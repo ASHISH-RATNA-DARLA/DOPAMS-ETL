@@ -1,0 +1,126 @@
+crimes api:
+ curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/crimes?fromDate=2025-01-01&toDate=2025-01-07' \
+  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+
+1.first crimes  api needs to process start date is 2022-01-01 , current date and time.
+2.if you observe crime api there is a limit, so we can get data every 5 days and process 
+3.for the next chunk we use overlap concept so that no data we will miss.
+4.in each record we need to get crime id and fir_copy and need to insert in the files table.
+5.if for specific crime id fir_copy empty means just update as fir_copy null
+6.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+7.when running the script proper log write in the log so that we can understand clearly.
+
+
+
+persons api:
+example:
+curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/person-details/person_id' \            
+-H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+
+1.secod persons api needs to process start.take one by one person id from person table .
+2.pass the person id to person api get person details in that , take the identy details file id and media .
+3.if identy file id or media multiple values means, each identy file id one record wiht persion id, media one record wiht persion id and if more identy or media values also it need to insert like identy file id2 with person id, media2 value with person id like that.
+4.dont confise here like the same person id repease multiple times also based of identy file id or media value it will be unigue.
+5.if for specific identy file id or media  empty means just update as  null
+6.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+7.when running the script proper log write in the log so that we can understand clearly.
+
+
+example:1
+curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/person-details/6925ef36fa8e0b7120c3a695' \            
+-H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+
+
+property api:
+example:
+ 
+curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/property-details?fromDate=2025-01-01&toDate=2025-01-07' \                                                  
+  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+
+
+1.thrid property api needs to process start date is 2022-01-01 , current date and time.
+2.if you observe property api there is a limit, so we can get data every 5 days and process 
+3.for the next chunk we use overlap concept so that no data we will miss.
+4.in each record we need to get propery id and media ,  need to insert in the files table.
+5.if media multiple values means, each media one record wiht property id and if more media values also it need to insert like media2 value with property id like that.
+5.if for specific property id , media  empty means just update as media null
+6.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+7.when running the script proper log write in the log so that we can understand clearly.
+
+
+Interrogation api:
+
+example:
+
+interagation api:
+  curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/interrogation-reports/v1/?fromDate=2025-01-01&toDate=2025-01-07' \                                         
+  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+
+
+1.fourth Interrogation api needs to process start date is 2022-01-01 , current date and time.
+2.if you observe Interrogation api there is a limit, so we can get data every 5 days and process 
+3.for the next chunk we use overlap concept so that no data we will miss.
+4.in each record we need to get Interrogation id and media , Interrogation id and interragation report  , Interrogation id and dopams data need to insert in the files table.
+5.if media or interragation report  or dopams data  multiple values means, each media one record wiht interragation id and if more media, interragation report , dopams data  values also it need to insert like media2 value with interragation id like that.
+5.if for specific interragation id , media , interragation report , dopams data  empty means just update as null
+6.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+7.when running the script proper log write in the log so that we can understand clearly.
+
+
+mo_seizures api:
+
+curl "http://103.164.200.184:3001/api/DOPAMS/mo-seizures?fromDate=2025-01-06&toDate=2025-01-10" \
+  -H "x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0"
+
+1.fivefth mo_seizures api needs to process start date is 2022-01-01 , current date and time.
+2.if you observe mo_seizures api there is a limit, so we can get data every 5 days and process 
+3.for the next chunk we use overlap concept so that no data we will miss.
+4.in each record we need to get MO_MEDIA_FILE_ID , MO_SEIZURE_ID need to insert in the files table.
+5.if MO_MEDIA_FILE_ID multiple values means, each MO_MEDIA_FILE_ID one record wiht MO_SEIZURE_ID and if more MO_MEDIA_FILE_ID  values also it need to insert like MO_MEDIA_FILE_ID2 value with MO_SEIZURE_ID like that.
+6.if for specific MO_SEIZURE_ID , MO_MEDIA_FILE_ID empty means just update as null
+7.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+8.when running the script proper log write in the log so that we can understand clearly.
+9.here i am providing where it needs to download Path:- /opt/tomcat/apache-tomcat-9.0.113/webapps/files/mo_seizures
+10.MO_SEIZURE_ID is parent_id  and MO_MEDIA_FILE_ID is file_id
+
+chargesheets:
+
+curl "http://103.164.200.184:3001/api/DOPAMS/chargesheets?fromDate=2025-01-06&toDate=2025-01-10" \
+  -H "x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0"
+
+uploadChargeSheet : fileId :- 99b2ae18-9741-4622-8502-ec7b7cd20f88
+
+1.sixth chargesheets api needs to process start date is 2022-01-01 , current date and time.
+2.if you observe chargesheets api there is a limit, so we can get data every 5 days and process 
+3.for the next chunk we use overlap concept so that no data we will miss.
+4.in each record we need to get uploadChargeSheet  of fileId, chargeSheetId need to insert in the files table.
+5.if uploadChargeSheet  of fileId multiple values means, each uploadChargeSheet  of fileId one record wiht chargeSheetId and if more chargeSheetId  values also it need to insert like uploadChargeSheet  of fileId2 value with chargeSheetId like that.
+6.if for specific chargeSheetId , uploadChargeSheet  of fileId empty means just update as null
+7.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+8.when running the script proper log write in the log so that we can understand clearly.
+9.here i am providing where it needs to download Path:- /opt/tomcat/apache-tomcat-9.0.113/webapps/files/chargesheets
+10.uploadChargeSheet  of fileId is file_id , chargeSheetId is parent_id
+
+
+fsl_case_property:
+
+curl "http://103.164.200.184:3001/api/DOPAMS/case-property?fromDate=2025-01-11&toDate=2025-01-15" \
+  -H "x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0"
+
+1.sixth case_property api needs to process start date is 2022-01-01 , current date and time.
+2.if you observe case_property api there is a limit, so we can get data every 5 days and process 
+3.for the next chunk we use overlap concept so that no data we will miss.
+4.in each record we need to get MEDIA  of fileId, CASE_PROPERTY_ID need to insert in the files table.
+5.if MEDIA  of fileId multiple values means, each MEDIA  of fileId one record wiht CASE_PROPERTY_ID and if more CASE_PROPERTY_ID  values also it need to insert like MEDIA of fileId2 value with CASE_PROPERTY_ID like that.
+6.if for specific CASE_PROPERTY_ID , MEDIA  of fileId empty means just update as null
+7.in feature if i process again this script means it needs to verify already processed or not , if not process then only needs to  insert or update. other wise no need just skip
+8.when running the script proper log write in the log so that we can understand clearly.
+9.here i am providing where it needs to download Path:- /opt/tomcat/apache-tomcat-9.0.113/webapps/files/fsl_case_property
+10.MEDIA of fileId is file_id , CASE_PROPERTY_ID is parent_id
+
+
+
+
+
+
+

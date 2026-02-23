@@ -1,0 +1,611 @@
+nohup: ignoring input
+2026-01-19 10:42:24,979 - INFO - Starting Accused Extraction Service...
+2026-01-19 10:42:24,991 - INFO - Database connection established.
+2026-01-19 10:42:24,992 - INFO - input.txt not found. Will fetch unprocessed crimes from DB.
+2026-01-19 10:42:24,992 - INFO - No input IDs provided. Starting Dynamic Batch Processing...
+2026-01-19 10:42:25,068 - INFO - Fetched batch of 43 unprocessed crimes.
+2026-01-19 10:42:25,068 - INFO - Processing Crime ID: 696bd3ceb9128f69149cb9b3
+2026-01-19 10:42:25,068 - INFO - Starting Pass 1: Name Identification
+2026-01-19 10:42:25,114 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 10:42:25,114 - INFO - Pass 1 Prompt Length: 4529 chars
+2026-01-19 10:43:38,092 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:43:40,210 - INFO - Pass 1: LLM responded in 75.10 seconds.
+2026-01-19 10:43:40,211 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['G. Sai Kiran S/o Late Subba Rao']}
+2026-01-19 10:43:40,212 - INFO - Pass 1 found: ['G. Sai Kiran S/o Late Subba Rao']
+2026-01-19 10:43:40,212 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 10:43:40,258 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 10:45:15,161 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:45:28,093 - INFO - Pass 2: LLM responded in 107.84 seconds.
+2026-01-19 10:45:28,094 - INFO - Pass 2 found details entries: 1
+2026-01-19 10:45:28,106 - INFO - Completed processing for Crime 696bd3ceb9128f69149cb9b3. inserted_count=1
+2026-01-19 10:45:28,106 - INFO - Processing Crime ID: 696baf10f0e287d08a45a045
+2026-01-19 10:45:28,106 - INFO - Starting Pass 1: Name Identification
+2026-01-19 10:45:28,153 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 10:45:28,153 - INFO - Pass 1 Prompt Length: 2430 chars
+2026-01-19 10:46:17,257 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:46:19,422 - INFO - Pass 1: LLM responded in 51.27 seconds.
+2026-01-19 10:46:19,422 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Mudavath Eshwar, S/o Neerya']}
+2026-01-19 10:46:19,424 - INFO - Pass 1 found: ['Mudavath Eshwar, S/o Neerya']
+2026-01-19 10:46:19,424 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 10:46:19,470 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 10:47:31,845 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:47:41,477 - INFO - Pass 2: LLM responded in 82.01 seconds.
+2026-01-19 10:47:41,478 - INFO - Pass 2 found details entries: 1
+2026-01-19 10:47:41,483 - INFO - Completed processing for Crime 696baf10f0e287d08a45a045. inserted_count=1
+2026-01-19 10:47:41,483 - INFO - Processing Crime ID: 696b129bb9128f4611879129
+2026-01-19 10:47:41,483 - INFO - Starting Pass 1: Name Identification
+2026-01-19 10:47:41,528 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 10:47:41,528 - INFO - Pass 1 Prompt Length: 8816 chars
+2026-01-19 10:49:54,811 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:49:56,969 - INFO - Pass 1: LLM responded in 135.44 seconds.
+2026-01-19 10:49:56,970 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Md. Akhtarula Islam Momin']}
+2026-01-19 10:49:56,970 - INFO - Pass 1 found: ['Md. Akhtarula Islam Momin']
+2026-01-19 10:49:56,971 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 10:49:57,016 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 10:52:39,296 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:53:03,605 - INFO - Pass 2: LLM responded in 186.59 seconds.
+2026-01-19 10:53:03,606 - INFO - Pass 2 found details entries: 1
+2026-01-19 10:53:03,611 - INFO - Completed processing for Crime 696b129bb9128f4611879129. inserted_count=1
+2026-01-19 10:53:03,611 - INFO - Processing Crime ID: 696afa8530e406be5ca30e30
+2026-01-19 10:53:03,611 - INFO - Starting Pass 1: Name Identification
+2026-01-19 10:53:03,656 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 10:53:03,657 - INFO - Pass 1 Prompt Length: 6826 chars
+2026-01-19 10:54:57,726 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:55:00,754 - INFO - Pass 1: LLM responded in 117.10 seconds.
+2026-01-19 10:55:00,754 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Balvanthapu Kranthik Chary', 'Shigasarapu Shiva']}
+2026-01-19 10:55:00,755 - INFO - Pass 1 found: ['Balvanthapu Kranthik Chary', 'Shigasarapu Shiva']
+2026-01-19 10:55:00,755 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 10:55:00,801 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 10:57:23,339 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:57:47,034 - INFO - Pass 2: LLM responded in 166.23 seconds.
+2026-01-19 10:57:47,035 - INFO - Pass 2 found details entries: 2
+2026-01-19 10:57:47,045 - INFO - Completed processing for Crime 696afa8530e406be5ca30e30. inserted_count=2
+2026-01-19 10:57:47,045 - INFO - Processing Crime ID: 696a77a6c5ae96163ce5b098
+2026-01-19 10:57:47,045 - INFO - Starting Pass 1: Name Identification
+2026-01-19 10:57:47,092 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 10:57:47,092 - INFO - Pass 1 Prompt Length: 5492 chars
+2026-01-19 10:59:15,233 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:59:17,068 - INFO - Pass 1: LLM responded in 89.98 seconds.
+2026-01-19 10:59:17,068 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Srinath Patnaik']}
+2026-01-19 10:59:17,069 - INFO - Pass 1 found: ['Srinath Patnaik']
+2026-01-19 10:59:17,070 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 10:59:17,114 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:01:11,098 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:01:22,234 - INFO - Pass 2: LLM responded in 125.12 seconds.
+2026-01-19 11:01:22,235 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:01:22,239 - INFO - Completed processing for Crime 696a77a6c5ae96163ce5b098. inserted_count=1
+2026-01-19 11:01:22,239 - INFO - Processing Crime ID: 696a6680f0e287c64a2ee7ed
+2026-01-19 11:01:22,239 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:01:22,283 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:01:22,283 - INFO - Pass 1 Prompt Length: 2320 chars
+2026-01-19 11:02:22,622 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:02:28,727 - INFO - Pass 1: LLM responded in 66.44 seconds.
+2026-01-19 11:02:28,727 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Kummari Shashanth s/o Sathish', 'Gadipalli Hemanth s/o Narasimha Rao', 'Munnangi Harish s/o Nageswar Rao', 'Anichini Ravikumar s/o Ramesh', 'Jangipalli Ajith s/o Prasad']}
+2026-01-19 11:02:28,728 - INFO - Pass 1 found: ['Kummari Shashanth s/o Sathish', 'Gadipalli Hemanth s/o Narasimha Rao', 'Munnangi Harish s/o Nageswar Rao', 'Anichini Ravikumar s/o Ramesh', 'Jangipalli Ajith s/o Prasad']
+2026-01-19 11:02:28,728 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:02:28,772 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:03:55,884 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:04:42,728 - INFO - Pass 2: LLM responded in 133.96 seconds.
+2026-01-19 11:04:42,729 - INFO - Pass 2 found details entries: 5
+2026-01-19 11:04:42,747 - INFO - Completed processing for Crime 696a6680f0e287c64a2ee7ed. inserted_count=5
+2026-01-19 11:04:42,747 - INFO - Processing Crime ID: 696a2dce32504eb2caa00a1c
+2026-01-19 11:04:42,747 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:04:42,791 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:04:42,791 - INFO - Pass 1 Prompt Length: 7705 chars
+2026-01-19 11:06:48,891 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:06:52,459 - INFO - Pass 1: LLM responded in 129.67 seconds.
+2026-01-19 11:06:52,459 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Shaik Afroz s/o late Shaik Javeed', 'Shaik Waseem @ Kallu Dada']}
+2026-01-19 11:06:52,460 - INFO - Pass 1 found: ['Shaik Afroz s/o late Shaik Javeed', 'Shaik Waseem @ Kallu Dada']
+2026-01-19 11:06:52,461 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:06:52,507 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:09:28,176 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:09:47,422 - INFO - Pass 2: LLM responded in 174.91 seconds.
+2026-01-19 11:09:47,423 - INFO - Pass 2 found details entries: 2
+2026-01-19 11:09:47,430 - INFO - Completed processing for Crime 696a2dce32504eb2caa00a1c. inserted_count=2
+2026-01-19 11:09:47,430 - INFO - Processing Crime ID: 6969c3aaf0e2878c0a1ab383
+2026-01-19 11:09:47,430 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:09:47,476 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:09:47,476 - INFO - Pass 1 Prompt Length: 1196 chars
+2026-01-19 11:10:23,216 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:10:25,222 - INFO - Pass 1: LLM responded in 37.75 seconds.
+2026-01-19 11:10:25,222 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Kadasi Mahesh', 'Koluguri Sunil']}
+2026-01-19 11:10:25,223 - INFO - Pass 1 found: ['Kadasi Mahesh', 'Koluguri Sunil']
+2026-01-19 11:10:25,223 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:10:25,268 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:11:23,080 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:11:41,816 - INFO - Pass 2: LLM responded in 76.55 seconds.
+2026-01-19 11:11:41,817 - INFO - Pass 2 found details entries: 2
+2026-01-19 11:11:41,826 - INFO - Completed processing for Crime 6969c3aaf0e2878c0a1ab383. inserted_count=2
+2026-01-19 11:11:41,826 - INFO - Processing Crime ID: 69698a2ac5ae966bebcee0d8
+2026-01-19 11:11:41,826 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:11:41,870 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:11:41,870 - INFO - Pass 1 Prompt Length: 3993 chars
+2026-01-19 11:12:42,355 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:12:43,983 - INFO - Pass 1: LLM responded in 62.11 seconds.
+2026-01-19 11:12:43,983 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Akash Rawath']}
+2026-01-19 11:12:43,984 - INFO - Pass 1 found: ['Akash Rawath']
+2026-01-19 11:12:43,984 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:12:44,029 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:14:08,258 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:14:17,530 - INFO - Pass 2: LLM responded in 93.50 seconds.
+2026-01-19 11:14:17,531 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:14:17,537 - INFO - Completed processing for Crime 69698a2ac5ae966bebcee0d8. inserted_count=1
+2026-01-19 11:14:17,537 - INFO - Processing Crime ID: 69696e29ff69b21141983aa0
+2026-01-19 11:14:17,537 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:14:17,581 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:14:17,581 - INFO - Pass 1 Prompt Length: 8114 chars
+2026-01-19 11:16:13,963 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:16:16,287 - INFO - Pass 1: LLM responded in 118.71 seconds.
+2026-01-19 11:16:16,287 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Md Fayaz, S/o Md Illiyaz']}
+2026-01-19 11:16:16,288 - INFO - Pass 1 found: ['Md Fayaz, S/o Md Illiyaz']
+2026-01-19 11:16:16,288 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:16:16,332 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:18:40,714 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:18:52,426 - INFO - Pass 2: LLM responded in 156.09 seconds.
+2026-01-19 11:18:52,427 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:18:52,432 - INFO - Completed processing for Crime 69696e29ff69b21141983aa0. inserted_count=1
+2026-01-19 11:18:52,432 - INFO - Processing Crime ID: 696925fcf0e2876353164aa1
+2026-01-19 11:18:52,432 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:18:52,479 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:18:52,479 - INFO - Pass 1 Prompt Length: 1180 chars
+2026-01-19 11:19:29,865 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:19:32,698 - INFO - Pass 1: LLM responded in 40.22 seconds.
+2026-01-19 11:19:32,698 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Guguloth Charan S/o.Srinu', 'Banoth Sai Vinayak S/o.Srinivas']}
+2026-01-19 11:19:32,699 - INFO - Pass 1 found: ['Guguloth Charan S/o.Srinu', 'Banoth Sai Vinayak S/o.Srinivas']
+2026-01-19 11:19:32,699 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:19:32,745 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:20:32,947 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:20:48,324 - INFO - Pass 2: LLM responded in 75.58 seconds.
+2026-01-19 11:20:48,325 - INFO - Pass 2 found details entries: 2
+2026-01-19 11:20:48,332 - INFO - Completed processing for Crime 696925fcf0e2876353164aa1. inserted_count=2
+2026-01-19 11:20:48,332 - INFO - Processing Crime ID: 6968d5b930e406beb4880744
+2026-01-19 11:20:48,332 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:20:48,379 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:20:48,379 - INFO - Pass 1 Prompt Length: 6288 chars
+2026-01-19 11:22:25,283 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:22:28,083 - INFO - Pass 1: LLM responded in 99.70 seconds.
+2026-01-19 11:22:28,083 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['A-2: Anwar Hussain', 'A-3: Burra Sampath']}
+2026-01-19 11:22:28,084 - INFO - Pass 1 found: ['A-2: Anwar Hussain', 'A-3: Burra Sampath']
+2026-01-19 11:22:28,084 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:22:28,128 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:24:31,972 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:24:45,767 - INFO - Pass 2: LLM responded in 137.64 seconds.
+2026-01-19 11:24:45,768 - INFO - Pass 2 found details entries: 2
+2026-01-19 11:24:45,773 - INFO - Completed processing for Crime 6968d5b930e406beb4880744. inserted_count=2
+2026-01-19 11:24:45,773 - INFO - Processing Crime ID: 696885ab32504e11f37d0d32
+2026-01-19 11:24:45,773 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:24:45,818 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:24:45,819 - INFO - Pass 1 Prompt Length: 8188 chars
+2026-01-19 11:26:47,471 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:26:49,290 - INFO - Pass 1: LLM responded in 123.47 seconds.
+2026-01-19 11:26:49,290 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Jeet Chadha']}
+2026-01-19 11:26:49,291 - INFO - Pass 1 found: ['Jeet Chadha']
+2026-01-19 11:26:49,291 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:26:49,336 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:29:18,834 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:29:30,043 - INFO - Pass 2: LLM responded in 160.71 seconds.
+2026-01-19 11:29:30,044 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:29:30,049 - INFO - Completed processing for Crime 696885ab32504e11f37d0d32. inserted_count=1
+2026-01-19 11:29:30,049 - INFO - Processing Crime ID: 6967e3eb6a69487f474aa5fa
+2026-01-19 11:29:30,049 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:29:30,095 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:29:30,095 - INFO - Pass 1 Prompt Length: 4672 chars
+2026-01-19 11:30:44,477 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:30:46,225 - INFO - Pass 1: LLM responded in 76.13 seconds.
+2026-01-19 11:30:46,225 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Munnur Chandrasekhar']}
+2026-01-19 11:30:46,226 - INFO - Pass 1 found: ['Munnur Chandrasekhar']
+2026-01-19 11:30:46,227 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:30:46,271 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:32:25,560 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:32:37,302 - INFO - Pass 2: LLM responded in 111.03 seconds.
+2026-01-19 11:32:37,304 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:32:37,309 - INFO - Completed processing for Crime 6967e3eb6a69487f474aa5fa. inserted_count=1
+2026-01-19 11:32:37,309 - INFO - Processing Crime ID: 6967b2aa2991f23fd2d38c40
+2026-01-19 11:32:37,309 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:32:37,353 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:32:37,353 - INFO - Pass 1 Prompt Length: 2630 chars
+2026-01-19 11:33:28,419 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:33:30,295 - INFO - Pass 1: LLM responded in 52.94 seconds.
+2026-01-19 11:33:30,295 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Bachala Ram Charan s/o Swamy']}
+2026-01-19 11:33:30,296 - INFO - Pass 1 found: ['Bachala Ram Charan s/o Swamy']
+2026-01-19 11:33:30,297 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:33:30,343 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:34:44,720 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:34:55,283 - INFO - Pass 2: LLM responded in 84.94 seconds.
+2026-01-19 11:34:55,284 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:34:55,289 - INFO - Completed processing for Crime 6967b2aa2991f23fd2d38c40. inserted_count=1
+2026-01-19 11:34:55,289 - INFO - Processing Crime ID: 69679560f0e287c89e0924d4
+2026-01-19 11:34:55,289 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:34:55,333 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:34:55,333 - INFO - Pass 1 Prompt Length: 9902 chars
+2026-01-19 11:37:28,679 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:37:31,548 - INFO - Pass 1: LLM responded in 156.21 seconds.
+2026-01-19 11:37:31,548 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Paliyad Kapurchand', 'Dansingh Jatve']}
+2026-01-19 11:37:31,549 - INFO - Pass 1 found: ['Paliyad Kapurchand', 'Dansingh Jatve']
+2026-01-19 11:37:31,549 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:37:31,593 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:40:35,810 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:40:54,781 - INFO - Pass 2: LLM responded in 203.19 seconds.
+2026-01-19 11:40:54,782 - INFO - Pass 2 found details entries: 2
+2026-01-19 11:40:54,790 - INFO - Completed processing for Crime 69679560f0e287c89e0924d4. inserted_count=2
+2026-01-19 11:40:54,790 - INFO - Processing Crime ID: 69674f1732504ed3726fdb5f
+2026-01-19 11:40:54,790 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:40:54,835 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:40:54,835 - INFO - Pass 1 Prompt Length: 959 chars
+2026-01-19 11:41:28,025 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:41:30,643 - INFO - Pass 1: LLM responded in 35.81 seconds.
+2026-01-19 11:41:30,643 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Pavan r/o. Karimnagar, cell: 8886234471']}
+2026-01-19 11:41:30,644 - INFO - Pass 1 found: ['Pavan r/o. Karimnagar, cell: 8886234471']
+2026-01-19 11:41:30,644 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:41:30,690 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:42:26,230 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:42:35,139 - INFO - Pass 2: LLM responded in 64.45 seconds.
+2026-01-19 11:42:35,141 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:42:35,147 - INFO - Completed processing for Crime 69674f1732504ed3726fdb5f. inserted_count=1
+2026-01-19 11:42:35,147 - INFO - Processing Crime ID: 69673d733f210794496b0f8c
+2026-01-19 11:42:35,147 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:42:35,192 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:42:35,192 - INFO - Pass 1 Prompt Length: 4734 chars
+2026-01-19 11:43:55,831 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:44:06,064 - INFO - Pass 1: LLM responded in 90.87 seconds.
+2026-01-19 11:44:06,064 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['A. Bheem Rao', 'R. Namdev', 'A. Kiran Kumar', 'Shaik Saleemuddin S/o Saluddin', 'Shaik Azeem S/o Shaik Khadar', 'N. Suraj', 'Dame Jai S/o Jagadish', 'Chawan Lalith S/o Narayan', 'Bhalerao Dadarao S/o Suryabhan', 'Takur Gariba S/o Dharamchand', 'Pathyal Lalith S/o Surendar']}
+2026-01-19 11:44:06,065 - INFO - Pass 1 found: ['A. Bheem Rao', 'R. Namdev', 'A. Kiran Kumar', 'Shaik Saleemuddin S/o Saluddin', 'Shaik Azeem S/o Shaik Khadar', 'N. Suraj', 'Dame Jai S/o Jagadish', 'Chawan Lalith S/o Narayan', 'Bhalerao Dadarao S/o Suryabhan', 'Takur Gariba S/o Dharamchand', 'Pathyal Lalith S/o Surendar']
+2026-01-19 11:44:06,065 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:44:06,109 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:45:57,894 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:47:15,819 - INFO - Pass 2: LLM responded in 189.71 seconds.
+2026-01-19 11:47:15,820 - INFO - Pass 2 found details entries: 11
+2026-01-19 11:47:15,859 - INFO - Completed processing for Crime 69673d733f210794496b0f8c. inserted_count=11
+2026-01-19 11:47:15,859 - INFO - Processing Crime ID: 6966e525ff69b200c38260d2
+2026-01-19 11:47:15,859 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:47:15,903 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:47:15,903 - INFO - Pass 1 Prompt Length: 13639 chars
+2026-01-19 11:50:41,347 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:50:44,858 - INFO - Pass 1: LLM responded in 208.96 seconds.
+2026-01-19 11:50:44,858 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Sachin Dilip Ranavare', 'Laukik Ganesh Raut']}
+2026-01-19 11:50:44,859 - INFO - Pass 1 found: ['Sachin Dilip Ranavare', 'Laukik Ganesh Raut']
+2026-01-19 11:50:44,860 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:50:44,905 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:54:44,359 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:55:05,625 - INFO - Pass 2: LLM responded in 260.72 seconds.
+2026-01-19 11:55:05,626 - INFO - Pass 2 found details entries: 2
+2026-01-19 11:55:05,635 - INFO - Completed processing for Crime 6966e525ff69b200c38260d2. inserted_count=2
+2026-01-19 11:55:05,635 - INFO - Processing Crime ID: 6966b66d9ecbd31b900f4f46
+2026-01-19 11:55:05,635 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:55:05,679 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:55:05,679 - INFO - Pass 1 Prompt Length: 5497 chars
+2026-01-19 11:56:37,354 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:56:39,542 - INFO - Pass 1: LLM responded in 93.86 seconds.
+2026-01-19 11:56:39,542 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Selva Rahul @ Mark Johnty S/o S Ramu']}
+2026-01-19 11:56:39,543 - INFO - Pass 1 found: ['Selva Rahul @ Mark Johnty S/o S Ramu']
+2026-01-19 11:56:39,543 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 11:56:39,588 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 11:58:37,710 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 11:58:51,372 - INFO - Pass 2: LLM responded in 131.78 seconds.
+2026-01-19 11:58:51,373 - INFO - Pass 2 found details entries: 1
+2026-01-19 11:58:51,378 - INFO - Completed processing for Crime 6966b66d9ecbd31b900f4f46. inserted_count=1
+2026-01-19 11:58:51,378 - INFO - Processing Crime ID: 696682d5554831e56f3ca269
+2026-01-19 11:58:51,378 - INFO - Starting Pass 1: Name Identification
+2026-01-19 11:58:51,422 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 11:58:51,422 - INFO - Pass 1 Prompt Length: 3866 chars
+2026-01-19 12:00:01,430 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:00:03,653 - INFO - Pass 1: LLM responded in 72.23 seconds.
+2026-01-19 12:00:03,653 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Katukuri Venu', 'Polaveni Anil']}
+2026-01-19 12:00:03,654 - INFO - Pass 1 found: ['Katukuri Venu', 'Polaveni Anil']
+2026-01-19 12:00:03,654 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:00:03,700 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:01:38,660 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:01:53,907 - INFO - Pass 2: LLM responded in 110.21 seconds.
+2026-01-19 12:01:53,908 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:01:53,914 - INFO - Completed processing for Crime 696682d5554831e56f3ca269. inserted_count=2
+2026-01-19 12:01:53,914 - INFO - Processing Crime ID: 69667527b9128f40e756e45d
+2026-01-19 12:01:53,914 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:01:53,958 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:01:53,958 - INFO - Pass 1 Prompt Length: 1078 chars
+2026-01-19 12:02:26,685 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:02:29,437 - INFO - Pass 1: LLM responded in 35.48 seconds.
+2026-01-19 12:02:29,437 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['A2', 'A3', 'A4', 'A5', 'A6', 'A7']}
+2026-01-19 12:02:29,438 - INFO - Pass 1 found: ['A2', 'A3', 'A4', 'A5', 'A6', 'A7']
+2026-01-19 12:02:29,438 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:02:29,482 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:03:24,581 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:03:53,952 - INFO - Pass 2: LLM responded in 84.47 seconds.
+2026-01-19 12:03:53,953 - INFO - Pass 2 found details entries: 6
+2026-01-19 12:03:53,973 - INFO - Completed processing for Crime 69667527b9128f40e756e45d. inserted_count=6
+2026-01-19 12:03:53,973 - INFO - Processing Crime ID: 69665f57c5ae96102cae3e54
+2026-01-19 12:03:53,973 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:03:54,017 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:03:54,017 - INFO - Pass 1 Prompt Length: 4456 chars
+2026-01-19 12:05:02,078 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:05:04,223 - INFO - Pass 1: LLM responded in 70.21 seconds.
+2026-01-19 12:05:04,223 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Md. Arbas Baig S/o Md. Gouse']}
+2026-01-19 12:05:04,224 - INFO - Pass 1 found: ['Md. Arbas Baig S/o Md. Gouse']
+2026-01-19 12:05:04,224 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:05:04,269 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:06:36,867 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:06:47,607 - INFO - Pass 2: LLM responded in 103.34 seconds.
+2026-01-19 12:06:47,608 - INFO - Pass 2 found details entries: 1
+2026-01-19 12:06:47,614 - INFO - Completed processing for Crime 69665f57c5ae96102cae3e54. inserted_count=1
+2026-01-19 12:06:47,614 - INFO - Processing Crime ID: 696638303f21076ecf5d9d8e
+2026-01-19 12:06:47,614 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:06:47,658 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:06:47,658 - INFO - Pass 1 Prompt Length: 1215 chars
+2026-01-19 12:07:25,226 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:07:27,927 - INFO - Pass 1: LLM responded in 40.27 seconds.
+2026-01-19 12:07:27,927 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Thimothi Bela S/o Samoo Mahra', 'Itenge Maina Rao S/o Pandana']}
+2026-01-19 12:07:27,928 - INFO - Pass 1 found: ['Thimothi Bela S/o Samoo Mahra', 'Itenge Maina Rao S/o Pandana']
+2026-01-19 12:07:27,929 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:07:27,975 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:08:28,335 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:08:47,597 - INFO - Pass 2: LLM responded in 79.62 seconds.
+2026-01-19 12:08:47,598 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:08:47,604 - INFO - Completed processing for Crime 696638303f21076ecf5d9d8e. inserted_count=2
+2026-01-19 12:08:47,605 - INFO - Processing Crime ID: 69662f522991f216d1bf9bb9
+2026-01-19 12:08:47,605 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:08:47,650 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:08:47,650 - INFO - Pass 1 Prompt Length: 8404 chars
+2026-01-19 12:10:45,193 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:10:47,722 - INFO - Pass 1: LLM responded in 120.07 seconds.
+2026-01-19 12:10:47,722 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Thakur Narsing', 'Thakur Akash Singh']}
+2026-01-19 12:10:47,723 - INFO - Pass 1 found: ['Thakur Narsing', 'Thakur Akash Singh']
+2026-01-19 12:10:47,723 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:10:47,767 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:13:13,537 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:13:33,095 - INFO - Pass 2: LLM responded in 165.33 seconds.
+2026-01-19 12:13:33,096 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:13:33,104 - INFO - Completed processing for Crime 69662f522991f216d1bf9bb9. inserted_count=2
+2026-01-19 12:13:33,104 - INFO - Processing Crime ID: 6966004c84aad1fe266905bc
+2026-01-19 12:13:33,104 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:13:33,148 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:13:33,148 - INFO - Pass 1 Prompt Length: 6121 chars
+2026-01-19 12:14:59,455 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:15:01,491 - INFO - Pass 1: LLM responded in 88.34 seconds.
+2026-01-19 12:15:01,491 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Ananta Swain', 'Kamal']}
+2026-01-19 12:15:01,492 - INFO - Pass 1 found: ['Ananta Swain', 'Kamal']
+2026-01-19 12:15:01,492 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:15:01,536 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:16:53,655 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:17:13,718 - INFO - Pass 2: LLM responded in 132.18 seconds.
+2026-01-19 12:17:13,719 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:17:13,724 - INFO - Completed processing for Crime 6966004c84aad1fe266905bc. inserted_count=2
+2026-01-19 12:17:13,724 - INFO - Processing Crime ID: 69657b312991f233d2a83c56
+2026-01-19 12:17:13,724 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:17:13,768 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:17:13,768 - INFO - Pass 1 Prompt Length: 8599 chars
+2026-01-19 12:19:25,480 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:19:29,432 - INFO - Pass 1: LLM responded in 135.66 seconds.
+2026-01-19 12:19:29,432 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Jagadeep Vijay Kumar @ Vijju @ Vijay @ Baghwan @ Petrol Vijay@ Suneel @Ajay Kumar']}
+2026-01-19 12:19:29,433 - INFO - Pass 1 found: ['Jagadeep Vijay Kumar @ Vijju @ Vijay @ Baghwan @ Petrol Vijay@ Suneel @Ajay Kumar']
+2026-01-19 12:19:29,433 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:19:29,479 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:22:11,416 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:22:24,658 - INFO - Pass 2: LLM responded in 175.18 seconds.
+2026-01-19 12:22:24,659 - INFO - Pass 2 found details entries: 1
+2026-01-19 12:22:24,664 - INFO - Completed processing for Crime 69657b312991f233d2a83c56. inserted_count=1
+2026-01-19 12:22:24,664 - INFO - Processing Crime ID: 6965599d554831836422e0ce
+2026-01-19 12:22:24,664 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:22:24,710 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:22:24,710 - INFO - Pass 1 Prompt Length: 7079 chars
+2026-01-19 12:24:10,919 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:24:13,524 - INFO - Pass 1: LLM responded in 108.81 seconds.
+2026-01-19 12:24:13,524 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Kayath Takur Prathap Singh', 'Pendur Gangaram']}
+2026-01-19 12:24:13,525 - INFO - Pass 1 found: ['Kayath Takur Prathap Singh', 'Pendur Gangaram']
+2026-01-19 12:24:13,525 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:24:13,569 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:26:27,042 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:26:44,693 - INFO - Pass 2: LLM responded in 151.12 seconds.
+2026-01-19 12:26:44,694 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:26:44,703 - INFO - Completed processing for Crime 6965599d554831836422e0ce. inserted_count=2
+2026-01-19 12:26:44,703 - INFO - Processing Crime ID: 696527d184aad1ca9b5c7fa4
+2026-01-19 12:26:44,703 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:26:44,748 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:26:44,748 - INFO - Pass 1 Prompt Length: 1467 chars
+2026-01-19 12:27:20,946 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:27:23,176 - INFO - Pass 1: LLM responded in 38.43 seconds.
+2026-01-19 12:27:23,176 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Jaheer Basha Kureshi S/o Shahejaada']}
+2026-01-19 12:27:23,177 - INFO - Pass 1 found: ['Jaheer Basha Kureshi S/o Shahejaada']
+2026-01-19 12:27:23,178 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:27:23,222 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:28:21,668 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:28:32,334 - INFO - Pass 2: LLM responded in 69.11 seconds.
+2026-01-19 12:28:32,335 - INFO - Pass 2 found details entries: 1
+2026-01-19 12:28:32,339 - INFO - Completed processing for Crime 696527d184aad1ca9b5c7fa4. inserted_count=1
+2026-01-19 12:28:32,339 - INFO - Processing Crime ID: 6965188cc5ae96d01f9425eb
+2026-01-19 12:28:32,339 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:28:32,384 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:28:32,384 - INFO - Pass 1 Prompt Length: 2097 chars
+2026-01-19 12:29:26,686 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:29:33,506 - INFO - Pass 1: LLM responded in 61.12 seconds.
+2026-01-19 12:29:33,506 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['A1/Thogaru Nikhil S/o Kumaraswamy', 'A2/Makkal Naveen S/o Ramulu', 'A3/Thammishetti Raj kumar S/o Ramaswamy', 'A4/Pallapu Raj Kumar S/o Narsimha', 'A5/Varikuppala Ramu S/o Yadaiah']}
+2026-01-19 12:29:33,507 - INFO - Pass 1 found: ['A1/Thogaru Nikhil S/o Kumaraswamy', 'A2/Makkal Naveen S/o Ramulu', 'A3/Thammishetti Raj kumar S/o Ramaswamy', 'A4/Pallapu Raj Kumar S/o Narsimha', 'A5/Varikuppala Ramu S/o Yadaiah']
+2026-01-19 12:29:33,507 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:29:33,554 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:30:54,718 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:32:04,015 - INFO - Pass 2: LLM responded in 150.46 seconds.
+2026-01-19 12:32:04,016 - INFO - Pass 2 found details entries: 5
+2026-01-19 12:32:04,032 - INFO - Completed processing for Crime 6965188cc5ae96d01f9425eb. inserted_count=5
+2026-01-19 12:32:04,033 - INFO - Processing Crime ID: 6964f1c484aad1758d5b4436
+2026-01-19 12:32:04,033 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:32:04,077 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:32:04,077 - INFO - Pass 1 Prompt Length: 1117 chars
+2026-01-19 12:32:39,303 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:32:41,485 - INFO - Pass 1: LLM responded in 37.41 seconds.
+2026-01-19 12:32:41,486 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Shaik Harun @ Javeed', 'Moharle Shankar']}
+2026-01-19 12:32:41,486 - INFO - Pass 1 found: ['Shaik Harun @ Javeed', 'Moharle Shankar']
+2026-01-19 12:32:41,487 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:32:41,531 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:33:38,877 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:33:54,044 - INFO - Pass 2: LLM responded in 72.51 seconds.
+2026-01-19 12:33:54,045 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:33:54,050 - INFO - Completed processing for Crime 6964f1c484aad1758d5b4436. inserted_count=2
+2026-01-19 12:33:54,051 - INFO - Processing Crime ID: 6964e96f6a69483344277022
+2026-01-19 12:33:54,051 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:33:54,099 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:33:54,099 - INFO - Pass 1 Prompt Length: 4347 chars
+2026-01-19 12:35:00,100 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:35:01,968 - INFO - Pass 1: LLM responded in 67.87 seconds.
+2026-01-19 12:35:01,968 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Anjani Kumar Upadhyaya']}
+2026-01-19 12:35:01,969 - INFO - Pass 1 found: ['Anjani Kumar Upadhyaya']
+2026-01-19 12:35:01,970 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:35:02,014 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:36:32,379 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:36:40,587 - INFO - Pass 2: LLM responded in 98.57 seconds.
+2026-01-19 12:36:40,588 - INFO - Pass 2 found details entries: 1
+2026-01-19 12:36:40,592 - INFO - Completed processing for Crime 6964e96f6a69483344277022. inserted_count=1
+2026-01-19 12:36:40,592 - INFO - Processing Crime ID: 6964e765b9128f969037d308
+2026-01-19 12:36:40,592 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:36:40,638 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:36:40,638 - INFO - Pass 1 Prompt Length: 2166 chars
+2026-01-19 12:37:27,737 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:37:30,033 - INFO - Pass 1: LLM responded in 49.40 seconds.
+2026-01-19 12:37:30,033 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Padidam Pradeep', 'Venu', 'Unknown male person']}
+2026-01-19 12:37:30,034 - INFO - Pass 1 found: ['Padidam Pradeep', 'Venu', 'Unknown male person']
+2026-01-19 12:37:30,034 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:37:30,081 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:38:40,475 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:39:06,715 - INFO - Pass 2: LLM responded in 96.63 seconds.
+2026-01-19 12:39:06,716 - INFO - Pass 2 found details entries: 3
+2026-01-19 12:39:06,729 - INFO - Completed processing for Crime 6964e765b9128f969037d308. inserted_count=3
+2026-01-19 12:39:06,729 - INFO - Processing Crime ID: 6964cd8430e40647554e657b
+2026-01-19 12:39:06,729 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:39:06,773 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:39:06,773 - INFO - Pass 1 Prompt Length: 4326 chars
+2026-01-19 12:40:17,921 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:40:21,488 - INFO - Pass 1: LLM responded in 74.72 seconds.
+2026-01-19 12:40:21,488 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Mohammed Imran Uddin @ Ziddi S/o Mohammed Ali', 'Shaik Munawar S/o Late Shaik Babujaan']}
+2026-01-19 12:40:21,489 - INFO - Pass 1 found: ['Mohammed Imran Uddin @ Ziddi S/o Mohammed Ali', 'Shaik Munawar S/o Late Shaik Babujaan']
+2026-01-19 12:40:21,489 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:40:21,533 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:41:58,430 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:42:19,978 - INFO - Pass 2: LLM responded in 118.44 seconds.
+2026-01-19 12:42:19,979 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:42:19,986 - INFO - Completed processing for Crime 6964cd8430e40647554e657b. inserted_count=2
+2026-01-19 12:42:19,986 - INFO - Processing Crime ID: 6964a534c5ae960282821cae
+2026-01-19 12:42:19,986 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:42:20,031 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:42:20,031 - INFO - Pass 1 Prompt Length: 11407 chars
+2026-01-19 12:45:59,361 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:46:04,262 - INFO - Pass 1: LLM responded in 224.23 seconds.
+2026-01-19 12:46:04,263 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['SACHIN GANGARAM MARUTI CHAVAN', 'MAHESH RAVINDRA VHATKAR', 'VIJAY CHAVAN']}
+2026-01-19 12:46:04,263 - INFO - Pass 1 found: ['SACHIN GANGARAM MARUTI CHAVAN', 'MAHESH RAVINDRA VHATKAR', 'VIJAY CHAVAN']
+2026-01-19 12:46:04,264 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:46:04,308 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:50:19,312 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:50:56,969 - INFO - Pass 2: LLM responded in 292.66 seconds.
+2026-01-19 12:50:56,970 - INFO - Pass 2 found details entries: 3
+2026-01-19 12:50:56,981 - INFO - Completed processing for Crime 6964a534c5ae960282821cae. inserted_count=3
+2026-01-19 12:50:56,981 - INFO - Processing Crime ID: 6964a439ff69b215ad5494b4
+2026-01-19 12:50:56,981 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:50:57,027 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:50:57,027 - INFO - Pass 1 Prompt Length: 2320 chars
+2026-01-19 12:51:41,753 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:51:43,995 - INFO - Pass 1: LLM responded in 46.97 seconds.
+2026-01-19 12:51:43,996 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Kunta Shiva Kumar', 'Ursu Dileep Kumar']}
+2026-01-19 12:51:43,997 - INFO - Pass 1 found: ['Kunta Shiva Kumar', 'Ursu Dileep Kumar']
+2026-01-19 12:51:43,997 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:51:44,043 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:52:51,771 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:53:02,472 - INFO - Pass 2: LLM responded in 78.43 seconds.
+2026-01-19 12:53:02,473 - INFO - Pass 2 found details entries: 2
+2026-01-19 12:53:02,481 - INFO - Completed processing for Crime 6964a439ff69b215ad5494b4. inserted_count=2
+2026-01-19 12:53:02,481 - INFO - Processing Crime ID: 6963fedbb9128f6a371a6b85
+2026-01-19 12:53:02,481 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:53:02,525 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:53:02,525 - INFO - Pass 1 Prompt Length: 5658 chars
+2026-01-19 12:54:42,808 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:54:46,130 - INFO - Pass 1: LLM responded in 103.61 seconds.
+2026-01-19 12:54:46,130 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Vadthyavath Nagesh', 'Dilli Dinesh', 'Vadde Venkatesh']}
+2026-01-19 12:54:46,131 - INFO - Pass 1 found: ['Vadthyavath Nagesh', 'Dilli Dinesh', 'Vadde Venkatesh']
+2026-01-19 12:54:46,131 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 12:54:46,175 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 12:56:54,208 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 12:57:24,308 - INFO - Pass 2: LLM responded in 158.13 seconds.
+2026-01-19 12:57:24,309 - INFO - Pass 2 found details entries: 3
+2026-01-19 12:57:24,319 - INFO - Completed processing for Crime 6963fedbb9128f6a371a6b85. inserted_count=3
+2026-01-19 12:57:24,319 - INFO - Processing Crime ID: 6963bd12b9128f7c9f18f052
+2026-01-19 12:57:24,319 - INFO - Starting Pass 1: Name Identification
+2026-01-19 12:57:24,362 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 12:57:24,362 - INFO - Pass 1 Prompt Length: 10381 chars
+2026-01-19 13:00:04,369 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:00:07,314 - INFO - Pass 1: LLM responded in 162.95 seconds.
+2026-01-19 13:00:07,314 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Indravath Vicky @ Ganesh', 'Sai Charan']}
+2026-01-19 13:00:07,315 - INFO - Pass 1 found: ['Indravath Vicky @ Ganesh', 'Sai Charan']
+2026-01-19 13:00:07,315 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 13:00:07,361 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 13:03:18,666 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:03:42,581 - INFO - Pass 2: LLM responded in 215.22 seconds.
+2026-01-19 13:03:42,582 - INFO - Pass 2 found details entries: 2
+2026-01-19 13:03:42,589 - INFO - Completed processing for Crime 6963bd12b9128f7c9f18f052. inserted_count=2
+2026-01-19 13:03:42,589 - INFO - Processing Crime ID: 696355972991f22ece771b6e
+2026-01-19 13:03:42,589 - INFO - Starting Pass 1: Name Identification
+2026-01-19 13:03:42,633 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 13:03:42,633 - INFO - Pass 1 Prompt Length: 6823 chars
+2026-01-19 13:05:30,093 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:05:44,451 - INFO - Pass 1: LLM responded in 121.82 seconds.
+2026-01-19 13:05:44,451 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Marati Rajesh s/o Srinivas, aged 25 Years, occ: Labourer, caste: Madiga, R/O Venkatapur v/o Yellareddypet mandal of Rajanna Sircilla now at Gandhi nagar in Sircilla Town', 'Kosediga Nagesh @ Naga s/o Sailu , Age: 23 years , Caste: Madiga ,Occ: Sentring Work, R/O: Near Kallu Compound , Alluru Village , Armor Mandal , Nizamabad', 'Bontha Shekar s/o Ramulu, age: 27 yrs, caste : Waddera  r/o Husta near Yellamma temple, Gowrelly, Near Linga reddy ricemill, Hayath nagar']}
+2026-01-19 13:05:44,452 - INFO - Pass 1 found: ['Marati Rajesh s/o Srinivas, aged 25 Years, occ: Labourer, caste: Madiga, R/O Venkatapur v/o Yellareddypet mandal of Rajanna Sircilla now at Gandhi nagar in Sircilla Town', 'Kosediga Nagesh @ Naga s/o Sailu , Age: 23 years , Caste: Madiga ,Occ: Sentring Work, R/O: Near Kallu Compound , Alluru Village , Armor Mandal , Nizamabad', 'Bontha Shekar s/o Ramulu, age: 27 yrs, caste : Waddera  r/o Husta near Yellamma temple, Gowrelly, Near Linga reddy ricemill, Hayath nagar']
+2026-01-19 13:05:44,452 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 13:05:44,495 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 13:08:08,075 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:08:37,971 - INFO - Pass 2: LLM responded in 173.48 seconds.
+2026-01-19 13:08:37,972 - INFO - Pass 2 found details entries: 3
+2026-01-19 13:08:37,983 - INFO - Completed processing for Crime 696355972991f22ece771b6e. inserted_count=3
+2026-01-19 13:08:37,983 - INFO - Processing Crime ID: 69633dde56db4e1967320317
+2026-01-19 13:08:37,983 - INFO - Starting Pass 1: Name Identification
+2026-01-19 13:08:38,029 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 13:08:38,029 - INFO - Pass 1 Prompt Length: 1994 chars
+2026-01-19 13:09:23,220 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:09:24,565 - INFO - Pass 1: LLM responded in 46.54 seconds.
+2026-01-19 13:09:24,565 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Pallapu Naresh']}
+2026-01-19 13:09:24,566 - INFO - Pass 1 found: ['Pallapu Naresh']
+2026-01-19 13:09:24,567 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 13:09:24,610 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 13:10:32,326 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:10:39,669 - INFO - Pass 2: LLM responded in 75.06 seconds.
+2026-01-19 13:10:39,670 - INFO - Pass 2 found details entries: 1
+2026-01-19 13:10:39,674 - INFO - Completed processing for Crime 69633dde56db4e1967320317. inserted_count=1
+2026-01-19 13:10:39,674 - INFO - Processing Crime ID: 69631b1825e0d334ef36306e
+2026-01-19 13:10:39,674 - INFO - Starting Pass 1: Name Identification
+2026-01-19 13:10:39,719 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 13:10:39,720 - INFO - Pass 1 Prompt Length: 2256 chars
+2026-01-19 13:11:23,849 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:11:26,047 - INFO - Pass 1: LLM responded in 46.33 seconds.
+2026-01-19 13:11:26,047 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Mandala Prabhu s/o Mandala Narayana']}
+2026-01-19 13:11:26,048 - INFO - Pass 1 found: ['Mandala Prabhu s/o Mandala Narayana']
+2026-01-19 13:11:26,048 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 13:11:26,094 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 13:12:33,107 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:12:42,197 - INFO - Pass 2: LLM responded in 76.10 seconds.
+2026-01-19 13:12:42,198 - INFO - Pass 2 found details entries: 1
+2026-01-19 13:12:42,202 - INFO - Completed processing for Crime 69631b1825e0d334ef36306e. inserted_count=1
+2026-01-19 13:12:42,202 - INFO - Processing Crime ID: 692a0fa7f64a2bca06f3bc42
+2026-01-19 13:12:42,202 - INFO - Starting Pass 1: Name Identification
+2026-01-19 13:12:42,246 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 13:12:42,246 - INFO - Pass 1 Prompt Length: 12030 chars
+2026-01-19 13:15:53,742 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:15:55,975 - INFO - Pass 1: LLM responded in 193.73 seconds.
+2026-01-19 13:15:55,975 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Om Prakash S/o Ram Lal']}
+2026-01-19 13:15:55,976 - INFO - Pass 1 found: ['Om Prakash S/o Ram Lal']
+2026-01-19 13:15:55,976 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 13:15:56,021 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 13:19:39,663 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:19:56,250 - INFO - Pass 2: LLM responded in 240.23 seconds.
+2026-01-19 13:19:56,251 - INFO - Pass 2 found details entries: 1
+2026-01-19 13:19:56,259 - INFO - Completed processing for Crime 692a0fa7f64a2bca06f3bc42. inserted_count=1
+2026-01-19 13:19:56,259 - INFO - Processing Crime ID: 68f479de6f585d7cbdd0cabc
+2026-01-19 13:19:56,259 - INFO - Starting Pass 1: Name Identification
+2026-01-19 13:19:56,305 - INFO - Pass 1: Invoking LLM with model qwen2.5-coder:3b...
+2026-01-19 13:19:56,305 - INFO - Pass 1 Prompt Length: 1767 chars
+2026-01-19 13:20:38,083 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:20:40,332 - INFO - Pass 1: LLM responded in 44.03 seconds.
+2026-01-19 13:20:40,332 - INFO - Pass 1 Raw LLM Parsed Response: {'accused_names': ['Nune Kumare Rajinikanth', 'Pitla Naresh']}
+2026-01-19 13:20:40,333 - INFO - Pass 1 found: ['Nune Kumare Rajinikanth', 'Pitla Naresh']
+2026-01-19 13:20:40,333 - INFO - Starting Pass 2: Details Extraction
+2026-01-19 13:20:40,377 - INFO - Pass 2: Invoking LLM for details...
+2026-01-19 13:21:44,835 - INFO - HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 13:21:59,624 - INFO - Pass 2: LLM responded in 79.25 seconds.
+2026-01-19 13:21:59,625 - INFO - Pass 2 found details entries: 2
+2026-01-19 13:21:59,634 - INFO - Completed processing for Crime 68f479de6f585d7cbdd0cabc. inserted_count=2
+2026-01-19 13:21:59,634 - INFO - Batch complete. Total processed so far: 43
+2026-01-19 13:21:59,650 - INFO - No more unprocessed crimes found in DB. Exiting.
+2026-01-19 13:21:59,650 - INFO - Database connection closed.

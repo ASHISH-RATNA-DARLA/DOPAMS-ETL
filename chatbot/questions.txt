@@ -1,0 +1,441 @@
+# VALID TEST QUESTIONS FOR DOPAMAS CHATBOT
+# Based on actual PostgreSQL and MongoDB schema structure
+# These questions can be directly answered using the actual database tables/collections
+
+# ============================================================================
+# 1. BASIC CRIME INFORMATION QUERIES (PostgreSQL - crimes table)
+# ============================================================================
+
+## Simple Listing Queries
+1. Show me all crimes with FIR number, date, and police station code
+2. List all crimes registered in 2025
+3. Show me the first 10 crimes ordered by FIR date
+4. Display all crimes with their case status
+5. List crimes with FIR registration number, crime type, and IO name
+
+## Filtering by Date Range
+6. Find all crimes registered between 01-01-2025 and 31-01-2025
+7. Show crimes registered in February 2025
+8. List crimes from the last 30 days
+9. Find crimes registered on 27-02-2025
+10. Show crimes from 11-05-2025 onwards
+
+## Filtering by Status and Classification
+11. Show all crimes with case status 'UI'
+12. List all pending cases
+13. Find crimes with major head 'Narcotics'
+14. Show crimes classified as 'Intermediate'
+15. List crimes with crime type 'Narcotics'
+
+## Filtering by Police Station and IO
+16. Show all crimes from police station code '2025005'
+17. Find crimes handled by IO 'BARPATI RAMESH'
+18. List crimes where IO rank is 'Inspector'
+19. Show crimes from police station code '2032061'
+20. Find all crimes handled by IO 'KENDRE VENKATARAO'
+
+## Filtering by Acts/Sections
+21. Find crimes under NDPS Act section 8c
+22. Show crimes with acts_sections containing 'NDPSA'
+23. List crimes under section 27(A) NDPSA
+24. Find crimes with section 20(b)(ii)(B) NDPSA
+
+# ============================================================================
+# 2. ACCUSED INFORMATION QUERIES (PostgreSQL - accused, persons tables)
+# ============================================================================
+
+## Basic Accused Queries
+25. List all accused persons with their accused code and type
+26. Show all accused linked to crime_id '67c0a3bbb7c278e8994c46cd'
+27. Find accused with accused_code 'A1'
+28. Show accused who are CCL (is_ccl = true)
+29. List accused with their physical features (height, build, color)
+
+## Person Master Data Queries
+30. Find person with person_id '62bab83f447aa042308369ba'
+31. Show all persons with their full name, age, and gender
+32. List persons with phone number
+33. Find persons with email address (show all persons who have email_id)
+34. Show persons with their present district and state
+
+## Person Search Queries
+35. Search for person named 'Rathod' in the persons table
+36. Find persons from district 'Hyderabad'
+37. List persons with occupation 'Farmer'
+38. Show persons from state 'Telangana' (show both present_state_ut and permanent_state_ut - show both if available, show one if only one available, show no data if neither available)
+39. Find persons with caste information
+
+## Physical Features Queries
+40. List all accused with height information (show accused who have height data)
+41. List accused with build type information
+42. Show accused with eye color details
+43. Find accused with hair color information
+44. List accused with mole or leucoderma marks
+
+## Advanced Person Queries
+45. Find persons who have died (is_died = true)
+46. Show persons with their permanent address
+47. List persons with education qualification
+48. Find persons with nationality 'India' (show all persons with nationality)
+49. Show persons with their domicile classification
+
+# ============================================================================
+# 3. DRUG SEIZURE QUERIES (PostgreSQL - brief_facts_drugs table)
+# ============================================================================
+
+## Basic Drug Queries
+50. List all drug seizures with drug name and quantity
+51. Show drugs seized under crime_id '67c0a3bbb7c278e8994c46cd'
+52. Find all Ganja seizures
+53. List commercial quantity drug cases (is_commercial = true)
+54. Show drugs with their total quantity and unit
+
+## Drug Quantity and Value Queries
+55. Find drugs with quantity greater than 1 kg
+56. List drugs with street value information
+57. Find drugs by number of packets
+58. List drugs with purity percentage
+
+## Drug Location and Transport Queries
+59. Find drugs seized from source location 'Guntur, AP State' (show drugs with source_location)
+60. Show drugs with destination information
+61. List drugs by transport method
+62. Find drugs seized at 'Dundigal Village' (show drugs with seizure_location)
+63. Show drugs by packaging details
+
+## Drug Category Queries
+64. List drugs by drug category
+65. Find drugs by drug schedule
+66. Show drugs by scientific name
+67. List drugs by brand name (use drug_name from brief_facts_drugs or nature from properties as brand name alternatives)
+68. Find drugs by drug schedule classification
+
+# ============================================================================
+# 4. PROPERTY SEIZURE QUERIES (PostgreSQL - properties table)
+# ============================================================================
+
+## Basic Property Queries
+69. List all seized properties with nature and value
+70. Show properties linked to crime_id '67c0a3bbb7c278e8994c46cd' (show all properties for this crime)
+71. Find properties recovered from person 'Amith' (show properties with recovered_from field or linked via crime)
+72. List properties by property status
+73. Show properties with estimate value
+
+## Property Details Queries
+74. Find properties by nature (e.g., vehicles, phones, cash)
+75. List properties with recovery value
+76. Show properties recovered from place
+77. Find properties by category
+78. List properties by belongs to information
+
+## Property Value Queries
+79. Show high-value properties (estimate_value > 100000)
+80. Find properties with recovered value
+81. List properties by value range
+82. Show properties seized on date '2025-02-27' (show properties with date_of_seizure)
+83. Find properties by date of seizure
+
+# ============================================================================
+# 5. HIERARCHY & GEOGRAPHICAL QUERIES (PostgreSQL - hierarchy table)
+# ============================================================================
+
+## Police Station Hierarchy
+84. List all police stations with their codes and names
+85. Show police stations by district name
+86. Find police stations in a specific zone
+87. List police stations by circle name
+88. Show hierarchy from ADG to PS level for a specific station
+
+## District and Zone Queries
+89. List all districts
+90. Show zones and their police stations
+91. Find circles in a specific district
+92. List sub-zones in a zone
+93. Show SDPO codes and names
+
+## Geographic Analysis
+94. Count crimes by district
+95. Show crime statistics by police station
+96. List crimes by zone
+97. Find crimes in a specific circle
+98. Show hierarchical breakdown of crimes from ADG to PS
+
+# ============================================================================
+# 6. BRIEF FACTS & SUMMARIES QUERIES (PostgreSQL - brief_facts tables)
+# ============================================================================
+
+## Crime Summaries
+99. Show crime summary for crime_id '67c0a3bbb7c278e8994c46cd' (show summary_text from brief_facts_crime_summaries)
+100. List all crime summaries with word count
+101. Find summaries processed by specific model
+102. Show summaries with processing time
+103. List summaries created on date '2025-11-01' (show summaries with date_created)
+
+## Brief Facts Accused
+104. Show brief facts for accused in a crime
+105. List accused with role_in_crime information
+106. Find accused with alias names from brief facts
+107. Show accused with key_details from brief facts
+108. List accused with phone numbers from brief facts
+
+## Brief Facts Drugs
+109. Show drug details from brief facts
+110. List drugs with supply chain information
+111. Find drugs with seizure method
+112. Show drugs with seizure officer information
+113. List drugs with weight breakdown
+
+# ============================================================================
+# 7. TEMPORAL/TIME-BASED QUERIES
+# ============================================================================
+
+## Date-Based Analysis
+114. Count crimes by month in 2025
+115. Show crimes registered vs occurred date
+116. Find FIR registration delays
+117. List recently modified records (last 7 days)
+118. Show crimes by year
+
+## Time Trends
+119. Count crimes by date in october 2025
+120. Show drug seizure trends by date
+121. Find stale cases (old pending cases)
+122. List cases registered today
+123. Show recently created records
+
+# ============================================================================
+# 8. STATISTICAL & ANALYTICAL QUERIES
+# ============================================================================
+
+## Crime Statistics
+124. Count total number of crimes
+125. Show crime count by case status
+126. Count crimes by major head
+127. Show crime count by district
+128. Count crimes by police station
+
+## Drug Statistics
+129. Calculate total drug quantity seized
+130. Show total street value of seizures
+131. Count commercial vs non-commercial drug cases
+132. Calculate average drug quantity per case
+133. Show drug seizures by category
+
+## Accused Statistics
+134. Count total accused persons
+135. Show accused count by gender
+136. Count accused by age range
+137. Show accused count by occupation
+138. Count repeat offenders (persons with multiple crimes)
+
+## Property Statistics
+139. Calculate total value of seized properties
+140. Show property count by nature
+141. Count properties by status
+142. Calculate average property value
+143. Show property recovery statistics
+
+# ============================================================================
+# 9. CROSS-TABLE/JOIN QUERIES
+# ============================================================================
+
+## Crime-Accused Joins
+144. Show complete crime details with all accused persons
+145. Find crimes with accused from multiple states
+146. List persons with their complete crime history (show person name, all their crimes, accused details, and properties)
+147. Show accused details for a specific crime
+148. Find crimes sharing common accused
+
+## Crime-Property Joins
+149. Show crimes with all seized properties
+150. Find properties linked to accused with person_id '62bab83f447aa042308369ba' (show properties linked via crime_id)
+151. List crimes with property recovery value
+152. Show property recovery patterns by accused type
+153. Find high-value seizures with crime details
+
+## Crime-Drug Joins
+154. Show crimes with drug seizure details
+155. Find drug seizures with accused details
+156. List commercial drug cases with crime information
+157. Show drug supply chain with crime details
+158. Find drugs seized with IO information
+
+## Multi-table Complex Queries
+159. Show complete crime profile (crime + accused + properties + drugs)
+160. Find crimes with accused, properties, and hierarchy information
+161. List crimes with brief facts and summaries
+162. Show IO workload (crimes per officer)
+163. Find crime-to-conviction pipeline analysis
+
+# ============================================================================
+# 10. MONGODB QUERIES (fir_records collection - ALL UPPERCASE FIELDS!)
+# ============================================================================
+
+## Basic MongoDB Queries
+164. Count all records in fir_records collection
+165. Show all FIR records from year 2025
+166. List records from district 'Sangareddy'
+167. Find records by FIR_REG_NUM '2029019150001'
+168. Show records from police station 'Wankidi PS' (join with hierarchy table using ps_code)
+
+## MongoDB Name Search
+169. Find records where ACCUSED_NAME contains 'Rathod'
+170. Search for accused named 'Rajnikanth'
+171. Find records with FATHER_NAME
+172. List records by accused name pattern
+173. Show records with INT_FATHER_NAME information
+
+## MongoDB Mobile/Contact Search
+174. Find records with MOBILE_1 number
+175. Search by TELEPHONE_RESIDENCE
+176. Find records with INT_FATHER_MOBILE_NO
+177. List records with INT_WIFE_MOBILE_NO
+178. Show records with INT_MOTHER_MOBILE_NO
+
+## MongoDB Physical Features
+179. Find records with HEIGHT_FROM_CM field in MongoDB (show fir_records with HEIGHT_FROM_CM data)
+180. List records by BUILD_TYPE
+181. Show records with COMPLEXION_TYPE
+182. Find records by FACE_TYPE
+183. List records with HAIR_STYLE and HAIR_COLOR
+
+## MongoDB Drug Queries
+184. Find records with DRUG_TYPE
+185. List records with drug weight in kg (WEIGHT_KG)
+186. Show records with number of packets (PACKETS_COUNT)
+187. Find records with ESTIMATED_VALUE
+188. List records with DRUG_PARTICULARS
+
+## MongoDB Relationship Data
+189. Find records with INT_FATHER_NAME and INT_FATHER_MOBILE_NO
+190. List records with INT_WIFE_NAME information
+191. Show records with INT_MOTHER_NAME
+192. Find records with INT_BROTHER_NAME
+193. List records with INT_SON_NAME or INT_DAUGHTER_NAME
+
+## MongoDB Date Queries
+194. Find records registered on REG_DT
+195. List records by year (YEAR field)
+196. Show records from PS_RECV_INFORM_DT
+197. Find records between FROM_DT and TO_DT
+198. List recent records ordered by REG_DT
+
+# ============================================================================
+# 11. TEXT SEARCH & PATTERN MATCHING QUERIES (PostgreSQL - text search)
+# ============================================================================
+
+## Text-Based Searches (Using ILIKE and text matching)
+199. Find crimes with similar brief facts text (search brief_facts field)
+200. Find accused with similar physical descriptions (search physical feature fields)
+201. Find properties with similar descriptions (search particular_of_property field)
+202. Find crimes with similar patterns in acts_sections (search acts_sections field)
+203. Find persons with similar names (search full_name with pattern matching)
+204. Find crimes with similar crime types (search crime_type field)
+205. Find drugs with similar names or descriptions (search drug_name and scientific_name)
+
+# ============================================================================
+# 12. DATA QUALITY & VALIDATION QUERIES
+# ============================================================================
+
+## Missing Data Checks
+206. Find crimes with missing brief_facts
+207. List accused with missing physical features
+208. Show properties with missing estimate_value
+209. Find persons with missing phone numbers
+210. List crimes with missing case_status
+
+## Data Validation
+211. Find duplicate FIR numbers
+212. List records with inconsistent dates (show crimes where fir_date doesn't match date_created or date_modified)
+213. Show all crimes with their crime_id (list all crimes showing crime_id field)
+214. Find accused without person_id link
+215. Show all properties with their crime_id (list all properties showing crime_id field)
+
+## Completeness Checks
+216. Count crimes with complete brief facts
+217. Show accused with complete physical feature data
+218. List persons with complete address information
+219. Find records with all required fields
+220. Show data completeness statistics
+
+# ============================================================================
+# 13. REPORTING & DASHBOARD QUERIES
+# ============================================================================
+
+## Daily Reports
+221. Daily crime summary report
+222. Daily drug seizure report
+223. Daily property recovery report
+224. Today's registered cases
+225. Today's modified records
+
+## Weekly/Monthly Reports
+226. Weekly crime statistics
+227. Monthly drug seizure trends
+228. Quarterly crime analysis
+229. Annual performance report
+230. Monthly conviction statistics
+
+## Operational Reports
+231. Pending cases by police station
+232. High-value seizure report (properties > 100000)
+233. Commercial drug case monitoring
+234. Repeat offender watchlist
+235. IO workload report
+
+## Analytical Reports
+236. Crime hotspot by district
+237. Drug seizure trends by month
+238. Property recovery rate by category
+239. Case clearance rate by police station
+240. Resource allocation recommendations
+
+# ============================================================================
+# 14. COMBINED POSTGRESQL + MONGODB QUERIES
+# ============================================================================
+
+## Cross-Database Searches
+241. Find person in PostgreSQL and related FIR in MongoDB
+242. Search crime in PostgreSQL and find related legacy FIR in MongoDB
+243. Match accused name across both databases
+244. Find mobile number in both PostgreSQL persons and MongoDB fir_records
+245. Search district across both databases
+
+# ============================================================================
+# 15. ADVANCED SEARCH SCENARIOS
+# ============================================================================
+
+## Multi-Criteria Searches
+246. Find crimes with NDPS Act, registered in 2025, from district 'HYDERABAD' (join with hierarchy for district)
+247. Show accused persons aged 20-30, from Hyderabad, involved in Narcotics
+248. List commercial drug seizures with seizure_worth from February 2025 (show drugs with is_commercial=true and fir_date in February 2025)
+249. Find properties seized from accused with specific physical features
+250. Show crimes with multiple accused and properties above 50000 value
+
+## Pattern Analysis
+251. Find crimes with similar brief facts text
+252. Show accused with similar physical features
+253. List crimes with similar patterns
+254. Find property descriptions matching a pattern
+255. Show person profiles matching criteria
+
+## Complex Analytics
+256. Calculate crime rate per police station
+257. Show average case age by status
+258. Find drug supply chain patterns
+259. Calculate property recovery rate
+260. Show accused network analysis
+
+# ============================================================================
+# NOTES FOR TESTING:
+# ============================================================================
+# - All PostgreSQL queries use actual table and column names from schema_reference.py
+# - All MongoDB queries use UPPERCASE field names (as per fir_records collection)
+# - Date formats should match database format (timestamp without time zone)
+# - Some queries may return empty results if data doesn't exist
+# - Text search queries use ILIKE pattern matching for similarity
+# - Join queries may need proper relationship understanding
+# - Statistics queries should work with actual data counts
+# ============================================================================
+
+

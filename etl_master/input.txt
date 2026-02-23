@@ -1,0 +1,200 @@
+# Master ETL Process Configuration File
+# This file defines the sequence of ETL processes to run daily.
+# The Master ETL script will read this file top-to-bottom and execute each process sequentially.
+#
+# Format:
+# <Working Directory> ; <Command to Execute>
+#
+# Instructions:
+# 1. Add each ETL process on a new line.
+# 2. Specify the full path to the directory where the process should run.
+# 3. Separate the directory and the command with a semicolon (;).
+# 4. Lines starting with # are ignored.
+#
+# Example:
+# /home/ubuntu/projects/etl-1 ; python3 run_process.py
+# /home/ubuntu/projects/etl-2 ; ./start_script.sh
+#
+
+# --- User Process Definitions ---
+
+[Order 1]
+hierarchy
+cd /data-drive/etl-process-dev/etl-hierarchy
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_hierarchy.py
+
+[Order 2]
+crimes
+cd /data-drive/etl-process-dev/etl-crimes
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_crimes.py
+
+[Order 3]
+class_classification
+cd /data-drive/etl-process-dev/section-wise-case-clarification
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 process_sections.py
+
+
+[Order 4]
+case_status
+cd /data-drive/etl-process-dev/etl_case_status
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 update_crimes.py
+
+[Order 5]
+accused
+cd /data-drive/etl-process-dev/etl-accused
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_accused.py
+
+[Order 6]
+persons
+cd /data-drive/etl-process-dev/etl-persons
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_persons.py
+
+[Order 7]
+update-state-country
+cd /data-drive/etl-process-dev/update-state-country
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 update-state-country.py
+
+[Order 8]
+Domicile classification
+cd /data-drive/etl-process-dev/domicile_classification
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 domicile_classifier.py
+
+[Order 9]
+fix_person_names
+cd /data-drive/etl-process-dev/fix_fullname
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 fix_person_names.py
+
+[Order 10]
+full_name_fix
+cd /data-drive/etl-process-dev/fix_fullname
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 fix_all_fullnames.py
+
+[Order 11]
+name_fix
+cd /data-drive/etl-process-dev/fix_fullname
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 fix_name_field.py
+
+[Order 12]
+surname_fix
+cd /data-drive/etl-process-dev/fix_fullname
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 fix_surname_field.py
+
+
+[Order 13]
+properties
+cd /data-drive/etl-process-dev/etl-properties
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_properties.py
+
+[Order 14]
+IR
+cd /data-drive/etl-process-dev/etl-ir
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 ir_etl.py
+
+
+[Order 15]
+Disposal
+cd /data-drive/etl-process-dev/etl-disposal
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_disposal.py
+
+[Order 16]
+arrests
+cd /data-drive/etl-process-dev/etl_arrests
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_arrests.py
+
+[Order 17]
+mo_seizures
+cd /data-drive/etl-process-dev/etl_mo_seizures
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_mo_seizure.py
+
+
+[Order 18]
+chargesheets
+cd /data-drive/etl-process-dev/etl_chargesheets
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_chargesheets.py
+
+[Order 19]
+updated_chargesheet
+cd /data-drive/etl-process-dev/etl_updated_chargesheet
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_update_chargesheet.py
+
+
+[Order 20]
+fsl_case_property
+cd /data-drive/etl-process-dev/etl_fsl_case_property
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_fsl_case_property.py
+
+
+[Order 21]
+refresh_views
+cd /data-drive/etl-process-dev/etl_refresh_views
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 views_refresh_sql.py
+
+[Order 22]
+brief_facts_accused
+cd /data-drive/etl-process-dev/brief_facts_accused
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 accused_type.py
+
+[Order 23]
+brief_facts_drugs
+cd /data-drive/etl-process-dev/brief_facts_drugs
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 main.py
+
+[Order 24]
+drug_standardization
+cd /data-drive/etl-process-dev/drug_standardization
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 drug_standardization.py
+
+[Order 25]
+refresh_views
+cd /data-drive/etl-process-dev/etl_refresh_views
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 views_refresh_sql.py
+
+[Order 26]
+update_file_id
+cd /data-drive/etl-process-dev/etl-files/etl_pipeline_files
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 main_standalone.py
+
+[Order 27]
+files_download_media_server
+cd /data-drive/etl-process-dev/etl-files/etl_files_media_server
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 -m etl_files_media_server.main
+
+[Order 28]
+update_file_extentions
+cd /data-drive/etl-process-dev/etl-files/update_file_urls_with_extensions
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 update_file_urls_with_extensions.py
+
+[Order 29]
+refresh_views
+cd /data-drive/etl-process-dev/etl_refresh_views
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 views_refresh_sql.py
+

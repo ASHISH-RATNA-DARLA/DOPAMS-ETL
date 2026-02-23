@@ -1,0 +1,140 @@
+nohup: ignoring input
+2026-01-19 06:42:26,675 - INFO - Starting Drug Extraction Service...
+2026-01-19 06:42:26,687 - INFO - Database connection established.
+2026-01-19 06:42:26,687 - INFO - input.txt not found. Will fetch unprocessed crimes from DB.
+2026-01-19 06:42:26,687 - INFO - No input IDs provided. Starting Dynamic Batch Processing...
+2026-01-19 06:42:26,706 - INFO - Fetched batch of 43 unprocessed crimes.
+2026-01-19 06:42:26,706 - INFO - Processing Crime ID: 69667527b9128f40e756e45d
+2026-01-19 06:45:51,510 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 06:46:10,247 - INFO - Completed processing for Crime 69667527b9128f40e756e45d. inserted_count=1
+2026-01-19 06:46:10,247 - INFO - Processing Crime ID: 6968d5b930e406beb4880744
+2026-01-19 06:51:57,222 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 06:52:23,489 - INFO - Completed processing for Crime 6968d5b930e406beb4880744. inserted_count=1
+2026-01-19 06:52:23,490 - INFO - Processing Crime ID: 6967b2aa2991f23fd2d38c40
+2026-01-19 06:54:48,644 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 06:55:11,578 - INFO - Completed processing for Crime 6967b2aa2991f23fd2d38c40. inserted_count=1
+2026-01-19 06:55:11,578 - INFO - Processing Crime ID: 69698a2ac5ae966bebcee0d8
+2026-01-19 06:58:19,011 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 06:58:44,912 - INFO - Completed processing for Crime 69698a2ac5ae966bebcee0d8. inserted_count=1
+2026-01-19 06:58:44,912 - INFO - Processing Crime ID: 696baf10f0e287d08a45a045
+2026-01-19 07:00:59,727 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:01:23,379 - INFO - Completed processing for Crime 696baf10f0e287d08a45a045. inserted_count=1
+2026-01-19 07:01:23,380 - INFO - Processing Crime ID: 69673d733f210794496b0f8c
+2026-01-19 07:05:59,954 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:06:28,593 - INFO - Completed processing for Crime 69673d733f210794496b0f8c. inserted_count=1
+2026-01-19 07:06:28,593 - INFO - Processing Crime ID: 696b129bb9128f4611879129
+2026-01-19 07:14:52,999 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:15:22,173 - INFO - Completed processing for Crime 696b129bb9128f4611879129. inserted_count=1
+2026-01-19 07:15:22,173 - INFO - Processing Crime ID: 696925fcf0e2876353164aa1
+2026-01-19 07:16:44,314 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:17:05,383 - INFO - Completed processing for Crime 696925fcf0e2876353164aa1. inserted_count=1
+2026-01-19 07:17:05,383 - INFO - Processing Crime ID: 6964a534c5ae960282821cae
+2026-01-19 07:31:31,766 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:32:05,839 - INFO - Completed processing for Crime 6964a534c5ae960282821cae. inserted_count=1
+2026-01-19 07:32:05,841 - INFO - Processing Crime ID: 69679560f0e287c89e0924d4
+2026-01-19 07:41:56,359 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:42:28,734 - INFO - Completed processing for Crime 69679560f0e287c89e0924d4. inserted_count=1
+2026-01-19 07:42:28,735 - INFO - Processing Crime ID: 6964f1c484aad1758d5b4436
+2026-01-19 07:43:41,582 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:44:20,803 - INFO - Completed processing for Crime 6964f1c484aad1758d5b4436. inserted_count=2
+2026-01-19 07:44:20,804 - INFO - Processing Crime ID: 69665f57c5ae96102cae3e54
+2026-01-19 07:48:01,036 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:48:22,357 - INFO - Completed processing for Crime 69665f57c5ae96102cae3e54. inserted_count=1
+2026-01-19 07:48:22,358 - INFO - Processing Crime ID: 69674f1732504ed3726fdb5f
+2026-01-19 07:49:25,841 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 07:49:46,594 - INFO - Completed processing for Crime 69674f1732504ed3726fdb5f. inserted_count=1
+2026-01-19 07:49:46,595 - INFO - Processing Crime ID: 6966e525ff69b200c38260d2
+2026-01-19 08:03:10,868 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:03:49,178 - INFO - Completed processing for Crime 6966e525ff69b200c38260d2. inserted_count=1
+2026-01-19 08:03:49,179 - INFO - Processing Crime ID: 69662f522991f216d1bf9bb9
+2026-01-19 08:11:06,327 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:11:35,485 - INFO - Completed processing for Crime 69662f522991f216d1bf9bb9. inserted_count=1
+2026-01-19 08:11:35,486 - INFO - Processing Crime ID: 6964e765b9128f969037d308
+2026-01-19 08:13:43,035 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:14:08,031 - INFO - Completed processing for Crime 6964e765b9128f969037d308. inserted_count=1
+2026-01-19 08:14:08,031 - INFO - Processing Crime ID: 696682d5554831e56f3ca269
+2026-01-19 08:17:56,405 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:18:46,697 - INFO - Completed processing for Crime 696682d5554831e56f3ca269. inserted_count=2
+2026-01-19 08:18:46,697 - INFO - Processing Crime ID: 696afa8530e406be5ca30e30
+2026-01-19 08:25:47,730 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:26:14,446 - INFO - Completed processing for Crime 696afa8530e406be5ca30e30. inserted_count=1
+2026-01-19 08:26:14,447 - INFO - Processing Crime ID: 696a6680f0e287c64a2ee7ed
+2026-01-19 08:29:20,334 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:29:42,728 - INFO - Completed processing for Crime 696a6680f0e287c64a2ee7ed. inserted_count=1
+2026-01-19 08:29:42,729 - INFO - Processing Crime ID: 68f479de6f585d7cbdd0cabc
+2026-01-19 08:31:25,607 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:31:28,531 - INFO - No drugs found for Crime 68f479de6f585d7cbdd0cabc.
+2026-01-19 08:31:28,531 - INFO - Marking Crime 68f479de6f585d7cbdd0cabc as processed (NO_DRUGS_DETECTED).
+2026-01-19 08:31:28,533 - INFO - Completed processing for Crime 68f479de6f585d7cbdd0cabc. inserted_count=0
+2026-01-19 08:31:28,533 - INFO - Processing Crime ID: 696a77a6c5ae96163ce5b098
+2026-01-19 08:36:37,345 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:37:03,868 - INFO - Completed processing for Crime 696a77a6c5ae96163ce5b098. inserted_count=1
+2026-01-19 08:37:03,869 - INFO - Processing Crime ID: 69696e29ff69b21141983aa0
+2026-01-19 08:44:14,792 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:44:47,525 - INFO - Completed processing for Crime 69696e29ff69b21141983aa0. inserted_count=1
+2026-01-19 08:44:47,525 - INFO - Processing Crime ID: 69657b312991f233d2a83c56
+2026-01-19 08:53:03,741 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 08:53:44,241 - INFO - Completed processing for Crime 69657b312991f233d2a83c56. inserted_count=1
+2026-01-19 08:53:44,241 - INFO - Processing Crime ID: 6965599d554831836422e0ce
+2026-01-19 09:00:11,215 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:01:01,445 - INFO - Completed processing for Crime 6965599d554831836422e0ce. inserted_count=2
+2026-01-19 09:01:01,446 - INFO - Processing Crime ID: 696a2dce32504eb2caa00a1c
+2026-01-19 09:08:54,994 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:09:29,962 - INFO - Completed processing for Crime 696a2dce32504eb2caa00a1c. inserted_count=1
+2026-01-19 09:09:29,962 - INFO - Processing Crime ID: 692a0fa7f64a2bca06f3bc42
+2026-01-19 09:22:07,819 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:22:41,717 - INFO - Completed processing for Crime 692a0fa7f64a2bca06f3bc42. inserted_count=1
+2026-01-19 09:22:41,717 - INFO - Processing Crime ID: 696885ab32504e11f37d0d32
+2026-01-19 09:30:15,356 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:30:47,688 - INFO - Completed processing for Crime 696885ab32504e11f37d0d32. inserted_count=1
+2026-01-19 09:30:47,688 - INFO - Processing Crime ID: 6965188cc5ae96d01f9425eb
+2026-01-19 09:33:26,160 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:35:02,956 - INFO - Completed processing for Crime 6965188cc5ae96d01f9425eb. inserted_count=5
+2026-01-19 09:35:02,956 - INFO - Processing Crime ID: 6966b66d9ecbd31b900f4f46
+2026-01-19 09:40:25,685 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:40:52,787 - INFO - Completed processing for Crime 6966b66d9ecbd31b900f4f46. inserted_count=1
+2026-01-19 09:40:52,787 - INFO - Processing Crime ID: 6964cd8430e40647554e657b
+2026-01-19 09:44:46,471 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:45:13,311 - INFO - Completed processing for Crime 6964cd8430e40647554e657b. inserted_count=1
+2026-01-19 09:45:13,312 - INFO - Processing Crime ID: 696527d184aad1ca9b5c7fa4
+2026-01-19 09:46:30,595 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:46:52,218 - INFO - Completed processing for Crime 696527d184aad1ca9b5c7fa4. inserted_count=1
+2026-01-19 09:46:52,218 - INFO - Processing Crime ID: 696638303f21076ecf5d9d8e
+2026-01-19 09:48:15,614 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:48:37,835 - INFO - Completed processing for Crime 696638303f21076ecf5d9d8e. inserted_count=1
+2026-01-19 09:48:37,835 - INFO - Processing Crime ID: 6969c3aaf0e2878c0a1ab383
+2026-01-19 09:49:52,732 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:50:16,459 - INFO - Completed processing for Crime 6969c3aaf0e2878c0a1ab383. inserted_count=1
+2026-01-19 09:50:16,460 - INFO - Processing Crime ID: 6964e96f6a69483344277022
+2026-01-19 09:53:48,760 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:54:15,706 - INFO - Completed processing for Crime 6964e96f6a69483344277022. inserted_count=1
+2026-01-19 09:54:15,706 - INFO - Processing Crime ID: 69633dde56db4e1967320317
+2026-01-19 09:56:12,819 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 09:56:33,599 - INFO - Completed processing for Crime 69633dde56db4e1967320317. inserted_count=1
+2026-01-19 09:56:33,599 - INFO - Processing Crime ID: 6967e3eb6a69487f474aa5fa
+2026-01-19 10:00:41,090 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:01:14,137 - INFO - Completed processing for Crime 6967e3eb6a69487f474aa5fa. inserted_count=1
+2026-01-19 10:01:14,137 - INFO - Processing Crime ID: 696355972991f22ece771b6e
+2026-01-19 10:07:47,169 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:08:13,408 - INFO - Completed processing for Crime 696355972991f22ece771b6e. inserted_count=1
+2026-01-19 10:08:13,408 - INFO - Processing Crime ID: 6963bd12b9128f7c9f18f052
+2026-01-19 10:18:31,588 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:19:31,534 - INFO - Completed processing for Crime 6963bd12b9128f7c9f18f052. inserted_count=2
+2026-01-19 10:19:31,535 - INFO - Processing Crime ID: 6963fedbb9128f6a371a6b85
+2026-01-19 10:25:32,601 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:26:01,406 - INFO - Completed processing for Crime 6963fedbb9128f6a371a6b85. inserted_count=1
+2026-01-19 10:26:01,406 - INFO - Processing Crime ID: 696bd3ceb9128f69149cb9b3
+2026-01-19 10:29:50,165 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:30:11,594 - INFO - Completed processing for Crime 696bd3ceb9128f69149cb9b3. inserted_count=1
+2026-01-19 10:30:11,595 - INFO - Processing Crime ID: 6966004c84aad1fe266905bc
+2026-01-19 10:35:12,455 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:35:39,496 - INFO - Completed processing for Crime 6966004c84aad1fe266905bc. inserted_count=1
+2026-01-19 10:35:39,496 - INFO - Processing Crime ID: 6964a439ff69b215ad5494b4
+2026-01-19 10:37:35,774 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:37:59,273 - INFO - Completed processing for Crime 6964a439ff69b215ad5494b4. inserted_count=1
+2026-01-19 10:37:59,273 - INFO - Processing Crime ID: 69631b1825e0d334ef36306e
+2026-01-19 10:39:52,963 - INFO - HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"
+2026-01-19 10:40:19,287 - INFO - Completed processing for Crime 69631b1825e0d334ef36306e. inserted_count=1
+2026-01-19 10:40:19,287 - INFO - Batch complete. Total processed so far: 43
+2026-01-19 10:40:19,305 - INFO - No more unprocessed crimes found in DB. Exiting.
+2026-01-19 10:40:19,305 - INFO - Database connection closed.

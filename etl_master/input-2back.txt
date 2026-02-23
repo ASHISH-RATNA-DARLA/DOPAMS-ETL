@@ -1,0 +1,25 @@
+# Master ETL Process Configuration File
+# This file defines the sequence of ETL processes to run daily.
+# The Master ETL script will read this file top-to-bottom and execute each process sequentially.
+#
+# Format:
+# <Working Directory> ; <Command to Execute>
+#
+# Instructions:
+# 1. Add each ETL process on a new line.
+# 2. Specify the full path to the directory where the process should run.
+# 3. Separate the directory and the command with a semicolon (;).
+# 4. Lines starting with # are ignored.
+#
+# Example:
+# /home/ubuntu/projects/etl-1 ; python3 run_process.py
+# /home/ubuntu/projects/etl-2 ; ./start_script.sh
+#
+
+# --- User Process Definitions ---
+
+[Order 1]
+persons
+cd /data-drive/etl-process-dev/etl-persons
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_persons.py

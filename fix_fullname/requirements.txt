@@ -1,0 +1,17 @@
+# Python Requirements for Person Deduplication Script
+# Install with: pip install -r requirements-deduplication.txt
+
+# Database connectivity
+psycopg2-binary>=2.9.0
+
+# Fuzzy matching and deduplication (optional but recommended)
+dedupe>=2.0.0
+python-Levenshtein>=0.12.0
+
+# Environment and utilities
+python-dotenv>=0.19.0
+
+# No external models required for fix_all_fullnames.py
+# Uses rule-based extraction optimized for Indian names
+
+

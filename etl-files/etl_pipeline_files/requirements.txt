@@ -1,0 +1,13 @@
+# ETL Pipeline Dependencies
+# Install with: pip install -r requirements.txt
+
+# Database connection
+psycopg2-binary>=2.9.10,<3.0
+
+# HTTP requests for API calls
+requests>=2.31.0
+
+# Environment variable management (.env file)
+python-dotenv>=1.0.0
+
+

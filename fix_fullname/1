@@ -1,0 +1,471 @@
+import psycopg2
+import os
+import sys
+import re
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def connect_to_db():
+    db_url = os.getenv("DATABASE_URL")
+    if "?schema=" in db_url:
+        db_url = db_url.split("?schema=")[0]
+    return psycopg2.connect(db_url)
+
+
+def extract_phone_number(text):
+    """
+    Extract phone number from text.
+    Returns None if no valid phone number found.
+
+    Examples:
+    - "Ravi Kumar, Ph: 9908585274 (Absconding)" → "9908585274"
+    - "Cell: 7995841312" → "7995841312"
+    """
+    if not text:
+        return None
+
+    # Pattern for Indian phone numbers (10 digits)
+    # Look for patterns like: Ph: 9908585274, Cell: 7995841312, 9876543210
+    phone_patterns = [
+        r"(?:ph|phone|cell|mobile|contact)[:\s]*(\d{10})",  # Ph: 9908585274
+        r"\b(\d{10})\b",  # Standalone 10 digits
+    ]
+
+    for pattern in phone_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            phone = match.group(1)
+            # Validate it starts with 6-9 (Indian mobile numbers)
+            if phone[0] in "6789":
+                return phone
+
+    return None
+
+
+def extract_name(text):
+    """
+    Extract person name using rule-based approach optimized for Indian names.
+    Uses dedupe-style normalization without hardcoded lists.
+
+    Returns None if no valid name found.
+
+    Examples:
+    - "Jahangir ( ABSCONDING )" → "Jahangir"
+    - "A1. Anil (Absconding)" → "Anil"
+    - "Edapelli Saketh s/o Anjaiah, age. 22yrs" → "Edapelli Saketh"
+    - "7013625594" → None
+    - "Ravi Kumar, Ph: 9908585274 (Absconding)" → "Ravi Kumar"
+    """
+    if not text or not isinstance(text, str):
+        return None
+
+    original = text
+    text = text.strip().strip('"').strip("'").strip()
+
+    if not text:
+        return None
+
+    # Return None for pure phone numbers
+    if re.match(r"^\d{10,}$", text):
+        return None
+
+    # Return None for "unknown" patterns
+    if re.match(r"^(an?\s+)?unknown", text, re.IGNORECASE):
+        return None
+
+    # Step 1: Remove content in brackets/parentheses
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = re.sub(r"\[[^\]]*\]", "", text)
+    text = re.sub(r"\{[^}]*\}", "", text)
+
+    # Step 2: Remove accused numbering (A1., 1), etc) from start
+    text = re.sub(r"^[A]?[\-\s]?\d+[\-\.\)\:\s]+", "", text)
+
+    # Step 3: Remove "Friend of" / "Frend of" and extract the actual name
+    friend_match = re.match(r"^(friend|frend)\s+of\s+(.+)$", text, re.IGNORECASE)
+    if friend_match:
+        text = friend_match.group(2)
+
+    # Step 4: Stop at metadata keywords
+    metadata_split = re.split(
+        r",?\s*(age|caste|r/o|adhaa?r|residing|s/o|d/o|w/o)\b",
+        text,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
+    if metadata_split:
+        text = metadata_split[0]
+
+    # Step 5: Remove phone numbers
+    text = re.sub(r"\d{10,}", "", text)
+
+    # Step 6: If comma-separated, take first part only
+    if "," in text:
+        text = text.split(",")[0]
+
+    # Step 7: Remove common status/job words
+    # Pattern: word boundaries to avoid breaking compound names
+    status_job_pattern = r"\b(absconding|absconder|consumer|seller|dealer|peddler|wanted|arrested|taskforce|task force|constable|inspector|police|officer|cop)\b"
+    text = re.sub(status_job_pattern, "", text, flags=re.IGNORECASE)
+
+    # Step 8: Clean up
+    text = re.sub(
+        r"[^\w\s\-\']", "", text
+    )  # Keep only alphanumeric, spaces, hyphens, apostrophes
+    text = re.sub(r"\s+", " ", text)  # Normalize spaces
+    text = text.strip()
+
+    # Step 9: Check if result is just "unknown"
+    if re.match(r"^unknown$", text, re.IGNORECASE):
+        return None
+
+    # Step 10: Validate - must have at least 2 letters and start with a letter
+    if not text or len(text) < 2:
+        return None
+
+    if not re.search(r"[A-Za-z]{2,}", text):
+        return None
+
+    if not re.match(r"^[A-Za-z]", text):
+        return None
+
+    # Return with title case
+    return text.title()
+
+
+def clean_full_name(text):
+    """
+    Main function: Extract and clean name.
+    Returns None if no valid name found.
+    """
+    if not text:
+        return None
+
+    extracted = extract_name(text)
+
+    if not extracted:
+        return None
+
+    # Final normalization for dedupe compatibility
+    name = extracted.lower()
+    name = re.sub(r"\s+", " ", name).strip()
+
+    if len(name) < 2:
+        return None
+
+    return name.title()
+
+
+def test_cleaning_examples():
+    """Test the cleaning function with real examples"""
+
+    # Test phone extraction first
+    print("\n=== Testing Phone Number Extraction ===\n")
+    phone_test_cases = [
+        "Ravi Kumar, Ph: 9908585274 (Absconding)",
+        "Vadlakonda Akhil s/o Prabhakar, age. 25yrs, Cell: 7995841312",
+        "John Doe 8765432109",
+        "No phone here",
+    ]
+
+    for test in phone_test_cases:
+        phone = extract_phone_number(test)
+        print(f"Input:  {test[:60]}")
+        print(f"Phone:  {phone if phone else '[No phone found]'}\n")
+
+    test_cases = [
+        "Ravi Kumar, Ph: 9908585274 (Absconding)",
+        "Vadlakonda Akhil s/o Prabhakar, age. 25yrs, caste: Padmashali r/o H.No. 4-1/11, Kodimial village and Mandal, Cell: 7995841312, (Adhaar.No. 4865 9431",
+        "Jahangir ( ABSCONDING )",
+        "Jacob(Drug Consumer)",
+        "Hidayath consumer absconding",
+        "Taskforce Constable Tirupathi",
+        "Gouni Bharat Goud (Ganja Seller/Consumer)",
+        "Frend of Shesu",
+        "Friend of A2",
+        "Edapelli Saketh s/o Anjaiah, age. 22yrs, caste: SC-Madiga r/o Gourapur village",
+        "Edapelli",
+        '"1)\tAjay Kumar Chaudhary"',
+        '"1)\tAjay Vilas Gaikwad"',
+        "1) Ana (Russian Lady)",
+        "1)Burse Narendra Srinivas, 2)Bharath Kumar",
+        "2). Laddu",
+        "7013625594",
+        "7675887886",
+        ". A",
+        '"A10\tAbhay Jain"',
+        "A1. Anil (Absconding)",
+        "A1) an unknown person in Dhoula, Odissa State",
+        "A1.Hadiwal Suresh",
+        "A1. Jeripotula Jashwanth",
+        "A1) Khader Mohideen",
+        "A1) Mohammad Salem",
+        "A1 Pavan Kumar –(Absconding)",
+        "A-1 Prashanth (Absconding )",
+        "A1.Raju, A2. Shiva, A3.Amith Agarwal",
+        "A-1) Sahu R/o Odisha state",
+        "A1: Seejo  (Absconding)",
+        "A1.  Shiva Biswas",
+        "A1.Shubham Sharma",
+        "A1. Sumeth Khurana.",
+        "A1. Unknown (Absconding)",
+        "A2) Dinesh Yadav",
+        "A-2. MD. Osman",
+        "A-3 Sameer",
+        "A3. Syed Jawwad Jawad",
+        "A8.Nimmagadda Vasuki Nandan",
+    ]
+
+    print("\n=== Testing Rule-Based Name Extraction (Indian Names Optimized) ===\n")
+
+    success_count = 0
+    null_count = 0
+
+    print("Processing one record at a time...\n")
+
+    for i, test in enumerate(test_cases, 1):
+        display_text = test[:60] + "..." if len(test) > 60 else test
+        print(f"{i:2d}. Input:  {display_text}")
+
+        cleaned = clean_full_name(test)
+
+        if cleaned:
+            print(f"    Output: {cleaned}\n")
+            success_count += 1
+        else:
+            print(f"    Output: [NULL - No name found]\n")
+            null_count += 1
+
+    print(f"{'='*70}")
+    print(f"✓ Extracted {success_count} names")
+    print(f"✗ Returned NULL for {null_count} records")
+    print(f"{'='*70}\n")
+
+
+def fix_all_fullnames():
+    conn = connect_to_db()
+    cursor = conn.cursor()
+
+    print("\n=== Comprehensive Full Name Cleaning (Rule-Based) ===\n")
+    print("Optimized for Indian names - NO external models required")
+    print("\nFeatures:")
+    print("  • Dedupe-compatible normalization")
+    print("  • Returns NULL if no valid person name found")
+    print("  • Fast processing (no AI model overhead)")
+    print("  • Handles complex text with annotations, metadata, etc.\n")
+
+    # Check and create required columns if they don't exist
+    columns_created = []
+    
+    # Check for raw_full_name column
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'persons' AND column_name = 'raw_full_name'
+    """)
+    
+    if not cursor.fetchone():
+        cursor.execute("""
+            ALTER TABLE persons 
+            ADD COLUMN IF NOT EXISTS raw_full_name VARCHAR(500)
+        """)
+        conn.commit()
+        columns_created.append("raw_full_name")
+
+    # Check for date_modified column
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'persons' AND column_name = 'date_modified'
+    """)
+    
+    if not cursor.fetchone():
+        cursor.execute("""
+            ALTER TABLE persons 
+            ADD COLUMN IF NOT EXISTS date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        """)
+        conn.commit()
+        columns_created.append("date_modified")
+    
+    # Show message only if columns were created
+    if columns_created:
+        print(f"✓ Created missing columns: {', '.join(columns_created)}\n")
+
+    # Find all records (also get phone_number to check if missing)
+    cursor.execute(
+        """
+        SELECT person_id, full_name, raw_full_name, phone_number
+        FROM persons
+        WHERE full_name IS NOT NULL 
+          AND full_name != ''
+        ORDER BY person_id
+    """
+    )
+
+    records = cursor.fetchall()
+    print(f"Found {len(records)} total records to process\n")
+
+    if not records:
+        print("No records to update!")
+        cursor.close()
+        conn.close()
+        return
+
+    print("Processing sample (first 20):")
+    preview_count = 0
+    for pid, fname, raw, phone in records[:20]:
+        clean = clean_full_name(fname)
+        extracted_phone = extract_phone_number(fname) if not phone else None
+
+        if clean != fname or extracted_phone:
+            preview_count += 1
+            display_before = fname[:50] + "..." if len(fname) > 50 else fname
+            display_after = clean if clean else "[NULL]"
+            print(f"{preview_count}. {display_before}")
+            print(f"   → Name: {display_after}")
+            if extracted_phone:
+                print(f"   → Phone: {extracted_phone} (will be added)")
+            print()
+
+    if preview_count == 0:
+        print("(First 20 records need no changes)")
+
+    auto_confirm = "--confirm" in sys.argv
+    if not auto_confirm:
+        try:
+            response = input("\nProceed with cleaning? (yes/no): ").strip().lower()
+        except EOFError:
+            response = "no"
+    else:
+        print("\nAuto-confirm: Proceeding...")
+        response = "yes"
+
+    if response != "yes":
+        print("Cancelled")
+        cursor.close()
+        conn.close()
+        return
+
+    print("\nProcessing records...")
+    print("Progress updates every 100 records.\n")
+
+    updated_count = 0
+    skipped_count = 0
+    null_count = 0
+    total = len(records)
+
+    phone_added_count = 0
+
+    for idx, (person_id, full_name, raw_full_name, phone_number) in enumerate(
+        records, 1
+    ):
+        try:
+            # Show progress
+            if idx % 100 == 0:
+                print(
+                    f"Progress: {idx}/{total} ({idx*100//total}%) - Updated: {updated_count}, NULL: {null_count}, Phones: {phone_added_count}"
+                )
+                sys.stdout.flush()
+
+            clean = clean_full_name(full_name)
+            extracted_phone = (
+                extract_phone_number(full_name) if not phone_number else None
+            )
+
+            # Check if we need to update
+            name_changed = clean != full_name
+            phone_needs_adding = extracted_phone is not None
+
+            if name_changed or phone_needs_adding:
+                if clean is None:
+                    # No valid name found - set to NULL, maybe add phone
+                    if phone_needs_adding:
+                        if not raw_full_name:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = NULL, raw_full_name = %s, phone_number = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (full_name, extracted_phone, person_id),
+                            )
+                        else:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = NULL, phone_number = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (extracted_phone, person_id),
+                            )
+                        phone_added_count += 1
+                    else:
+                        if not raw_full_name:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = NULL, raw_full_name = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (full_name, person_id),
+                            )
+                        else:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = NULL, date_modified = NOW() WHERE person_id = %s""",
+                                (person_id,),
+                            )
+                    null_count += 1
+                else:
+                    # Extracted a clean name, maybe also add phone
+                    if phone_needs_adding:
+                        if not raw_full_name:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = %s, raw_full_name = %s, phone_number = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (clean, full_name, extracted_phone, person_id),
+                            )
+                        else:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = %s, phone_number = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (clean, extracted_phone, person_id),
+                            )
+                        phone_added_count += 1
+                    else:
+                        if not raw_full_name:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = %s, raw_full_name = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (clean, full_name, person_id),
+                            )
+                        else:
+                            cursor.execute(
+                                """UPDATE persons SET full_name = %s, date_modified = NOW() WHERE person_id = %s""",
+                                (clean, person_id),
+                            )
+                updated_count += 1
+
+                # Commit every 500 records
+                if updated_count % 500 == 0:
+                    conn.commit()
+            else:
+                skipped_count += 1
+
+        except Exception as e:
+            print(f"Error processing {person_id}: {e}")
+
+    conn.commit()
+
+    # Show final statistics
+    cursor.execute("SELECT COUNT(*) FROM persons WHERE full_name IS NULL")
+    total_null = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM persons WHERE raw_full_name IS NOT NULL")
+    total_with_raw = cursor.fetchone()[0]
+
+    print(f"\n✅ Cleaning Complete!")
+    print(f"   Updated: {updated_count} records")
+    print(f"   Skipped: {skipped_count} records (no changes needed)")
+    print(f"   Set to NULL: {null_count} records (no valid name found)")
+    print(f"   Phone numbers added: {phone_added_count} records")
+    print(f"\nDatabase Status:")
+    print(f"   Total NULL names: {total_null}")
+    print(f"   Total with raw_full_name backup: {total_with_raw}\n")
+
+    cursor.close()
+    conn.close()
+
+
+if __name__ == "__main__":
+    if "--test" in sys.argv:
+        test_cleaning_examples()
+    else:
+        fix_all_fullnames()
+

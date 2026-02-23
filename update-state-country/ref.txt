@@ -1,0 +1,46 @@
+India(country):
+KARNATAKA
+DELHI
+RAJASTHAN
+MANIPUR
+WEST BENGAL
+ANDHRA PRADESH (also listed as "Andhra Pradesh")
+MADHYA PRADESH
+KERALA
+GUJARAT
+TELANGANA (listed twice)
+ANDAMAN AND NICOBAR
+BIHAR
+GOA
+CHANDIGARH
+TRIPURA
+JHARKHAND
+ASSAM
+PUNJAB
+JAMMU AND KASHMIR
+ODISHA (also listed as "odisha")
+MEGHALAYA
+MIZORAM
+MAHARASHTRA
+CHHATTISGARH
+TAMIL NADU
+HARYANA
+UTTARAKHAND
+UTTAR PRADESH
+HIMACHAL PRADESH
+
+
+Nigeria(country):
+Nigeria
+Lagos (city in Nigeria)
+Awommama village, Emo state, Nigeria
+Anambra State
+Imo State (also listed as "Emo State" and "EMO" - likely variations/misspellings)
+Lambanyi
+
+Nepal(country):
+pokhra (Pokhara - city in Nepal)
+Nepal
+
+Tanzania(country):
+PCO Dar Es salaam (Dar es Salaam - city in Tanzania)

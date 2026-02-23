@@ -1,0 +1,5 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/data-drive/etl-process-dev/etl-files/etl_files_media_server/main.py", line 43, in <module>
+    from config import DB_CONFIG, API_CONFIG, LOG_CONFIG
+ModuleNotFoundError: No module named 'config'

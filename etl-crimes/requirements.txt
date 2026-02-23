@@ -1,0 +1,22 @@
+# Core Dependencies (Required for ETL)
+python-dotenv>=1.0.0
+requests>=2.31.0
+psycopg2-binary>=2.9.9
+
+# Data Processing (Required)
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Utilities (Required)
+tqdm>=4.66.1
+python-dateutil>=2.8.2
+colorlog>=6.8.0
+
+# ========================================
+# Vector Embeddings (OPTIONAL - Only for AI features)
+# Install separately if needed: pip install sentence-transformers
+# ========================================
+sentence-transformers>=2.2.2
+torch>=2.2.0
+
+

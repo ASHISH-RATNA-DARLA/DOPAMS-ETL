@@ -1,0 +1,9 @@
+langchain
+langchain-community
+langchain-ollama
+psycopg2-binary
+python-dotenv
+pydantic
+fuzzywuzzy
+python-Levenshtein
+
