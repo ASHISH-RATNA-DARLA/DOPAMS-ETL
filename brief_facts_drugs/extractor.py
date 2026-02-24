@@ -3,8 +3,12 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from langchain_ollama import ChatOllama
-from llm_factory import get_llm
+import sys
+import os
+
+# Ensure core is accessible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from core.llm_service import get_llm, invoke_extraction_with_retry
 import config
 
 # --- Data Models ---
@@ -187,14 +191,11 @@ def extract_drug_info(text: str) -> List[DrugExtraction]:
     prompt = ChatPromptTemplate.from_template(EXTRACTION_PROMPT)
     
     try:
-        llm = ChatOllama(
-            base_url=config.LLM_ENDPOINT.replace("/api", ""),
-            model=config.LLM_MODEL,
-            temperature=0,
-            num_ctx=config.LLM_CONTEXT_WINDOW
-        )
+        llm_service = get_llm('extraction')
+        llm = llm_service.get_langchain_model()
         chain = prompt | llm | parser
-        response = chain.invoke({"text": text})
+        
+        response = invoke_extraction_with_retry(chain, {"text": text}, max_retries=1)
         
         drugs_data = response.get("drugs", []) # Changed from result to response
         valid_drugs = []

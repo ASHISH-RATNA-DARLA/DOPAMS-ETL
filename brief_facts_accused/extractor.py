@@ -2,7 +2,13 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from langchain_ollama import ChatOllama
+import sys
+import os
+
+# Ensure core is accessible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from core.llm_service import get_llm, invoke_extraction_with_retry
+
 import config
 import logging
 
@@ -363,21 +369,15 @@ def detect_ccl(full_name: str, role: str) -> bool:
 
 # --- Main Extraction Logic ---
 
-def get_llm_instance():
-    return ChatOllama(
-        base_url=config.LLM_ENDPOINT.replace("/api", ""),
-        model=config.LLM_MODEL,
-        temperature=0,
-        num_ctx=config.LLM_CONTEXT_WINDOW
-    )
+def get_llm_chain(prompt_template, parser):
+    llm_service = get_llm('extraction')
+    llm = llm_service.get_langchain_model()
+    prompt = ChatPromptTemplate.from_template(prompt_template)
+    return prompt | llm | parser
 
 def extract_accused_names_pass1(text: str) -> List[str]:
-    llm = get_llm_instance()
     parser = JsonOutputParser(pydantic_object=AccusedNamesResponse)
-    
-    # Inject format instructions manually if needed, but langchain does it
-    prompt = ChatPromptTemplate.from_template(PASS1_PROMPT)
-    chain = prompt | llm | parser
+    chain = get_llm_chain(PASS1_PROMPT, parser)
     
     try:
         import time
@@ -385,11 +385,15 @@ def extract_accused_names_pass1(text: str) -> List[str]:
         logger.info(f"Pass 1: Invoking LLM with model {config.LLM_MODEL}...")
         logger.info(f"Pass 1 Prompt Length: {len(text)} chars")
         
-        # Debug: Invoke and print raw first if possible, but chain is convenient.
-        response = chain.invoke({
-            "text": text,
-            "format_instructions": parser.get_format_instructions()
-        })
+        # Use our new retry wrapper
+        response = invoke_extraction_with_retry(
+            chain,
+            {
+                "text": text,
+                "format_instructions": parser.get_format_instructions()
+            },
+            max_retries=1
+        )
         
         duration = time.time() - start_time
         logger.info(f"Pass 1: LLM responded in {duration:.2f} seconds.")
@@ -409,10 +413,8 @@ def extract_details_pass2(text: str, accused_names: List[str]) -> List[AccusedDe
     if not accused_names:
         return []
         
-    llm = get_llm_instance()
     parser = JsonOutputParser(pydantic_object=AccusedDetailsResponse)
-    prompt = ChatPromptTemplate.from_template(PASS2_PROMPT)
-    chain = prompt | llm | parser
+    chain = get_llm_chain(PASS2_PROMPT, parser)
     
     try:
         # Pass 2 is often faster as the list is short, but text is same long text.
@@ -420,11 +422,15 @@ def extract_details_pass2(text: str, accused_names: List[str]) -> List[AccusedDe
         start_time = time.time()
         logger.info("Pass 2: Invoking LLM for details...")
         
-        response = chain.invoke({
-            "text": text,
-            "accused_names": str(accused_names),
-            "format_instructions": parser.get_format_instructions()
-        })
+        response = invoke_extraction_with_retry(
+            chain,
+            {
+                "text": text,
+                "accused_names": str(accused_names),
+                "format_instructions": parser.get_format_instructions()
+            },
+            max_retries=1
+        )
         
         duration = time.time() - start_time
         logger.info(f"Pass 2: LLM responded in {duration:.2f} seconds.")

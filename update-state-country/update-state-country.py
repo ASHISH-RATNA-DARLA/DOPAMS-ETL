@@ -35,7 +35,11 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple
 
 import psycopg
-import requests
+
+# Ensure core is accessible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from core.llm_service import get_llm
+
 from dotenv import load_dotenv
 
 # --- Logging Configuration ---
@@ -61,20 +65,14 @@ DB_DSN = os.environ.get(
     ])
 )
 
-# LLM Configuration - Try deepseek first, fallback to mistral
-LLM_ENDPOINT = os.environ.get("LLM_ENDPOINT", "http://127.0.0.1:11434/api/generate")
-LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-coder-v2:16b")
-LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "mistral:latest")
-LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "60"))
+# LLM Configuration is now handled by core/llm_service.py
+# Reference data file path
+REF_DATA_FILE = os.environ.get("REF_DATA_FILE", "ref.txt")
 
 # Table Configuration
 DEFAULT_TABLE_NAME = os.environ.get("TABLE_NAME", "persons")
 DEFAULT_ID_COLUMN = os.environ.get("ID_COLUMN", "id")
 
-# Reference data file path
-REF_DATA_FILE = os.environ.get("REF_DATA_FILE", "ref.txt")
-
-logger.info(f"Using LLM: {LLM_MODEL} (fallback: {LLM_FALLBACK_MODEL})")
 logger.info(f"Database: {os.environ.get('DB_NAME', 'dopamas')}@{os.environ.get('DB_HOST', 'localhost')}")
 logger.info(f"Default Table: {DEFAULT_TABLE_NAME}, ID Column: {DEFAULT_ID_COLUMN}")
 logger.info(f"Reference Data File: {REF_DATA_FILE}")
@@ -322,11 +320,8 @@ def lookup_state_country(
 class LocationDeterminationLLM:
     """LLM client for determining state and country from address."""
     
-    def __init__(self, endpoint: str, model: str, fallback_model: str, timeout: int, ref_data: Dict[str, Dict[str, List[str]]] = None):
-        self.endpoint = endpoint
-        self.model = model
-        self.fallback_model = fallback_model
-        self.timeout = timeout
+    def __init__(self, ref_data: Dict[str, Dict[str, List[str]]] = None):
+        self.llm_service = get_llm('classification')
         self.ref_data = ref_data or {}
     
     def determine_location(self, address: AddressRecord) -> LocationResult:
@@ -371,24 +366,17 @@ class LocationDeterminationLLM:
         logger.debug("No match in reference data, using LLM")
         prompt = self._build_prompt(address)
         
-        # Try primary model first
         try:
-            result = self._call_llm(prompt, self.model)
+            result = self._call_llm(prompt)
             return result
         except Exception as e:
-            logger.warning(f"Primary model {self.model} failed: {e}")
-            logger.info(f"Trying fallback model: {self.fallback_model}")
-            try:
-                result = self._call_llm(prompt, self.fallback_model)
-                return result
-            except Exception as e2:
-                logger.error(f"Fallback model also failed: {e2}")
-                return LocationResult(
-                    state=None,
-                    country=None,
-                    confidence="low",
-                    reasoning=f"LLM failed: {str(e2)}"
-                )
+            logger.error(f"LLM failed: {e}")
+            return LocationResult(
+                state=None,
+                country=None,
+                confidence="low",
+                reasoning=f"LLM failed: {str(e)}"
+            )
     
     def _build_prompt(self, address: AddressRecord) -> str:
         """Build intelligent prompt based on what information is available."""
@@ -461,37 +449,19 @@ Return ONLY the JSON object."""
         
         return prompt
     
-    def _call_llm(self, prompt: str, model: str) -> LocationResult:
+    def _call_llm(self, prompt: str) -> LocationResult:
         """Call LLM with the prompt and parse response."""
         
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "num_ctx": 4096,
-                "num_predict": 512,
-                "temperature": 0.1,  # Very low for factual determination
-                "top_p": 0.9,
-                "num_thread": 8,
-            }
-        }
-        
-        logger.debug(f"Calling LLM: {model}")
+        logger.debug(f"Calling LLM: {self.llm_service.model}")
         start_time = time.time()
         
-        response = requests.post(
-            self.endpoint,
-            json=payload,
-            timeout=self.timeout
-        )
+        response_text = self.llm_service.generate(prompt=prompt)
         
         elapsed = time.time() - start_time
-        response.raise_for_status()
         
-        result_json = response.json()
-        response_text = result_json.get("response", "")
-        
+        if not response_text:
+            raise Exception("Empty response from LLM")
+            
         logger.debug(f"LLM response received in {elapsed:.2f}s")
         
         # Parse JSON from response
@@ -725,10 +695,6 @@ def process_records(
     
     # Initialize LLM client with reference data
     llm = LocationDeterminationLLM(
-        endpoint=LLM_ENDPOINT,
-        model=LLM_MODEL,
-        fallback_model=LLM_FALLBACK_MODEL,
-        timeout=LLM_TIMEOUT,
         ref_data=ref_data
     )
     

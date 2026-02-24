@@ -10,6 +10,12 @@ import requests
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+import sys
+import os
+
+# Ensure core is accessible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from core.llm_service import get_llm
 
 logger = logging.getLogger(__name__)
 
@@ -74,49 +80,19 @@ class LLMProvider(ABC):
 class OllamaProvider(LLMProvider):
     """Ollama local LLM provider - Optimized version"""
     
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+        self.llm_service = get_llm('sql')
+    
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
-        """Generate using Ollama with detailed logging"""
-        try:
-            endpoint = f"{self.config.api_url}/api/generate"
-            
-            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-            
-            payload = {
-                "model": self.config.model,
-                "prompt": full_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": self.config.temperature,
-                    "num_predict": self.config.max_tokens,
-                    "num_ctx": 4096
-                }
-            }
-            
-            logger.info(f"Sending request to Ollama: {self.config.model}")
-            logger.debug(f"Prompt length: {len(full_prompt)} chars")
-            logger.debug(f"Timeout: {self.config.timeout}s, Max tokens: {self.config.max_tokens}")
-            
-            response = requests.post(endpoint, json=payload, timeout=self.config.timeout)
-            response.raise_for_status()
-            
-            result = response.json().get('response', '').strip()
-            logger.info(f"Ollama response received ({len(result)} chars)")
-            return result
-            
-        except requests.exceptions.Timeout:
-            logger.error("Ollama request timed out")
-            return None
-        except requests.exceptions.ConnectionError:
-            logger.error(f"Cannot connect to Ollama at {self.config.api_url}")
-            return None
-        except Exception as e:
-            logger.error(f"Ollama request failed: {e}")
-            return None
+        """Generate using Ollama with detailed logging via core/llm_service"""
+        return self.llm_service.generate(prompt=prompt, system_prompt=system_prompt)
     
     def test_connection(self) -> bool:
         """Test Ollama connection"""
+        import requests
         try:
-            response = requests.get(f"{self.config.api_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.llm_service.api_url}/api/tags", timeout=5)
             return response.status_code == 200
         except:
             return False

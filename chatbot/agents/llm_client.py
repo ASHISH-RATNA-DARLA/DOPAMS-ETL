@@ -2,9 +2,15 @@
 Local LLM Client
 Connects to Qwen2.5-Coder running locally via Ollama or similar
 """
-import requests
 import logging
 from typing import Dict, Any, Optional
+import sys
+import os
+
+# Ensure core is accessible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from core.llm_service import get_llm
+
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -14,15 +20,12 @@ class LocalLLMClient:
     """Client for local Qwen2.5-Coder LLM"""
     
     def __init__(self):
-        self.api_url = Config.LLM_CONFIG['api_url']
-        self.model = Config.LLM_CONFIG['model']
-        self.temperature = Config.LLM_CONFIG['temperature']
-        self.max_tokens = Config.LLM_CONFIG['max_tokens']
-        self.timeout = Config.LLM_CONFIG['timeout']
+        # We now use the unified factory for SQL tasks
+        self.llm_service = get_llm('sql')
     
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
         """
-        Generate text using local LLM
+        Generate text using local LLM via core LLMService
         
         Args:
             prompt: User prompt
@@ -31,57 +34,7 @@ class LocalLLMClient:
         Returns:
             Generated text or None if failed
         """
-        try:
-            # Ollama API format
-            endpoint = f"{self.api_url}/api/generate"
-            
-            # Combine system and user prompts
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-            
-            payload = {
-                "model": self.model,
-                "prompt": full_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": self.temperature,
-                    "num_predict": self.max_tokens
-                }
-            }
-            
-            logger.info(f"Sending request to LLM: {self.model}")
-            
-            response = requests.post(
-                endpoint,
-                json=payload,
-                timeout=self.timeout  # Configurable timeout from .env
-            )
-            
-            response.raise_for_status()
-            
-            result = response.json()
-            generated_text = result.get('response', '').strip()
-            
-            logger.info(f"LLM response received ({len(generated_text)} chars)")
-            
-            return generated_text
-            
-        except requests.exceptions.Timeout:
-            logger.error("LLM request timed out")
-            return None
-            
-        except requests.exceptions.ConnectionError:
-            logger.error(f"Could not connect to LLM at {self.api_url}")
-            return None
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"LLM request failed: {e}")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Unexpected error in LLM generation: {e}")
-            return None
+        return self.llm_service.generate(prompt=prompt, system_prompt=system_prompt)
     
     def generate_sql(self, user_message: str, schema: str) -> Optional[str]:
         """
@@ -176,8 +129,9 @@ Generate the MongoDB query (JSON only):"""
     
     def test_connection(self) -> bool:
         """Test if LLM is accessible"""
+        import requests
         try:
-            response = requests.get(f"{self.api_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.llm_service.api_url}/api/tags", timeout=5)
             return response.status_code == 200
         except:
             return False
