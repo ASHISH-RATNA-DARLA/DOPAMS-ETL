@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional
+from functools import lru_cache
 
 from dotenv import load_dotenv
 
@@ -24,9 +25,15 @@ class LLMService:
         self.max_tokens = max_tokens
         self.context_window = context_window
         self.stream = stream
+        self._langchain_model_instance = None
 
     def get_langchain_model(self):
-        """Returns a Langchain ChatOllama instance for structured abstraction tasks"""
+        """Returns a Langchain ChatOllama instance for structured abstraction tasks
+        Caches the model instance internally to prevent multiple instantiations per service."""
+        
+        if self._langchain_model_instance is not None:
+            return self._langchain_model_instance
+            
         from langchain_ollama import ChatOllama
         
         # Ensure base URL is correctly formatted for Langchain (remove trailing /api if present in some configs)
@@ -34,13 +41,14 @@ class LLMService:
         if base_url.endswith("/api"):
             base_url = base_url.replace("/api", "")
             
-        return ChatOllama(
+        self._langchain_model_instance = ChatOllama(
             base_url=base_url,
             model=self.model,
             temperature=self.temperature,
             num_ctx=self.context_window,
             # Use max_tokens internally if strictly required by underlying Langchain versions
         )
+        return self._langchain_model_instance
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
         """Direct HTTP generation primarily used for Chatbot SQL and legacy routing"""
@@ -86,6 +94,7 @@ class LLMService:
             logger.error(f"LLM request failed: {e}")
             return None
 
+@lru_cache(maxsize=10)
 def get_llm(task_type: str) -> LLMService:
     """
     Factory Function to route the correct LLM model, temperature, and context based on task.

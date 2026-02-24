@@ -32,7 +32,7 @@ class AccusedExtraction(BaseModel):
     
     accused_type: Optional[str] = Field(
         default="unknown", 
-        description="One of: peddler, consumer, supplier, harbourer, organizer_kingpin, processor, financier, manufacturer, unknown"
+        description="One of: peddler, consumer, supplier, harbourer, organizer_kingpin, processor, financier, manufacturer, transporter, producer, unknown"
     )
     status: Optional[str] = Field(default="unknown", description="arrested, absconding, or unknown")
     is_ccl: bool = Field(default=False, description="Is Child in Conflict with Law (Juvenile)")
@@ -108,7 +108,7 @@ From the input FIR / Brief Facts text:
 2. Include:
    - Persons apprehended, arrested, confessed, absconding
    - Persons referred as A1, A2, accused, suspect, JCL/CCL
-   - **Crucial**: Include Suppliers / Sources mentioned in confessions, even if not arrested or "absconding".
+   - **Crucial**: Include Suppliers / Transporters / Producers / Sources mentioned in confessions, even if not arrested or "absconding".
 
 =====================================
 STRICT EXCLUSIONS (MANDATORY)
@@ -179,7 +179,7 @@ STRICT RULES
 =====================================
 - Extract strictly from the text. Do not guess.
 - Address: Extract full available address (H.No, Village, Mandal, State).
-- Role: Describe what they did AND their INTENT if stated (e.g. "Caught with 5kg ganja for selling", "Purchased for personal consumption", "Caught with phone").
+- Role: Describe what they did AND their INTENT if stated (e.g. "Caught with 5kg ganja for selling", "Purchased for personal consumption", "Caught with phone", "Transporting drugs in car", "Cultivating ganja plants").
 
 Accused List:
 {accused_names}
@@ -209,8 +209,6 @@ def classify_accused_type(role_text: str) -> str:
         "sold",
         "retailer",
         "street dealer",
-        "delivering",
-        "transporting", 
         "waiting for customers",
         "commission for selling",
         "sale of",
@@ -220,6 +218,18 @@ def classify_accused_type(role_text: str) -> str:
         "distributing"
     ]):
         return "peddler"
+
+    # ------------------
+    # TRANSPORTER
+    # ------------------
+    if any(k in t for k in [
+        "transporting",
+        "carrying",
+        "delivering",
+        "driver",
+        "courier"
+    ]):
+        return "transporter"
 
     # ------------------
     # CONSUMER (Priority over Possession)
@@ -275,15 +285,25 @@ def classify_accused_type(role_text: str) -> str:
     # MANUFACTURER (Producer/Cultivator)
     # ------------------
     if any(k in t for k in [
-        "cultivated",
-        "grown",
-        "cultivator",
-        "grower",
-        "producer",
         "manufactured",
         "production of"
     ]):
         return "manufacturer"
+
+    # ------------------
+    # PRODUCER
+    # ------------------
+    if any(k in t for k in [
+        "producing",
+        "producer",
+        "growing",
+        "cultivator",
+        "farming",
+        "cultivated",
+        "grown",
+        "grower"
+    ]):
+        return "producer"
 
     # ------------------
     # HARBOURER
@@ -334,7 +354,6 @@ def classify_accused_type(role_text: str) -> str:
         "possession",
         "possession of",
         "found in possession",
-        "carrying",
         "purchasing", 
         "purchased",
         "bought",
