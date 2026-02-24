@@ -47,7 +47,7 @@ class LLMConfig:
             provider=os.getenv('LLM_PROVIDER', 'ollama'),
             api_url=os.getenv('LLM_API_URL', 'http://localhost:11434'),
             api_key=os.getenv('LLM_API_KEY'),
-            model=os.getenv('LLM_MODEL', 'mixtral:8x7b'),
+            model=os.getenv('LLM_MODEL_SQL', 'deepseek-coder-v2:16b'),
             temperature=float(os.getenv('LLM_TEMPERATURE', '0.1')),
             max_tokens=int(os.getenv('LLM_MAX_TOKENS', '500')),
             timeout=int(os.getenv('LLM_TIMEOUT_SECONDS', '120'))
@@ -1718,8 +1718,10 @@ def create_openai_client(api_key: str, model: str = 'gpt-4', **kwargs) -> Univer
     """Create OpenAI client with shorthand"""
     return create_client('openai', api_key=api_key, model=model, **kwargs)
 
-def create_ollama_client(model: str = 'mixtral:8x7b', **kwargs) -> UniversalLLMClient:
+def create_ollama_client(model: str = None, **kwargs) -> UniversalLLMClient:
     """Create Ollama client with shorthand"""
+    import os
+    model = model or os.getenv('LLM_MODEL_SQL', 'deepseek-coder-v2:16b')
     return create_client('ollama', model=model, **kwargs)
 
 def create_anthropic_client(api_key: str, model: str = 'claude-3-5-sonnet-20241022', **kwargs) -> UniversalLLMClient:

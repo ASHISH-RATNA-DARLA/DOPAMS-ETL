@@ -18,6 +18,6 @@ LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", "http://localhost:11434/api")
 # - qwen2.5-coder:3b (Fastest, ~2GB) - SELECTED FOR SPEED
 # - llama3.1:8b (Too slow on CPU)
 # - qwen2.5-coder:14b (Too slow on CPU)
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5-coder:3b")
+LLM_MODEL = os.getenv("LLM_MODEL_EXTRACTION", "deepseek-coder-v2:16b")
 LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
 

@@ -49,7 +49,7 @@ class Config:
         'provider': os.getenv('LLM_PROVIDER', 'ollama'),  # 'ollama', 'openai', or 'anthropic'
         'api_url': os.getenv('LLM_API_URL', 'http://localhost:11434'),
         'api_key': os.getenv('LLM_API_KEY', ''),  # For OpenAI/Anthropic
-        'model': os.getenv('LLM_MODEL', 'deepseek-coder-v2:16b'),  # OPTIMIZED for SQL generation
+        'model': os.getenv('LLM_MODEL_SQL', 'deepseek-coder-v2:16b'),  # OPTIMIZED for SQL generation — routed via LLM_MODEL_SQL
         'temperature': float(os.getenv('LLM_TEMPERATURE', 0.0)),  # 0.0 for deterministic SQL
         'max_tokens': int(os.getenv('LLM_MAX_TOKENS', 1000)),  # 1000 for complex multi-table queries
         'timeout': int(os.getenv('LLM_TIMEOUT_SECONDS', 120)),  # 120s for complex queries
