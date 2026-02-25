@@ -49,7 +49,7 @@ from config import DB_CONFIG, API_CONFIG, LOG_CONFIG
 # -----------------------------------------------------------------------------
 
 # Table name for files metadata (bypasses TABLE_CONFIG as per requirements)
-FILES_TABLE = os.getenv("FILES_TABLE", "files")
+FILES_TABLE = os.getenv("FILES_TABLE")
 
 # Base path on the Tomcat media server
 BASE_MEDIA_PATH = os.getenv(

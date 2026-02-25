@@ -10,18 +10,18 @@ load_dotenv()
 
 # Database Configuration
 DB_CONFIG = {
-    'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'database': os.getenv('POSTGRES_DB', 'dopamasuprddb'),
-    'user': os.getenv('POSTGRES_USER', 'dopamasprd_ur'),
-    'password': os.getenv('POSTGRES_PASSWORD', ''),
-    'port': int(os.getenv('POSTGRES_PORT', 5432)),
+    'host': os.getenv('POSTGRES_HOST'),
+    'database': os.getenv('POSTGRES_DB'),
+    'user': os.getenv('POSTGRES_USER'),
+    'password': os.getenv('POSTGRES_PASSWORD'),
+    'port': int(os.getenv('POSTGRES_PORT')),
     # Connection timeout and keepalive settings for connection stability
     # Keepalive helps maintain connections during long API calls and network issues
-    'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),  # Connection timeout in seconds
-    'keepalives': int(os.getenv('DB_KEEPALIVES', '1')),  # Enable TCP keepalive (1 = enabled)
-    'keepalives_idle': int(os.getenv('DB_KEEPALIVES_IDLE', '30')),  # Seconds of inactivity before sending keepalive
-    'keepalives_interval': int(os.getenv('DB_KEEPALIVES_INTERVAL', '10')),  # Seconds between keepalive packets
-    'keepalives_count': int(os.getenv('DB_KEEPALIVES_COUNT', '5')),  # Number of keepalive packets before considering connection dead
+    'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT')),  # Connection timeout in seconds
+    'keepalives': int(os.getenv('DB_KEEPALIVES')),  # Enable TCP keepalive (1 = enabled)
+    'keepalives_idle': int(os.getenv('DB_KEEPALIVES_IDLE')),  # Seconds of inactivity before sending keepalive
+    'keepalives_interval': int(os.getenv('DB_KEEPALIVES_INTERVAL')),  # Seconds between keepalive packets
+    'keepalives_count': int(os.getenv('DB_KEEPALIVES_COUNT')),  # Number of keepalive packets before considering connection dead
 }
 
 # API Configuration
@@ -51,7 +51,7 @@ def get_api_endpoint(endpoint_key: str, default_path: str = '') -> str:
     else:
         # Check for alternative base URL (e.g., DOPAMAS_API_URL2 for port 3001)
         api_url2 = os.getenv('DOPAMAS_API_URL2', '').strip()
-        base_url = api_url2 if api_url2 else os.getenv('DOPAMAS_API_URL', 'http://103.164.200.184:3000/api/DOPAMS')
+        base_url = api_url2 if api_url2 else os.getenv('DOPAMAS_API_URL')
     
     # Get endpoint path from env (e.g., DISPOSAL_API_ENDPOINT=/crimes/disposal)
     endpoint_path = os.getenv(f'{endpoint_key.upper()}_API_ENDPOINT', '').strip()
@@ -68,10 +68,10 @@ def get_api_endpoint(endpoint_key: str, default_path: str = '') -> str:
     return f"{base_url.rstrip('/')}{endpoint_path}"
 
 API_CONFIG = {
-    'base_url': os.getenv('DOPAMAS_API_URL', 'http://103.164.200.184:3000/api/DOPAMS'),
-    'api_key': os.getenv('DOPAMAS_API_KEY', 'c4127def-da76-4d8d-ad3d-159cea0206a0'),
-    'timeout': int(os.getenv('API_TIMEOUT', 30)),
-    'max_retries': int(os.getenv('API_MAX_RETRIES', 3)),
+    'base_url': os.getenv('DOPAMAS_API_URL'),
+    'api_key': os.getenv('DOPAMAS_API_KEY'),
+    'timeout': int(os.getenv('API_TIMEOUT')),
+    'max_retries': int(os.getenv('API_MAX_RETRIES')),
     
     # API Endpoints - using helper function for flexibility
     # Backward compatibility: if env vars not set, use defaults
@@ -107,14 +107,14 @@ ETL_CONFIG = {
     'end_date': '2025-12-31T23:59:59+05:30',    # Placeholder for log headers (not used in actual processing)
     
     'chunk_days': 5,  # Fetch 5 days at a time
-    'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS', '1')),  # Overlap between chunks to ensure no data is missed (default: 1 day)
+    'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS')),  # Overlap between chunks to ensure no data is missed
     'batch_size': 100,  # Insert batch size
-    'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS', 'false').lower() == 'true'
+    'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS') == 'true'
 }
 
 # Embedding Configuration
 EMBEDDING_CONFIG = {
-    'model_name': os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2'),
+    'model_name': os.getenv('EMBEDDING_MODEL'),
     'brief_facts_model': 'all-mpnet-base-v2',  # Better for long text
     'pattern_model': 'all-MiniLM-L6-v2',  # Faster for shorter patterns
     'batch_size': 32
@@ -122,7 +122,7 @@ EMBEDDING_CONFIG = {
 
 # Logging Configuration
 LOG_CONFIG = {
-    'level': os.getenv('LOG_LEVEL', 'INFO'),
+    'level': os.getenv('LOG_LEVEL'),
     'format': '%(log_color)s%(asctime)s - %(levelname)s - %(message)s',
     'date_format': '%Y-%m-%d %H:%M:%S'
 }

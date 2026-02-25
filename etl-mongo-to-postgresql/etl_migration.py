@@ -108,7 +108,7 @@ class ETLMigration:
         try:
             pg_config = {
                 'host': os.getenv('POSTGRES_HOST'),
-                'port': os.getenv('POSTGRES_PORT', '5432'),
+                'port': os.getenv('POSTGRES_PORT'),
                 'database': os.getenv('POSTGRES_DB'),
                 'user': os.getenv('POSTGRES_USER'),
                 'password': os.getenv('POSTGRES_PASSWORD')
@@ -867,7 +867,7 @@ class ETLMigration:
             
         try:
             # Get collection name
-            collection_name = os.getenv('MONGO_COLLECTION_NAME', 'fir_records')
+            collection_name = os.getenv('MONGO_COLLECTION_NAME')
             collection = self.mongo_db[collection_name]
             
             # Get total count

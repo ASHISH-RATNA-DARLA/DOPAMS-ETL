@@ -102,7 +102,7 @@ def get_llm(task_type: str) -> LLMService:
     task_type = task_type.lower()
     
     if task_type == 'extraction':
-        model = os.getenv("LLM_MODEL_EXTRACTION", "deepseek-coder-v2:16b")
+        model = os.getenv("LLM_MODEL_EXTRACTION")
         return LLMService(
             model=model,
             temperature=0.0,          # Deterministic JSON
@@ -112,7 +112,7 @@ def get_llm(task_type: str) -> LLMService:
         )
         
     elif task_type == 'sql':
-        model = os.getenv("LLM_MODEL_SQL", "deepseek-coder-v2:16b")
+        model = os.getenv("LLM_MODEL_SQL")
         return LLMService(
             model=model,
             temperature=0.0,
@@ -122,7 +122,7 @@ def get_llm(task_type: str) -> LLMService:
         )
         
     elif task_type == 'classification':
-        model = os.getenv("LLM_MODEL_CLASSIFICATION", "llama3.1:8b")
+        model = os.getenv("LLM_MODEL_CLASSIFICATION")
         return LLMService(
             model=model,
             temperature=0.1,          # Slight variability is okay, mostly deterministic
@@ -132,7 +132,7 @@ def get_llm(task_type: str) -> LLMService:
         )
         
     elif task_type == 'reasoning':
-        model = os.getenv("LLM_MODEL_REASONING", "falcon3:10b")
+        model = os.getenv("LLM_MODEL_REASONING")
         return LLMService(
             model=model,
             temperature=0.2,          # Requires some reasoning variance
@@ -143,7 +143,7 @@ def get_llm(task_type: str) -> LLMService:
         
     else:
         logger.warning(f"Unknown task_type '{task_type}', defaulting to extraction parameters.")
-        model = os.getenv("LLM_MODEL_EXTRACTION", "deepseek-coder-v2:16b")
+        model = os.getenv("LLM_MODEL_EXTRACTION")
         return LLMService(model=model)
 
 # --- Retry Loop Wrapper for Extraction ---

@@ -66,7 +66,7 @@ class MongoDBRecordsExporter:
         try:
             mongo_uri = os.getenv('MONGO_URI')
             mongo_db_name = os.getenv('MONGO_DB_NAME')
-            mongo_collection_name = os.getenv('MONGO_COLLECTION_NAME', 'fir_records')
+            mongo_collection_name = os.getenv('MONGO_COLLECTION_NAME')
             
             if not mongo_uri or not mongo_db_name:
                 raise ValueError("MONGO_URI and MONGO_DB_NAME must be set in .env")
@@ -102,7 +102,7 @@ class MongoDBRecordsExporter:
         try:
             pg_config = {
                 'host': os.getenv('POSTGRES_HOST'),
-                'port': os.getenv('POSTGRES_PORT', '5432'),
+                'port': os.getenv('POSTGRES_PORT'),
                 'database': os.getenv('POSTGRES_DB'),
                 'user': os.getenv('POSTGRES_USER'),
                 'password': os.getenv('POSTGRES_PASSWORD')

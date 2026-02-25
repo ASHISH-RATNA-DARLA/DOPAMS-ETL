@@ -18,11 +18,11 @@ load_dotenv()
 
 # Database configuration
 DB_CONFIG = {
-    'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'database': os.getenv('POSTGRES_DB', 'dopamasuprddb'),
-    'user': os.getenv('POSTGRES_USER', 'dopamasprd_ur'),
-    'password': os.getenv('POSTGRES_PASSWORD', ''),
-    'port': int(os.getenv('POSTGRES_PORT', 5432))
+    'host': os.getenv('POSTGRES_HOST'),
+    'database': os.getenv('POSTGRES_DB'),
+    'user': os.getenv('POSTGRES_USER'),
+    'password': os.getenv('POSTGRES_PASSWORD'),
+    'port': int(os.getenv('POSTGRES_PORT'))
 }
 
 # Import mapping function from files media server

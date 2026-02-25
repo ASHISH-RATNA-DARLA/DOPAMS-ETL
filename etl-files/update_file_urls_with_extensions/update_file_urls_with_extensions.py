@@ -29,11 +29,11 @@ load_dotenv()
 
 # Database Configuration
 DB_CONFIG = {
-    'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'database': os.getenv('POSTGRES_DB', 'dopamasuprddb'),
-    'user': os.getenv('POSTGRES_USER', 'dopamasprd_ur'),
-    'password': os.getenv('POSTGRES_PASSWORD', ''),
-    'port': int(os.getenv('POSTGRES_PORT', 5432))
+    'host': os.getenv('POSTGRES_HOST'),
+    'database': os.getenv('POSTGRES_DB'),
+    'user': os.getenv('POSTGRES_USER'),
+    'password': os.getenv('POSTGRES_PASSWORD'),
+    'port': int(os.getenv('POSTGRES_PORT'))
 }
 
 # Base path on the Tomcat media server
@@ -45,7 +45,7 @@ BASE_MEDIA_PATH = os.getenv(
 # Base URL for file URLs (from generate_file_url function)
 BASE_FILE_URL = os.getenv(
     "FILES_BASE_URL",
-    "http://192.168.103.106:8080/files"
+    ""
 )
 
 # Processing order - all source types from ref.md

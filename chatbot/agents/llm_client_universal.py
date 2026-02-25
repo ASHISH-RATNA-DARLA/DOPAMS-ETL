@@ -44,13 +44,13 @@ class LLMConfig:
         """Create config from environment variables"""
         import os
         return cls(
-            provider=os.getenv('LLM_PROVIDER', 'ollama'),
-            api_url=os.getenv('LLM_API_URL', 'http://localhost:11434'),
+            provider=os.getenv('LLM_PROVIDER'),
+            api_url=os.getenv('LLM_API_URL'),
             api_key=os.getenv('LLM_API_KEY'),
-            model=os.getenv('LLM_MODEL_SQL', 'deepseek-coder-v2:16b'),
-            temperature=float(os.getenv('LLM_TEMPERATURE', '0.1')),
-            max_tokens=int(os.getenv('LLM_MAX_TOKENS', '500')),
-            timeout=int(os.getenv('LLM_TIMEOUT_SECONDS', '120'))
+            model=os.getenv('LLM_MODEL_SQL'),
+            temperature=float(os.getenv('LLM_TEMPERATURE')),
+            max_tokens=int(os.getenv('LLM_MAX_TOKENS')),
+            timeout=int(os.getenv('LLM_TIMEOUT_SECONDS'))
         )
 
 # ============================================================================
@@ -1721,7 +1721,7 @@ def create_openai_client(api_key: str, model: str = 'gpt-4', **kwargs) -> Univer
 def create_ollama_client(model: str = None, **kwargs) -> UniversalLLMClient:
     """Create Ollama client with shorthand"""
     import os
-    model = model or os.getenv('LLM_MODEL_SQL', 'deepseek-coder-v2:16b')
+    model = model or os.getenv('LLM_MODEL_SQL')
     return create_client('ollama', model=model, **kwargs)
 
 def create_anthropic_client(api_key: str, model: str = 'claude-3-5-sonnet-20241022', **kwargs) -> UniversalLLMClient:

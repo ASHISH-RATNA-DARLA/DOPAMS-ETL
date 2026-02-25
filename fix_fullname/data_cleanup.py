@@ -17,14 +17,15 @@ import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import warnings
+from dotenv import load_dotenv
 
 warnings.filterwarnings("ignore")
 
-# Database connection
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgres://dopamasprd_ur:At0YM9pjD2rTmast4s@192.168.103.106:5432/dopamasuprddb",
-)
+# Load environment variables from .env file
+load_dotenv()
+
+# Database connection — must be set in .env as DATABASE_URL
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Try importing fuzzy matching libraries
 try:

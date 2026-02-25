@@ -212,7 +212,7 @@ class FilesETL:
 
         # Download latest file with simple retry & backoff (handles 429 / timeouts)
         max_retries = int(API_CONFIG.get("max_retries", 3))
-        base_delay = float(os.getenv("FILES_RETRY_DELAY_SECONDS", "1.0"))
+        base_delay = float(os.getenv("FILES_RETRY_DELAY_SECONDS"))
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -331,7 +331,7 @@ class FilesETL:
                 logger.warning("No FIR_COPY values found to process.")
                 return True
 
-            per_file_sleep = float(os.getenv("FILES_PER_FILE_SLEEP_SECONDS", "1.0"))
+            per_file_sleep = float(os.getenv("FILES_PER_FILE_SLEEP_SECONDS"))
 
             for idx, file_id in enumerate(fir_ids, start=1):
                 if not file_id or not str(file_id).strip():

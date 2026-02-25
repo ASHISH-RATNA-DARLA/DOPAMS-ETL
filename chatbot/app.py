@@ -24,7 +24,7 @@ from api.routes import init_routes, api_bp
 log_level = logging.DEBUG if Config.DEBUG else logging.INFO
 
 # Get log file from environment variable or use default
-log_file = os.getenv('LOG_FILE', 'app.log')
+log_file = os.getenv('LOG_FILE')
 
 logging.basicConfig(
     level=log_level,

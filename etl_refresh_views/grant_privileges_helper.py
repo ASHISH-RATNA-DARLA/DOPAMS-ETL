@@ -23,15 +23,15 @@ def grant_privileges():
     
     # Get database credentials - use superuser credentials
     db_config = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'port': os.getenv('DB_PORT', '5432'),
+        'host': os.getenv('DB_HOST'),
+        'port': os.getenv('DB_PORT'),
         'database': os.getenv('DB_NAME'),
-        'user': os.getenv('SUPERUSER_DB_USER', 'postgres'),  # Default to postgres
-        'password': os.getenv('SUPERUSER_DB_PASSWORD', '')
+        'user': os.getenv('SUPERUSER_DB_USER'),  # Must be set in .env
+        'password': os.getenv('SUPERUSER_DB_PASSWORD')
     }
     
     # Target user to grant privileges to
-    target_user = os.getenv('DB_USER', 'dev_dopamas')
+    target_user = os.getenv('DB_USER')
     
     # Validate required credentials
     if not all([db_config['database'], db_config['user'], db_config['password']]):

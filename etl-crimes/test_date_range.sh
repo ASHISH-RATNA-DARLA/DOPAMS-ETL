@@ -2,6 +2,22 @@
 # Test Script: Compare API response vs ETL results
 # Date Range: 2025-10-01 to 2025-10-02
 
+# Load environment variables from .env file if it exists
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+elif [ -f "../.env" ]; then
+    export $(grep -v '^#' ../.env | xargs)
+fi
+
+# Validate required env vars
+if [ -z "$DOPAMAS_API_URL" ] || [ -z "$DOPAMAS_API_KEY" ]; then
+    echo "❌ ERROR: DOPAMAS_API_URL and DOPAMAS_API_KEY must be set in .env"
+    exit 1
+fi
+
+POSTGRES_USER=${POSTGRES_USER:-${DB_USER:-postgres}}
+POSTGRES_DB=${POSTGRES_DB:-${DB_NAME:-}}
+
 echo "================================================================================"
 echo "🧪 DOPAMAS ETL - Test Date Range Verification"
 echo "================================================================================"
@@ -21,8 +37,8 @@ echo "==========================================================================
 echo ""
 
 API_RESPONSE=$(curl -s -X GET \
-  "http://103.164.200.184:3000/api/DOPAMS/crimes?fromDate=$FROM_DATE&toDate=$TO_DATE" \
-  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0')
+  "${DOPAMAS_API_URL}/crimes?fromDate=$FROM_DATE&toDate=$TO_DATE" \
+  -H "x-api-key: ${DOPAMAS_API_KEY}")
 
 echo "$API_RESPONSE" > /tmp/api_response_test.json
 
@@ -60,7 +76,7 @@ echo "Step 3: Checking Database..."
 echo "================================================================================"
 echo ""
 
-DB_COUNT=$(psql -U postgres -d dopamasuprddb -t -c "
+DB_COUNT=$(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "
     SELECT COUNT(*) 
     FROM crimes 
     WHERE fir_date BETWEEN '$FROM_DATE' AND '$TO_DATE'
@@ -73,7 +89,7 @@ echo "📊 Database Crime Count: $DB_COUNT"
 # Show sample from database
 echo ""
 echo "Sample crimes from database:"
-psql -U postgres -d dopamasuprddb -c "
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
     SELECT crime_id, fir_num, crime_type, fir_date::date
     FROM crimes 
     WHERE fir_date BETWEEN '$FROM_DATE' AND '$TO_DATE'

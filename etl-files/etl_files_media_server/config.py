@@ -10,29 +10,29 @@ load_dotenv()
 
 # Database Configuration
 DB_CONFIG = {
-    'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'database': os.getenv('POSTGRES_DB', 'dopamasuprddb'),
-    'user': os.getenv('POSTGRES_USER', 'dopamasprd_ur'),
-    'password': os.getenv('POSTGRES_PASSWORD', ''),
-    'port': int(os.getenv('POSTGRES_PORT', 5432))
+    'host': os.getenv('POSTGRES_HOST'),
+    'database': os.getenv('POSTGRES_DB'),
+    'user': os.getenv('POSTGRES_USER'),
+    'password': os.getenv('POSTGRES_PASSWORD'),
+    'port': int(os.getenv('POSTGRES_PORT'))
 }
 
 # API Configuration
 # API1 (original - port 3000): crimes, persons, property, interrogation
-API1_BASE_URL = os.getenv('DOPAMAS_API_URL', 'http://103.164.200.184:3000/api/DOPAMS')
+API1_BASE_URL = os.getenv('DOPAMAS_API_URL')
 
 # API2 (new - port 3001): mo_seizures, chargesheets, fsl_case_property
-API2_HOST = os.getenv('API2_URL', '103.164.200.184')
-API2_PORT = os.getenv('API2_PORT', '3001')
+API2_HOST = os.getenv('API2_URL')
+API2_PORT = os.getenv('API2_PORT')
 API2_BASE_URL = f"http://{API2_HOST}:{API2_PORT}/api/DOPAMS"
 
 API_CONFIG = {
     'base_url': API1_BASE_URL,  # Default to API1 for backward compatibility
     'api1_base_url': API1_BASE_URL,
     'api2_base_url': API2_BASE_URL,
-    'api_key': os.getenv('DOPAMAS_API_KEY', 'c4127def-da76-4d8d-ad3d-159cea0206a0'),
-    'timeout': int(os.getenv('API_TIMEOUT', 30)),
-    'max_retries': int(os.getenv('API_MAX_RETRIES', 3)),
+    'api_key': os.getenv('DOPAMAS_API_KEY'),
+    'timeout': int(os.getenv('API_TIMEOUT')),
+    'max_retries': int(os.getenv('API_MAX_RETRIES')),
     
     # API1 Endpoints (port 3000)
     'crimes_url': f"{API1_BASE_URL}/crimes",
@@ -66,14 +66,14 @@ ETL_CONFIG = {
     'end_date': '2025-12-31T23:59:59+05:30',    # Placeholder for log headers (not used in actual processing)
     
     'chunk_days': 5,  # Fetch 5 days at a time
-    'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS', '1')),  # Overlap between chunks to ensure no data is missed (default: 1 day)
+    'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS')),  # Overlap between chunks to ensure no data is missed
     'batch_size': 100,  # Insert batch size
-    'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS', 'false').lower() == 'true'
+    'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS') == 'true'
 }
 
 # Embedding Configuration
 EMBEDDING_CONFIG = {
-    'model_name': os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2'),
+    'model_name': os.getenv('EMBEDDING_MODEL'),
     'brief_facts_model': 'all-mpnet-base-v2',  # Better for long text
     'pattern_model': 'all-MiniLM-L6-v2',  # Faster for shorter patterns
     'batch_size': 32
@@ -81,7 +81,7 @@ EMBEDDING_CONFIG = {
 
 # Logging Configuration
 LOG_CONFIG = {
-    'level': os.getenv('LOG_LEVEL', 'INFO'),
+    'level': os.getenv('LOG_LEVEL'),
     'format': '%(log_color)s%(asctime)s - %(levelname)s - %(message)s',
     'date_format': '%Y-%m-%d %H:%M:%S'
 }

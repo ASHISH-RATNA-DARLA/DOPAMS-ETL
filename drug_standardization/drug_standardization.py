@@ -1,333 +1,202 @@
 """
 Drug Name Standardization Script
-Automatically updates primary_drug_name based on drug_name mappings
-Author: Auto-generated
-Date: 2026-01-28
+Database-driven workflow using:
+  - drug_ignore_list  -> Gatekeeper  (exact-match skip list)
+  - drug_categories   -> Brain       (fuzzy taxonomy via pg_trgm)
+  - brief_facts_drug  -> Muscle      (primary_drug_name target column)
+
+Expected behaviour
+------------------
+  "Heroinn"      -> Heroin        (fuzzy match, dist ~0.1)
+  "Whisky"       -> NULL          (blocked by ignore list)
+  "Canabis"      -> Ganja         (fuzzy match, dist ~0.15)
+  "Unknown Tablet"-> NULL         (blocked by ignore list)
+  <no close match>-> raw value    (kept for manual review)
 """
 
 import os
 import sys
 import logging
-from datetime import datetime
-from typing import Dict, List, Tuple
-import psycopg2
-from psycopg2 import Error
-from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
-import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
-# Load environment variables
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 load_dotenv()
 
-# Configure logging - console only, no file output
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
+DB_CONFIG = {
+    "host":     os.getenv("DB_HOST"),
+    "port":     int(os.getenv("DB_PORT")),
+    "database": os.getenv("DB_NAME"),
+    "user":     os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+}
 
+# pg_trgm distance threshold -- lower = stricter (0.3 strict, 0.5 lenient)
+FUZZY_THRESHOLD = float(os.getenv("FUZZY_THRESHOLD"))
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def get_db_connection():
+    return psycopg2.connect(**DB_CONFIG)
+
+
+def get_standard_name(cursor, raw_input: str):
+    """
+    Resolve raw_input to a standard drug name using a two-step lookup:
+
+    1. Gatekeeper -- exact match against public.drug_ignore_list
+       If found, return None (primary_drug_name will be set to NULL).
+
+    2. Brain      -- fuzzy match against public.drug_categories via pg_trgm
+       (<-> operator). If the closest hit is within FUZZY_THRESHOLD, return
+       its standard_name. Otherwise fall back to the raw value so it can be
+       flagged for manual admin review.
+    """
+    if not raw_input:
+        return None
+
+    clean = raw_input.strip().lower()
+
+    # STEP 1 -- Gatekeeper (exact match, case-insensitive)
+    cursor.execute(
+        "SELECT 1 FROM public.drug_ignore_list WHERE LOWER(term) = %s",
+        (clean,),
+    )
+    if cursor.fetchone():
+        logger.info(f"  [-] Ignored  : {raw_input}")
+        return None
+
+    # STEP 2 -- Brain (fuzzy match via pg_trgm <-> operator)
+    cursor.execute(
+        """
+        SELECT standard_name, raw_name <-> %s AS distance
+        FROM   public.drug_categories
+        ORDER  BY distance ASC
+        LIMIT  1
+        """,
+        (clean,),
+    )
+    result = cursor.fetchone()
+
+    if result and result["distance"] < FUZZY_THRESHOLD:
+        logger.info(
+            f"  [+] Matched  : {raw_input!r:40s} -> {result['standard_name']!r}"
+            f"  (dist={result['distance']:.2f})"
+        )
+        return result["standard_name"]
+
+    # Fallback -- no sufficiently close match; keep raw for manual review
+    dist_str = f"{result['distance']:.2f}" if result else "N/A"
+    logger.warning(
+        f"  [?] No match : {raw_input!r} (best dist={dist_str}), keeping raw"
+    )
+    return raw_input
+
+
+# ---------------------------------------------------------------------------
+# Main ETL
+# ---------------------------------------------------------------------------
+def run_standardization():
+    conn = get_db_connection()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+
+    stats = {"processed": 0, "matched": 0, "ignored": 0, "fallback": 0, "errors": 0}
+
+    try:
+        logger.info("=" * 70)
+        logger.info("DRUG STANDARDIZATION ETL -- START")
+        logger.info("=" * 70)
+        logger.info(f"DB           : {DB_CONFIG['host']} / {DB_CONFIG['database']}")
+        logger.info(f"Fuzzy thresh : {FUZZY_THRESHOLD}")
+
+        cur.execute(
+            """
+            SELECT id, drug_name
+            FROM   public.brief_facts_drug
+            WHERE  drug_name IS NOT NULL
+              AND  drug_name <> ''
+            """
+        )
+        records = cur.fetchall()
+        logger.info(f"Records to process: {len(records)}")
+
+        for row in records:
+            stats["processed"] += 1
+            try:
+                standard = get_standard_name(cur, row["drug_name"])
+
+                if standard is None:
+                    stats["ignored"] += 1
+                elif standard == row["drug_name"]:
+                    stats["fallback"] += 1
+                else:
+                    stats["matched"] += 1
+
+                cur.execute(
+                    """
+                    UPDATE public.brief_facts_drug
+                    SET    primary_drug_name = %s
+                    WHERE  id = %s
+                    """,
+                    (standard, row["id"]),
+                )
+
+            except Exception as row_err:
+                stats["errors"] += 1
+                logger.error(f"  [!] Error on id={row['id']}: {row_err}")
+
+        conn.commit()
+
+        logger.info("=" * 70)
+        logger.info("DRUG STANDARDIZATION ETL -- COMPLETE")
+        logger.info(f"  Processed : {stats['processed']}")
+        logger.info(f"  Matched   : {stats['matched']}   (fuzzy -> standard_name)")
+        logger.info(f"  Ignored   : {stats['ignored']}   (blocked by drug_ignore_list -> NULL)")
+        logger.info(f"  Fallback  : {stats['fallback']}   (no close match, kept raw for review)")
+        logger.info(f"  Errors    : {stats['errors']}")
+        logger.info("=" * 70)
+
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        conn.rollback()
+        raise
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Legacy class stub (kept so any external imports don't break immediately)
+# ---------------------------------------------------------------------------
 class DrugStandardizer:
-    """Main class to handle drug name standardization"""
+    """Deprecated: use run_standardization() directly."""
     
     def __init__(self):
-        """Initialize database connection and load mappings"""
-        self.connection = None
-        self.cursor = None
-        self.table_name = os.getenv('TABLE_NAME')
-        if not self.table_name:
-            logger.error("TABLE_NAME not found in .env file!")
-            sys.exit(1)
-        self.drug_mappings = self._load_drug_mappings()
-        self.stats = {
-            'total_processed': 0,
-            'updated': 0,
-            'skipped': 0,
-            'errors': 0,
-            'unmatched': []
-        }
+        logger.warning(
+            "DrugStandardizer class is deprecated. "
+            "Call run_standardization() instead."
+        )
     
-    def _normalize_drug_name(self, drug_name: str) -> str:
-        """
-        Normalize drug name by converting to lowercase and removing spaces
-        
-        Args:
-            drug_name: Original drug name
-            
-        Returns:
-            Normalized drug name
-        """
-        if not drug_name:
-            return ""
-        return drug_name.lower().replace(" ", "")
-    
-    def _load_drug_mappings(self) -> Dict[str, str]:
-        """
-        Load drug mappings from the mappings file
-        
-        Returns:
-            Dictionary mapping normalized drug names to primary drug names
-        """
-        try:
-            with open('drug_mappings.json', 'r', encoding='utf-8') as f:
-                mappings = json.load(f)
-            logger.info(f"Loaded {len(mappings)} drug mappings")
-            return mappings
-        except FileNotFoundError:
-            logger.error("drug_mappings.json not found! Please ensure the file exists.")
-            sys.exit(1)
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing drug_mappings.json: {e}")
-            sys.exit(1)
-    
-    def connect_to_database(self) -> bool:
-        """
-        Establish connection to PostgreSQL database
-        
-        Returns:
-            True if connection successful, False otherwise
-        """
-        try:
-            self.connection = psycopg2.connect(
-                host=os.getenv('DB_HOST'),
-                port=int(os.getenv('DB_PORT', 5432)),
-                database=os.getenv('DB_NAME'),
-                user=os.getenv('DB_USER'),
-                password=os.getenv('DB_PASSWORD')
-            )
-            
-            self.cursor = self.connection.cursor(cursor_factory=RealDictCursor)
-            db_info = self.connection.get_dsn_parameters()
-            logger.info(f"Successfully connected to PostgreSQL")
-            logger.info(f"Connected to database: {os.getenv('DB_NAME')}")
-            logger.info(f"Using table: {self.table_name}")
-            return True
-                
-        except Error as e:
-            logger.error(f"Error connecting to PostgreSQL: {e}")
-            return False
-    
-    def fetch_records_to_update(self) -> List[Dict]:
-        """
-        Fetch records that need to be updated
-        
-        Returns:
-            List of records with id and drug_name
-        """
-        try:
-            # Fetch records where primary_drug_name is NULL or empty
-            # Use parameterized query with table name (quoted for PostgreSQL)
-            # Also handles string 'NULL' (case-insensitive) which is a common mistake
-            query = f"""
-                SELECT id, drug_name, primary_drug_name 
-                FROM "{self.table_name}"
-                WHERE primary_drug_name IS NULL 
-                   OR primary_drug_name = '' 
-                   OR primary_drug_name = 'Unknown'
-                   OR (primary_drug_name IS NOT NULL AND LOWER(TRIM(primary_drug_name)) = 'null')
-            """
-            
-            self.cursor.execute(query)
-            records = self.cursor.fetchall()
-            logger.info(f"Found {len(records)} records to process")
-            if len(records) > 0:
-                # Log a sample of what we found for debugging
-                sample = records[:3] if len(records) >= 3 else records
-                logger.info(f"Sample records found: {[(r['id'], r.get('drug_name'), r.get('primary_drug_name')) for r in sample]}")
-            return records
-            
-        except Error as e:
-            logger.error(f"Error fetching records: {e}")
-            return []
-    
-    def update_record(self, record_id: int, primary_drug_name: str) -> bool:
-        """
-        Update a single record with the primary drug name
-        
-        Args:
-            record_id: ID of the record to update
-            primary_drug_name: Value to set for primary_drug_name
-            
-        Returns:
-            True if update successful, False otherwise
-        """
-        try:
-            # Use parameterized query with table name (quoted for PostgreSQL)
-            query = f"""
-                UPDATE "{self.table_name}"
-                SET primary_drug_name = %s 
-                WHERE id = %s
-            """
-            
-            self.cursor.execute(query, (primary_drug_name, record_id))
-            return True
-            
-        except Error as e:
-            logger.error(f"Error updating record {record_id}: {e}")
-            return False
-    
-    def process_records(self) -> None:
-        """
-        Main processing logic - fetch and update records
-        """
-        records = self.fetch_records_to_update()
-        
-        if not records:
-            logger.info("No records to process")
-            return
-        
-        logger.info("Starting record processing...")
-        
-        for record in records:
-            self.stats['total_processed'] += 1
-            record_id = record['id']
-            drug_name = record['drug_name']
-            
-            if not drug_name or drug_name.strip() == '':
-                logger.warning(f"Record {record_id}: Empty drug_name, skipping")
-                self.stats['skipped'] += 1
-                continue
-            
-            # Normalize the drug name
-            normalized_name = self._normalize_drug_name(drug_name)
-            
-            # Look up in mappings
-            if normalized_name in self.drug_mappings:
-                primary_drug_name = self.drug_mappings[normalized_name]
-                
-                # Update the record
-                if self.update_record(record_id, primary_drug_name):
-                    self.stats['updated'] += 1
-                    logger.info(f"Record {record_id}: '{drug_name}' -> '{primary_drug_name}'")
-                else:
-                    self.stats['errors'] += 1
-            else:
-                # No mapping found - set primary_drug_name = drug_name (original value)
-                if self.update_record(record_id, drug_name):
-                    self.stats['updated'] += 1
-                    logger.info(f"Record {record_id}: No mapping found, set primary_drug_name = '{drug_name}' (original value)")
-                else:
-                    self.stats['errors'] += 1
-                
-                # Still track as unmatched for reporting purposes
-                self.stats['unmatched'].append({
-                    'id': record_id,
-                    'drug_name': drug_name,
-                    'normalized': normalized_name
-                })
-        
-        # Commit all changes
-        try:
-            self.connection.commit()
-            logger.info("All changes committed successfully")
-        except Error as e:
-            logger.error(f"Error committing changes: {e}")
-            self.connection.rollback()
-            logger.info("Changes rolled back")
-    
-    def generate_report(self) -> None:
-        """Generate and save a summary report"""
-        report = f"""
-{'='*80}
-DRUG STANDARDIZATION REPORT
-{'='*80}
-Execution Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-SUMMARY:
---------
-Total Records Processed: {self.stats['total_processed']}
-Successfully Updated:     {self.stats['updated']}
-Skipped (Empty):          {self.stats['skipped']}
-Errors:                   {self.stats['errors']}
-Unmatched:                {len(self.stats['unmatched'])}
-
-"""
-        
-        if self.stats['unmatched']:
-            report += f"\nUNMATCHED DRUG NAMES ({len(self.stats['unmatched'])} records):\n"
-            report += "-" * 80 + "\n"
-            for item in self.stats['unmatched'][:50]:  # Show first 50
-                # Handle both UUID (string) and integer IDs
-                id_str = str(item['id'])
-                report += f"ID: {id_str} | Drug Name: {item['drug_name']}\n"
-            
-            if len(self.stats['unmatched']) > 50:
-                report += f"\n... and {len(self.stats['unmatched']) - 50} more unmatched records\n"
-        
-        report += "=" * 80 + "\n"
-        
-        # Print to console only (no file output)
-        print(report)
-    
-    def close_connection(self) -> None:
-        """Close database connection"""
-        if self.cursor:
-            self.cursor.close()
-        if self.connection:
-            self.connection.close()
-            logger.info("Database connection closed")
-    
-    def run(self) -> None:
-        """Main execution method"""
-        try:
-            logger.info("=" * 80)
-            logger.info("DRUG STANDARDIZATION SCRIPT STARTED")
-            logger.info("=" * 80)
-            
-            # Connect to database
-            if not self.connect_to_database():
-                logger.error("Failed to connect to database. Exiting.")
-                sys.exit(1)
-            
-            # Process records
-            self.process_records()
-            
-            # Generate report
-            self.generate_report()
-            
-            logger.info("=" * 80)
-            logger.info("DRUG STANDARDIZATION SCRIPT COMPLETED")
-            logger.info("=" * 80)
-            
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}", exc_info=True)
-            if self.connection:
-                self.connection.rollback()
-                logger.info("Transaction rolled back due to error")
-        
-        finally:
-            self.close_connection()
+    def run(self):
+        run_standardization()
 
 
 def main():
-    """Entry point of the script"""
-    # Check if .env file exists
-    if not os.path.exists('.env'):
-        print("ERROR: .env file not found!")
-        print("Please create a .env file with database credentials")
-        print("\nExample .env file:")
-        print("-" * 50)
-        print("DB_HOST=192.168.103.106")
-        print("DB_PORT=5432")
-        print("DB_NAME=your_database_name")
-        print("DB_USER=your_username")
-        print("DB_PASSWORD=your_password")
-        print("TABLE_NAME=your_table_name")
-        print("-" * 50)
-        sys.exit(1)
-    
-    # Check if mappings file exists
-    if not os.path.exists('drug_mappings.json'):
-        print("ERROR: drug_mappings.json file not found!")
-        print("Please ensure the drug_mappings.json file is in the same directory")
-        sys.exit(1)
-    
-    # Run the standardizer
-    standardizer = DrugStandardizer()
-    standardizer.run()
+    """Entry point."""
+    run_standardization()
 
 
 if __name__ == "__main__":

@@ -47,8 +47,8 @@ class APIConfig:
             self.api2_base_url = f"http://{host}:3001/api/DOPAMS"
         else:
             # Fallback to env vars if not found in file
-            api2_host = os.getenv('API2_URL', '103.164.200.184')
-            api2_port = os.getenv('API2_PORT', '3001')
+            api2_host = os.getenv('API2_URL')
+            api2_port = os.getenv('API2_PORT')
             self.api2_base_url = f"http://{api2_host}:{api2_port}/api/DOPAMS"
         
         # Extract API key

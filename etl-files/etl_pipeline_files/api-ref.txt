@@ -1,6 +1,6 @@
 crimes api:
- curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/crimes?fromDate=2025-01-01&toDate=2025-01-07' \
-  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+ curl -X GET 'http://YOUR_API_HOST:3000/api/DOPAMS/crimes?fromDate=2025-01-01&toDate=2025-01-07' \
+  -H 'x-api-key: YOUR_API_KEY_HERE'
 
 1.first crimes  api needs to process start date is 2022-01-01 , current date and time.
 2.if you observe crime api there is a limit, so we can get data every 5 days and process 
@@ -14,8 +14,8 @@ crimes api:
 
 persons api:
 example:
-curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/person-details/person_id' \            
--H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+curl -X GET 'http://YOUR_API_HOST:3000/api/DOPAMS/person-details/person_id' \            
+-H 'x-api-key: YOUR_API_KEY_HERE'
 
 1.secod persons api needs to process start.take one by one person id from person table .
 2.pass the person id to person api get person details in that , take the identy details file id and media .
@@ -27,15 +27,15 @@ curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/person-details/person_id' \
 
 
 example:1
-curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/person-details/6925ef36fa8e0b7120c3a695' \            
--H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+curl -X GET 'http://YOUR_API_HOST:3000/api/DOPAMS/person-details/6925ef36fa8e0b7120c3a695' \            
+-H 'x-api-key: YOUR_API_KEY_HERE'
 
 
 property api:
 example:
  
-curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/property-details?fromDate=2025-01-01&toDate=2025-01-07' \                                                  
-  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+curl -X GET 'http://YOUR_API_HOST:3000/api/DOPAMS/property-details?fromDate=2025-01-01&toDate=2025-01-07' \                                                  
+  -H 'x-api-key: YOUR_API_KEY_HERE'
 
 
 1.thrid property api needs to process start date is 2022-01-01 , current date and time.
@@ -53,8 +53,8 @@ Interrogation api:
 example:
 
 interagation api:
-  curl -X GET 'http://103.164.200.184:3000/api/DOPAMS/interrogation-reports/v1/?fromDate=2025-01-01&toDate=2025-01-07' \                                         
-  -H 'x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0'
+  curl -X GET 'http://YOUR_API_HOST:3000/api/DOPAMS/interrogation-reports/v1/?fromDate=2025-01-01&toDate=2025-01-07' \                                         
+  -H 'x-api-key: YOUR_API_KEY_HERE'
 
 
 1.fourth Interrogation api needs to process start date is 2022-01-01 , current date and time.
@@ -69,8 +69,8 @@ interagation api:
 
 mo_seizures api:
 
-curl "http://103.164.200.184:3001/api/DOPAMS/mo-seizures?fromDate=2025-01-06&toDate=2025-01-10" \
-  -H "x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0"
+curl "http://YOUR_API_HOST:3001/api/DOPAMS/mo-seizures?fromDate=2025-01-06&toDate=2025-01-10" \
+  -H "x-api-key: YOUR_API_KEY_HERE"
 
 1.fivefth mo_seizures api needs to process start date is 2022-01-01 , current date and time.
 2.if you observe mo_seizures api there is a limit, so we can get data every 5 days and process 
@@ -85,8 +85,8 @@ curl "http://103.164.200.184:3001/api/DOPAMS/mo-seizures?fromDate=2025-01-06&toD
 
 chargesheets:
 
-curl "http://103.164.200.184:3001/api/DOPAMS/chargesheets?fromDate=2025-01-06&toDate=2025-01-10" \
-  -H "x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0"
+curl "http://YOUR_API_HOST:3001/api/DOPAMS/chargesheets?fromDate=2025-01-06&toDate=2025-01-10" \
+  -H "x-api-key: YOUR_API_KEY_HERE"
 
 uploadChargeSheet : fileId :- 99b2ae18-9741-4622-8502-ec7b7cd20f88
 
@@ -104,8 +104,8 @@ uploadChargeSheet : fileId :- 99b2ae18-9741-4622-8502-ec7b7cd20f88
 
 fsl_case_property:
 
-curl "http://103.164.200.184:3001/api/DOPAMS/case-property?fromDate=2025-01-11&toDate=2025-01-15" \
-  -H "x-api-key: c4127def-da76-4d8d-ad3d-159cea0206a0"
+curl "http://YOUR_API_HOST:3001/api/DOPAMS/case-property?fromDate=2025-01-11&toDate=2025-01-15" \
+  -H "x-api-key: YOUR_API_KEY_HERE"
 
 1.sixth case_property api needs to process start date is 2022-01-01 , current date and time.
 2.if you observe case_property api there is a limit, so we can get data every 5 days and process 
