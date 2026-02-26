@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict flOYeFdlYrld34oiQ78FbqAG5py2jG50fg0fAXDOo1pbCMa8dPchHNsAUKbg7pi
+\restrict xYDNRhfxPaMXKV5i8HhzaINuY9I3ILtbB6JFzuj0bmF2dvMsMXJ2gb32Agotjft
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-1.pgdg24.04+1)
 -- Dumped by pg_dump version 17.6
 
--- Started on 2026-02-26 16:12:07
+-- Started on 2026-02-27 01:44:21
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -30,7 +30,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 
 --
--- TOC entry 4366 (class 0 OID 0)
+-- TOC entry 4373 (class 0 OID 0)
 -- Dependencies: 4
 -- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: 
 --
@@ -47,7 +47,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 
 
 --
--- TOC entry 4367 (class 0 OID 0)
+-- TOC entry 4374 (class 0 OID 0)
 -- Dependencies: 3
 -- Name: EXTENSION "uuid-ossp"; Type: COMMENT; Schema: -; Owner: 
 --
@@ -64,7 +64,7 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 
 --
--- TOC entry 4368 (class 0 OID 0)
+-- TOC entry 4375 (class 0 OID 0)
 -- Dependencies: 2
 -- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: 
 --
@@ -73,7 +73,7 @@ COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access met
 
 
 --
--- TOC entry 1184 (class 1247 OID 1412918)
+-- TOC entry 1181 (class 1247 OID 1412918)
 -- Name: source_field_enum; Type: TYPE; Schema: public; Owner: dev_dopamas
 --
 
@@ -91,7 +91,7 @@ CREATE TYPE public.source_field_enum AS ENUM (
 ALTER TYPE public.source_field_enum OWNER TO dev_dopamas;
 
 --
--- TOC entry 1181 (class 1247 OID 1412908)
+-- TOC entry 1178 (class 1247 OID 1412908)
 -- Name: source_type_enum; Type: TYPE; Schema: public; Owner: dev_dopamas
 --
 
@@ -285,7 +285,7 @@ CREATE FUNCTION public.get_accused_crime_history(target_accused_id character var
 ALTER FUNCTION public.get_accused_crime_history(target_accused_id character varying) OWNER TO dev_dopamas;
 
 --
--- TOC entry 4369 (class 0 OID 0)
+-- TOC entry 4376 (class 0 OID 0)
 -- Dependencies: 445
 -- Name: FUNCTION get_accused_crime_history(target_accused_id character varying); Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -326,7 +326,7 @@ CREATE FUNCTION public.get_person_crime_history(target_person_id character varyi
 ALTER FUNCTION public.get_person_crime_history(target_person_id character varying) OWNER TO dev_dopamas;
 
 --
--- TOC entry 4370 (class 0 OID 0)
+-- TOC entry 4377 (class 0 OID 0)
 -- Dependencies: 446
 -- Name: FUNCTION get_person_crime_history(target_person_id character varying); Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -364,7 +364,7 @@ CREATE FUNCTION public.search_person_by_name(search_name character varying) RETU
 ALTER FUNCTION public.search_person_by_name(search_name character varying) OWNER TO dev_dopamas;
 
 --
--- TOC entry 4371 (class 0 OID 0)
+-- TOC entry 4378 (class 0 OID 0)
 -- Dependencies: 447
 -- Name: FUNCTION search_person_by_name(search_name character varying); Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -410,7 +410,7 @@ CREATE TABLE public.accused (
 ALTER TABLE public.accused OWNER TO dev_dopamas;
 
 --
--- TOC entry 4372 (class 0 OID 0)
+-- TOC entry 4379 (class 0 OID 0)
 -- Dependencies: 229
 -- Name: TABLE accused; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -419,7 +419,7 @@ COMMENT ON TABLE public.accused IS 'Links persons to crimes as accused with phys
 
 
 --
--- TOC entry 4373 (class 0 OID 0)
+-- TOC entry 4380 (class 0 OID 0)
 -- Dependencies: 229
 -- Name: COLUMN accused.person_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -428,7 +428,7 @@ COMMENT ON COLUMN public.accused.person_id IS 'Can be NULL - stub persons are cr
 
 
 --
--- TOC entry 4374 (class 0 OID 0)
+-- TOC entry 4381 (class 0 OID 0)
 -- Dependencies: 229
 -- Name: COLUMN accused.is_ccl; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -502,7 +502,7 @@ CREATE TABLE public.crimes (
 ALTER TABLE public.crimes OWNER TO dev_dopamas;
 
 --
--- TOC entry 4376 (class 0 OID 0)
+-- TOC entry 4383 (class 0 OID 0)
 -- Dependencies: 228
 -- Name: TABLE crimes; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -511,7 +511,7 @@ COMMENT ON TABLE public.crimes IS 'Crime/FIR records registered at police statio
 
 
 --
--- TOC entry 4377 (class 0 OID 0)
+-- TOC entry 4384 (class 0 OID 0)
 -- Dependencies: 228
 -- Name: COLUMN crimes.brief_facts; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -549,7 +549,7 @@ CREATE TABLE public.files (
 ALTER TABLE public.files OWNER TO dev_dopamas;
 
 --
--- TOC entry 4378 (class 0 OID 0)
+-- TOC entry 4385 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: TABLE files; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -558,7 +558,7 @@ COMMENT ON TABLE public.files IS 'Stores file references (UUIDs) from various so
 
 
 --
--- TOC entry 4379 (class 0 OID 0)
+-- TOC entry 4386 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.source_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -567,7 +567,7 @@ COMMENT ON COLUMN public.files.source_type IS 'Type of source: crime, interrogat
 
 
 --
--- TOC entry 4380 (class 0 OID 0)
+-- TOC entry 4387 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.source_field; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -576,7 +576,7 @@ COMMENT ON COLUMN public.files.source_field IS 'Field name from source: FIR_COPY
 
 
 --
--- TOC entry 4381 (class 0 OID 0)
+-- TOC entry 4388 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.parent_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -585,7 +585,7 @@ COMMENT ON COLUMN public.files.parent_id IS 'ID of the parent record (crime_id, 
 
 
 --
--- TOC entry 4382 (class 0 OID 0)
+-- TOC entry 4389 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.file_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -594,7 +594,7 @@ COMMENT ON COLUMN public.files.file_id IS 'The actual file UUID that can be used
 
 
 --
--- TOC entry 4383 (class 0 OID 0)
+-- TOC entry 4390 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.has_field; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -603,7 +603,7 @@ COMMENT ON COLUMN public.files.has_field IS 'TRUE if the field exists in API res
 
 
 --
--- TOC entry 4384 (class 0 OID 0)
+-- TOC entry 4391 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.is_empty; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -612,7 +612,7 @@ COMMENT ON COLUMN public.files.is_empty IS 'TRUE if field exists but is null or 
 
 
 --
--- TOC entry 4385 (class 0 OID 0)
+-- TOC entry 4392 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.file_path; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -621,7 +621,7 @@ COMMENT ON COLUMN public.files.file_path IS 'Relative file path on Tomcat server
 
 
 --
--- TOC entry 4386 (class 0 OID 0)
+-- TOC entry 4393 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.file_url; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -630,7 +630,7 @@ COMMENT ON COLUMN public.files.file_url IS 'Full file URL on Tomcat server (auto
 
 
 --
--- TOC entry 4387 (class 0 OID 0)
+-- TOC entry 4394 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.file_index; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -639,7 +639,7 @@ COMMENT ON COLUMN public.files.file_index IS 'Index position in array (for MEDIA
 
 
 --
--- TOC entry 4388 (class 0 OID 0)
+-- TOC entry 4395 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.identity_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -648,7 +648,7 @@ COMMENT ON COLUMN public.files.identity_type IS 'For IDENTITY_DETAILS: type of i
 
 
 --
--- TOC entry 4389 (class 0 OID 0)
+-- TOC entry 4396 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.identity_number; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -657,7 +657,7 @@ COMMENT ON COLUMN public.files.identity_number IS 'For IDENTITY_DETAILS: identit
 
 
 --
--- TOC entry 4390 (class 0 OID 0)
+-- TOC entry 4397 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.downloaded_at; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -666,7 +666,7 @@ COMMENT ON COLUMN public.files.downloaded_at IS 'Timestamp when file was success
 
 
 --
--- TOC entry 4391 (class 0 OID 0)
+-- TOC entry 4398 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.is_downloaded; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -675,7 +675,7 @@ COMMENT ON COLUMN public.files.is_downloaded IS 'Flag indicating if file has bee
 
 
 --
--- TOC entry 4392 (class 0 OID 0)
+-- TOC entry 4399 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.download_error; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -684,7 +684,7 @@ COMMENT ON COLUMN public.files.download_error IS 'Error message if file download
 
 
 --
--- TOC entry 4393 (class 0 OID 0)
+-- TOC entry 4400 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.download_attempts; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -693,7 +693,7 @@ COMMENT ON COLUMN public.files.download_attempts IS 'Number of download attempts
 
 
 --
--- TOC entry 4394 (class 0 OID 0)
+-- TOC entry 4401 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: COLUMN files.created_at; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -731,7 +731,7 @@ CREATE TABLE public.hierarchy (
 ALTER TABLE public.hierarchy OWNER TO dev_dopamas;
 
 --
--- TOC entry 4395 (class 0 OID 0)
+-- TOC entry 4402 (class 0 OID 0)
 -- Dependencies: 226
 -- Name: TABLE hierarchy; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -801,7 +801,7 @@ CREATE TABLE public.persons (
 ALTER TABLE public.persons OWNER TO dev_dopamas;
 
 --
--- TOC entry 4396 (class 0 OID 0)
+-- TOC entry 4403 (class 0 OID 0)
 -- Dependencies: 227
 -- Name: TABLE persons; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -810,7 +810,7 @@ COMMENT ON TABLE public.persons IS 'Personal details of individuals (accused, vi
 
 
 --
--- TOC entry 278 (class 1259 OID 1421451)
+-- TOC entry 276 (class 1259 OID 1421451)
 -- Name: _persons; Type: VIEW; Schema: public; Owner: dopamasprd_ur
 --
 
@@ -904,7 +904,7 @@ CREATE VIEW public._persons AS
 ALTER VIEW public._persons OWNER TO dopamasprd_ur;
 
 --
--- TOC entry 288 (class 1259 OID 2028663)
+-- TOC entry 285 (class 1259 OID 2028663)
 -- Name: agent_deduplication_tracker; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -926,65 +926,37 @@ CREATE TABLE public.agent_deduplication_tracker (
 ALTER TABLE public.agent_deduplication_tracker OWNER TO dev_dopamas;
 
 --
--- TOC entry 275 (class 1259 OID 1420494)
--- Name: arrests; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.arrests (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    crime_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    accused_seq_no text,
-    accused_code text,
-    accused_type text,
-    is_arrested boolean,
-    arrested_date timestamp with time zone,
-    is_41a_crpc boolean,
-    is_41a_explain_submitted boolean,
-    date_of_issue_41a date,
-    is_ccl boolean,
-    is_apprehended boolean,
-    is_absconding boolean,
-    is_died boolean,
-    date_created timestamp with time zone,
-    date_modified timestamp with time zone
-);
-
-
-ALTER TABLE public.arrests OWNER TO dev_dopamas;
-
---
--- TOC entry 273 (class 1259 OID 1414245)
+-- TOC entry 298 (class 1259 OID 22014293)
 -- Name: brief_facts_drug; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
 CREATE TABLE public.brief_facts_drug (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    crime_id character varying,
-    drug_name character varying(255),
-    quantity_numeric numeric,
-    quantity_unit character varying(50),
-    drug_form character varying(50),
-    packaging_details text,
-    confidence_score integer,
-    standardized_quantity_kg numeric,
-    standardized_unit character varying(20) DEFAULT 'Kg'::character varying,
+    crime_id character varying(50) NOT NULL,
+    accused_id character varying(50),
+    raw_drug_name text NOT NULL,
+    raw_quantity numeric(18,6),
+    raw_unit text,
+    primary_drug_name text NOT NULL,
+    drug_form text,
+    weight_g numeric(18,6),
+    weight_kg numeric(18,6),
+    volume_ml numeric(18,6),
+    volume_l numeric(18,6),
+    count_total numeric(18,6),
+    confidence_score numeric(3,2),
+    extraction_metadata jsonb,
     is_commercial boolean DEFAULT false,
     seizure_worth numeric DEFAULT 0.0,
-    extraction_metadata jsonb,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    standardized_weight_kg numeric,
-    standardized_volume_ml numeric,
-    standardized_count numeric,
-    primary_unit_type character varying(20),
-    primary_drug_name character varying(255)
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
 );
 
 
 ALTER TABLE public.brief_facts_drug OWNER TO dev_dopamas;
 
 --
--- TOC entry 301 (class 1259 OID 20403618)
+-- TOC entry 299 (class 1259 OID 22033565)
 -- Name: accuseds; Type: VIEW; Schema: public; Owner: dev_dopamas
 --
 
@@ -1014,845 +986,158 @@ CREATE VIEW public.accuseds AS
             WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
             ELSE TRIM(BOTH FROM c.case_status)
         END AS "caseStatus",
-    (COALESCE(acccount.count, (0)::bigint))::integer AS "noOfAccusedInvolved",
-    COALESCE(acccount.details, '[]'::jsonb) AS "accusedDetails",
-    NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) AS "accusedCode",
-    NULLIF(TRIM(BOTH FROM a.seq_num), ''::text) AS "seqNum",
-    a.is_ccl AS "isCCL",
-    NULLIF(TRIM(BOTH FROM a.beard), ''::text) AS beard,
-    NULLIF(TRIM(BOTH FROM a.build), ''::text) AS build,
-    NULLIF(TRIM(BOTH FROM a.color), ''::text) AS color,
-    NULLIF(TRIM(BOTH FROM a.ear), ''::text) AS ear,
-    NULLIF(TRIM(BOTH FROM a.eyes), ''::text) AS eyes,
-    NULLIF(TRIM(BOTH FROM a.face), ''::text) AS face,
-    NULLIF(TRIM(BOTH FROM a.hair), ''::text) AS hair,
-    NULLIF(TRIM(BOTH FROM a.height), ''::text) AS height,
-    NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text) AS leucoderma,
-    NULLIF(TRIM(BOTH FROM a.mole), ''::text) AS mole,
-    NULLIF(TRIM(BOTH FROM a.mustache), ''::text) AS mustache,
-    NULLIF(TRIM(BOTH FROM a.nose), ''::text) AS nose,
-    NULLIF(TRIM(BOTH FROM a.teeth), ''::text) AS teeth,
-        CASE
-            WHEN (ar.arrested_date IS NOT NULL) THEN 'Arrested'::text
-            WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_apprehended IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
-            WHEN (ar.is_died IS TRUE) THEN 'Died'::text
-            WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.status))
-        END AS "accusedStatus",
-        CASE
-            WHEN ((bfa.accused_type IS NULL) OR (TRIM(BOTH FROM bfa.accused_type) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.accused_type))
-        END AS "accusedType",
-    NULLIF(TRIM(BOTH FROM p.name), ''::text) AS name,
-    NULLIF(TRIM(BOTH FROM p.surname), ''::text) AS surname,
-    NULLIF(TRIM(BOTH FROM p.alias), ''::text) AS alias,
-    NULLIF(TRIM(BOTH FROM p.full_name), ''::text) AS "fullName",
-    NULLIF(TRIM(BOTH FROM p.relative_name), ''::text) AS parentage,
-    NULLIF(TRIM(BOTH FROM p.relation_type), ''::text) AS "relationType",
-        CASE
-            WHEN ((p.gender IS NULL) OR (TRIM(BOTH FROM p.gender) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.gender)
-        END AS gender,
-    p.is_died AS "isDied",
-    p.date_of_birth AS "dateOfBirth",
-    p.age,
-        CASE
-            WHEN ((p.domicile_classification IS NULL) OR (TRIM(BOTH FROM p.domicile_classification) = ''::text)) THEN 'Unknown'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'NATIVE STATE'::text) THEN 'Telangana'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTER STATE'::text) THEN 'Other State'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTERNATIONAL'::text) THEN 'Foreign Nationals'::text
-            ELSE TRIM(BOTH FROM p.domicile_classification)
-        END AS domicile,
-    NULLIF(TRIM(BOTH FROM p.occupation), ''::text) AS occupation,
-    NULLIF(TRIM(BOTH FROM p.education_qualification), ''::text) AS "educationQualification",
-    NULLIF(TRIM(BOTH FROM p.caste), ''::text) AS caste,
-    NULLIF(TRIM(BOTH FROM p.sub_caste), ''::text) AS "subCaste",
-    NULLIF(TRIM(BOTH FROM p.religion), ''::text) AS religion,
-        CASE
-            WHEN ((p.nationality IS NULL) OR (TRIM(BOTH FROM p.nationality) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.nationality)
-        END AS nationality,
-    NULLIF(TRIM(BOTH FROM p.designation), ''::text) AS designation,
-    NULLIF(TRIM(BOTH FROM p.place_of_work), ''::text) AS "placeOfWork",
-    NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text) AS "presentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text) AS "presentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text) AS "presentWardColony",
-    NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text) AS "presentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text) AS "presentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text) AS "presentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.present_district), ''::text) AS "presentDistrict",
-        CASE
-            WHEN ((p.present_state_ut IS NULL) OR (TRIM(BOTH FROM p.present_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.present_state_ut)
-        END AS "presentStateUt",
-    NULLIF(TRIM(BOTH FROM p.present_country), ''::text) AS "presentCountry",
-    NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text) AS "presentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text) AS "presentPinCode",
-    NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text) AS "presentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text) AS "permanentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text) AS "permanentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text) AS "permanentWardColony",
-    NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text) AS "permanentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text) AS "permanentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text) AS "permanentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text) AS "permanentDistrict",
-        CASE
-            WHEN ((p.permanent_state_ut IS NULL) OR (TRIM(BOTH FROM p.permanent_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.permanent_state_ut)
-        END AS "permanentStateUt",
-    NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text) AS "permanentCountry",
-    NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text) AS "permanentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text) AS "permanentPinCode",
-    NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text) AS "permanentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.phone_number), ''::text) AS "phoneNumber",
-    NULLIF(TRIM(BOTH FROM p.country_code), ''::text) AS "countryCode",
-    NULLIF(TRIM(BOTH FROM p.email_id), ''::text) AS "emailId",
-    (COALESCE(crimecount.count, (0)::bigint))::integer AS "noOfCrimes",
-    COALESCE(prevcases.cases, '[]'::jsonb) AS "previouslyInvolvedCases",
-    COALESCE(drug_types.types, '{}'::text[]) AS "drugType",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity"
-   FROM (((((((((((public.accused a
+    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity",
+    p.full_name AS "fullName"
+   FROM (((((public.accused a
      LEFT JOIN public.agent_deduplication_tracker adt_main ON (((a.person_id)::text = ANY (adt_main.all_person_ids))))
      LEFT JOIN public.persons p ON (((p.person_id)::text = (a.person_id)::text)))
      LEFT JOIN public.crimes c ON (((c.crime_id)::text = (a.crime_id)::text)))
-     LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (c.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
      LEFT JOIN public.hierarchy h ON (((h.ps_code)::text = (c.ps_code)::text)))
-     LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-     LEFT JOIN ( SELECT c1.crime_id,
-            count(a1.accused_id) AS count,
-            jsonb_agg(jsonb_build_object('id', p1.person_id, 'accusedId', a1.accused_id, 'accusedCode', NULLIF(TRIM(BOTH FROM a1.accused_code), ''::text), 'seqNum', NULLIF(TRIM(BOTH FROM a1.seq_num), ''::text), 'isCCL', a1.is_ccl, 'beard', NULLIF(TRIM(BOTH FROM a1.beard), ''::text), 'build', NULLIF(TRIM(BOTH FROM a1.build), ''::text), 'color', NULLIF(TRIM(BOTH FROM a1.color), ''::text), 'ear', NULLIF(TRIM(BOTH FROM a1.ear), ''::text), 'eyes', NULLIF(TRIM(BOTH FROM a1.eyes), ''::text), 'face', NULLIF(TRIM(BOTH FROM a1.face), ''::text), 'hair', NULLIF(TRIM(BOTH FROM a1.hair), ''::text), 'height', NULLIF(TRIM(BOTH FROM a1.height), ''::text), 'leucoderma', NULLIF(TRIM(BOTH FROM a1.leucoderma), ''::text), 'mole', NULLIF(TRIM(BOTH FROM a1.mole), ''::text), 'mustache', NULLIF(TRIM(BOTH FROM a1.mustache), ''::text), 'nose', NULLIF(TRIM(BOTH FROM a1.nose), ''::text), 'teeth', NULLIF(TRIM(BOTH FROM a1.teeth), ''::text), 'name', NULLIF(TRIM(BOTH FROM (p1.name)::text), ''::text), 'surname', NULLIF(TRIM(BOTH FROM (p1.surname)::text), ''::text), 'alias', NULLIF(TRIM(BOTH FROM (p1.alias)::text), ''::text), 'fullName', NULLIF(TRIM(BOTH FROM (p1.full_name)::text), ''::text), 'relativeName', NULLIF(TRIM(BOTH FROM (p1.relative_name)::text), ''::text), 'emailId', NULLIF(TRIM(BOTH FROM (p1.email_id)::text), ''::text), 'status', NULLIF(TRIM(BOTH FROM (bfa1.status)::text), ''::text), 'type', NULLIF(TRIM(BOTH FROM (bfa1.accused_type)::text), ''::text), 'value', COALESCE(NULLIF(TRIM(BOTH FROM COALESCE(p1.full_name, p1.name)), ''::text), ''::text), 'houseNo', NULLIF(TRIM(BOTH FROM p1.permanent_house_no), ''::text), 'streetRoadNo', NULLIF(TRIM(BOTH FROM p1.permanent_street_road_no), ''::text), 'wardColony', NULLIF(TRIM(BOTH FROM p1.permanent_ward_colony), ''::text), 'landmarkMilestone', NULLIF(TRIM(BOTH FROM p1.permanent_landmark_milestone), ''::text), 'localityVillage', NULLIF(TRIM(BOTH FROM p1.permanent_locality_village), ''::text), 'areaMandal', NULLIF(TRIM(BOTH FROM p1.permanent_area_mandal), ''::text), 'district', NULLIF(TRIM(BOTH FROM p1.permanent_district), ''::text), 'stateUT', NULLIF(TRIM(BOTH FROM p1.permanent_state_ut), ''::text), 'country', NULLIF(TRIM(BOTH FROM p1.permanent_country), ''::text), 'residencyType', NULLIF(TRIM(BOTH FROM p1.permanent_residency_type), ''::text), 'pinCode', NULLIF(TRIM(BOTH FROM p1.permanent_pin_code), ''::text), 'jurisdictionPS', NULLIF(TRIM(BOTH FROM p1.permanent_jurisdiction_ps), ''::text))) AS details
-           FROM ((((public.accused a1
-             JOIN public.crimes c1 ON (((c1.crime_id)::text = (a1.crime_id)::text)))
-             JOIN public.agent_deduplication_tracker adt1 ON (((a1.person_id)::text = ANY (adt1.all_person_ids))))
-             LEFT JOIN public.persons p1 ON (((p1.person_id)::text = (a1.person_id)::text)))
-             LEFT JOIN public.brief_facts_accused bfa1 ON (((bfa1.accused_id)::text = (a1.accused_id)::text)))
-          GROUP BY c1.crime_id) acccount ON (((acccount.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT COALESCE(adt2.canonical_person_id, a2.person_id) AS person_id,
-            count(a2.accused_id) AS count
-           FROM ((public.accused a2
-             LEFT JOIN public.agent_deduplication_tracker adt2 ON (((a2.person_id)::text = ANY (adt2.all_person_ids))))
-             LEFT JOIN public.persons p2 ON (((p2.person_id)::text = (a2.person_id)::text)))
-          GROUP BY COALESCE(adt2.canonical_person_id, a2.person_id)) crimecount ON (((crimecount.person_id)::text = (COALESCE(adt_main.canonical_person_id, a.person_id))::text)))
-     LEFT JOIN ( SELECT COALESCE(adt3.canonical_person_id, a3.person_id) AS person_id,
-            jsonb_agg(jsonb_build_object('id', c3.crime_id, 'value', concat(COALESCE(NULLIF(TRIM(BOTH FROM c3.fir_num), ''::text), ''::text), ' of ', COALESCE(NULLIF(TRIM(BOTH FROM h3.ps_name), ''::text), ''::text), ' of ', COALESCE(NULLIF(TRIM(BOTH FROM h3.dist_name), ''::text), ''::text), ' (', COALESCE(NULLIF(TRIM(BOTH FROM c3.case_status), ''::text), ''::text), ')'))) AS cases
-           FROM (((((public.accused a3
-             LEFT JOIN public.agent_deduplication_tracker adt3 ON (((a3.person_id)::text = ANY (adt3.all_person_ids))))
-             LEFT JOIN public.persons p3 ON (((p3.person_id)::text = (a3.person_id)::text)))
-             JOIN public.crimes c3 ON (((c3.crime_id)::text = (a3.crime_id)::text)))
-             LEFT JOIN public.brief_facts_accused b3 ON (((b3.accused_id)::text = (a3.accused_id)::text)))
-             LEFT JOIN public.hierarchy h3 ON (((h3.ps_code)::text = (c3.ps_code)::text)))
-          GROUP BY COALESCE(adt3.canonical_person_id, a3.person_id)) prevcases ON (((prevcases.person_id)::text = (COALESCE(adt_main.canonical_person_id, a.person_id))::text)))
-     LEFT JOIN ( SELECT bfd.crime_id,
-            array_agg(DISTINCT NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text)) AS types
-           FROM public.brief_facts_drug bfd
-          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-          GROUP BY bfd.crime_id) drug_types ON (((drug_types.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT bfd.crime_id,
+     LEFT JOIN ( SELECT bfd.accused_id,
             jsonb_agg(jsonb_build_object('name', bfd.primary_drug_name, 'quantity', NULLIF(concat_ws(', '::text,
                 CASE
-                    WHEN ((bfd.standardized_weight_kg IS NOT NULL) AND (bfd.standardized_weight_kg <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_weight_kg, 2))::text), ' Kg')
+                    WHEN (bfd.weight_kg > (0)::numeric) THEN concat(round(bfd.weight_kg, 2), ' Kg')
                     ELSE NULL::text
                 END,
                 CASE
-                    WHEN ((bfd.standardized_volume_ml IS NOT NULL) AND (bfd.standardized_volume_ml <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_volume_ml, 2))::text), ' L')
+                    WHEN (bfd.volume_ml > (0)::numeric) THEN concat(round(bfd.volume_ml, 2), ' Ml')
                     ELSE NULL::text
                 END,
                 CASE
-                    WHEN ((bfd.standardized_count IS NOT NULL) AND (bfd.standardized_count <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_count, 2))::text), ' Packets/Pills')
+                    WHEN (bfd.count_total > (0)::numeric) THEN concat(round(bfd.count_total, 2), ' Units')
                     ELSE NULL::text
-                END), ''::text), 'worth', round((bfd.seizure_worth * (10000000)::numeric), 2))) AS types
+                END), ''::text), 'worth', bfd.seizure_worth)) AS types
            FROM public.brief_facts_drug bfd
-          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-          GROUP BY bfd.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)));
+          WHERE (bfd.accused_id IS NOT NULL)
+          GROUP BY bfd.accused_id) drug_quantities ON (((drug_quantities.accused_id)::text = (a.accused_id)::text)));
 
 
 ALTER VIEW public.accuseds OWNER TO dev_dopamas;
 
 --
--- TOC entry 302 (class 1259 OID 20620839)
+-- TOC entry 301 (class 1259 OID 22033589)
 -- Name: accuseds_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
 --
 
 CREATE MATERIALIZED VIEW public.accuseds_mv AS
- SELECT a.accused_id AS id,
-    c.crime_id AS "crimeId",
-    COALESCE(adt_main.canonical_person_id, a.person_id) AS "personId",
-        CASE
-            WHEN ((h.dist_name IS NULL) OR (TRIM(BOTH FROM h.dist_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.dist_name)
-        END AS unit,
-        CASE
-            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.ps_name)
-        END AS ps,
-    (EXTRACT(year FROM c.fir_date))::integer AS year,
-    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNumber",
-    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
-    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS section,
-    c.fir_date AS "crimeRegDate",
-    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
-        CASE
-            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.class_classification)
-        END AS "caseClassification",
-        CASE
-            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.case_status)
-        END AS "caseStatus",
-    (COALESCE(acccount.count, (0)::bigint))::integer AS "noOfAccusedInvolved",
-    COALESCE(acccount.details, '[]'::jsonb) AS "accusedDetails",
-    NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) AS "accusedCode",
-    NULLIF(TRIM(BOTH FROM a.seq_num), ''::text) AS "seqNum",
-    a.is_ccl AS "isCCL",
-    NULLIF(TRIM(BOTH FROM a.beard), ''::text) AS beard,
-    NULLIF(TRIM(BOTH FROM a.build), ''::text) AS build,
-    NULLIF(TRIM(BOTH FROM a.color), ''::text) AS color,
-    NULLIF(TRIM(BOTH FROM a.ear), ''::text) AS ear,
-    NULLIF(TRIM(BOTH FROM a.eyes), ''::text) AS eyes,
-    NULLIF(TRIM(BOTH FROM a.face), ''::text) AS face,
-    NULLIF(TRIM(BOTH FROM a.hair), ''::text) AS hair,
-    NULLIF(TRIM(BOTH FROM a.height), ''::text) AS height,
-    NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text) AS leucoderma,
-    NULLIF(TRIM(BOTH FROM a.mole), ''::text) AS mole,
-    NULLIF(TRIM(BOTH FROM a.mustache), ''::text) AS mustache,
-    NULLIF(TRIM(BOTH FROM a.nose), ''::text) AS nose,
-    NULLIF(TRIM(BOTH FROM a.teeth), ''::text) AS teeth,
-        CASE
-            WHEN (ar.arrested_date IS NOT NULL) THEN 'Arrested'::text
-            WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_apprehended IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
-            WHEN (ar.is_died IS TRUE) THEN 'Died'::text
-            WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.status))
-        END AS "accusedStatus",
-        CASE
-            WHEN ((bfa.accused_type IS NULL) OR (TRIM(BOTH FROM bfa.accused_type) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.accused_type))
-        END AS "accusedType",
-    NULLIF(TRIM(BOTH FROM p.name), ''::text) AS name,
-    NULLIF(TRIM(BOTH FROM p.surname), ''::text) AS surname,
-    NULLIF(TRIM(BOTH FROM p.alias), ''::text) AS alias,
-    NULLIF(TRIM(BOTH FROM p.full_name), ''::text) AS "fullName",
-    NULLIF(TRIM(BOTH FROM p.relative_name), ''::text) AS parentage,
-    NULLIF(TRIM(BOTH FROM p.relation_type), ''::text) AS "relationType",
-        CASE
-            WHEN ((p.gender IS NULL) OR (TRIM(BOTH FROM p.gender) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.gender)
-        END AS gender,
-    p.is_died AS "isDied",
-    p.date_of_birth AS "dateOfBirth",
-    p.age,
-        CASE
-            WHEN ((p.domicile_classification IS NULL) OR (TRIM(BOTH FROM p.domicile_classification) = ''::text)) THEN 'Unknown'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'NATIVE STATE'::text) THEN 'Telangana'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTER STATE'::text) THEN 'Other State'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTERNATIONAL'::text) THEN 'Foreign Nationals'::text
-            ELSE TRIM(BOTH FROM p.domicile_classification)
-        END AS domicile,
-    NULLIF(TRIM(BOTH FROM p.occupation), ''::text) AS occupation,
-    NULLIF(TRIM(BOTH FROM p.education_qualification), ''::text) AS "educationQualification",
-    NULLIF(TRIM(BOTH FROM p.caste), ''::text) AS caste,
-    NULLIF(TRIM(BOTH FROM p.sub_caste), ''::text) AS "subCaste",
-    NULLIF(TRIM(BOTH FROM p.religion), ''::text) AS religion,
-        CASE
-            WHEN ((p.nationality IS NULL) OR (TRIM(BOTH FROM p.nationality) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.nationality)
-        END AS nationality,
-    NULLIF(TRIM(BOTH FROM p.designation), ''::text) AS designation,
-    NULLIF(TRIM(BOTH FROM p.place_of_work), ''::text) AS "placeOfWork",
-    NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text) AS "presentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text) AS "presentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text) AS "presentWardColony",
-    NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text) AS "presentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text) AS "presentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text) AS "presentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.present_district), ''::text) AS "presentDistrict",
-        CASE
-            WHEN ((p.present_state_ut IS NULL) OR (TRIM(BOTH FROM p.present_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.present_state_ut)
-        END AS "presentStateUt",
-    NULLIF(TRIM(BOTH FROM p.present_country), ''::text) AS "presentCountry",
-    NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text) AS "presentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text) AS "presentPinCode",
-    NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text) AS "presentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text) AS "permanentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text) AS "permanentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text) AS "permanentWardColony",
-    NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text) AS "permanentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text) AS "permanentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text) AS "permanentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text) AS "permanentDistrict",
-        CASE
-            WHEN ((p.permanent_state_ut IS NULL) OR (TRIM(BOTH FROM p.permanent_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.permanent_state_ut)
-        END AS "permanentStateUt",
-    NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text) AS "permanentCountry",
-    NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text) AS "permanentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text) AS "permanentPinCode",
-    NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text) AS "permanentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.phone_number), ''::text) AS "phoneNumber",
-    NULLIF(TRIM(BOTH FROM p.country_code), ''::text) AS "countryCode",
-    NULLIF(TRIM(BOTH FROM p.email_id), ''::text) AS "emailId",
-    (COALESCE(crimecount.count, (0)::bigint))::integer AS "noOfCrimes",
-    COALESCE(prevcases.cases, '[]'::jsonb) AS "previouslyInvolvedCases",
-    COALESCE(drug_types.types, '{}'::text[]) AS "drugType",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity"
-   FROM (((((((((((public.accused a
-     LEFT JOIN public.agent_deduplication_tracker adt_main ON (((a.person_id)::text = ANY (adt_main.all_person_ids))))
-     LEFT JOIN public.persons p ON (((p.person_id)::text = (a.person_id)::text)))
-     LEFT JOIN public.crimes c ON (((c.crime_id)::text = (a.crime_id)::text)))
-     LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (c.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-     LEFT JOIN public.hierarchy h ON (((h.ps_code)::text = (c.ps_code)::text)))
-     LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-     LEFT JOIN ( SELECT c1.crime_id,
-            count(a1.accused_id) AS count,
-            jsonb_agg(jsonb_build_object('id', p1.person_id, 'accusedId', a1.accused_id, 'accusedCode', NULLIF(TRIM(BOTH FROM a1.accused_code), ''::text), 'seqNum', NULLIF(TRIM(BOTH FROM a1.seq_num), ''::text), 'isCCL', a1.is_ccl, 'beard', NULLIF(TRIM(BOTH FROM a1.beard), ''::text), 'build', NULLIF(TRIM(BOTH FROM a1.build), ''::text), 'color', NULLIF(TRIM(BOTH FROM a1.color), ''::text), 'ear', NULLIF(TRIM(BOTH FROM a1.ear), ''::text), 'eyes', NULLIF(TRIM(BOTH FROM a1.eyes), ''::text), 'face', NULLIF(TRIM(BOTH FROM a1.face), ''::text), 'hair', NULLIF(TRIM(BOTH FROM a1.hair), ''::text), 'height', NULLIF(TRIM(BOTH FROM a1.height), ''::text), 'leucoderma', NULLIF(TRIM(BOTH FROM a1.leucoderma), ''::text), 'mole', NULLIF(TRIM(BOTH FROM a1.mole), ''::text), 'mustache', NULLIF(TRIM(BOTH FROM a1.mustache), ''::text), 'nose', NULLIF(TRIM(BOTH FROM a1.nose), ''::text), 'teeth', NULLIF(TRIM(BOTH FROM a1.teeth), ''::text), 'name', NULLIF(TRIM(BOTH FROM (p1.name)::text), ''::text), 'surname', NULLIF(TRIM(BOTH FROM (p1.surname)::text), ''::text), 'alias', NULLIF(TRIM(BOTH FROM (p1.alias)::text), ''::text), 'fullName', NULLIF(TRIM(BOTH FROM (p1.full_name)::text), ''::text), 'relativeName', NULLIF(TRIM(BOTH FROM (p1.relative_name)::text), ''::text), 'emailId', NULLIF(TRIM(BOTH FROM (p1.email_id)::text), ''::text), 'status', NULLIF(TRIM(BOTH FROM (bfa1.status)::text), ''::text), 'type', NULLIF(TRIM(BOTH FROM (bfa1.accused_type)::text), ''::text), 'value', COALESCE(NULLIF(TRIM(BOTH FROM COALESCE(p1.full_name, p1.name)), ''::text), ''::text), 'houseNo', NULLIF(TRIM(BOTH FROM p1.permanent_house_no), ''::text), 'streetRoadNo', NULLIF(TRIM(BOTH FROM p1.permanent_street_road_no), ''::text), 'wardColony', NULLIF(TRIM(BOTH FROM p1.permanent_ward_colony), ''::text), 'landmarkMilestone', NULLIF(TRIM(BOTH FROM p1.permanent_landmark_milestone), ''::text), 'localityVillage', NULLIF(TRIM(BOTH FROM p1.permanent_locality_village), ''::text), 'areaMandal', NULLIF(TRIM(BOTH FROM p1.permanent_area_mandal), ''::text), 'district', NULLIF(TRIM(BOTH FROM p1.permanent_district), ''::text), 'stateUT', NULLIF(TRIM(BOTH FROM p1.permanent_state_ut), ''::text), 'country', NULLIF(TRIM(BOTH FROM p1.permanent_country), ''::text), 'residencyType', NULLIF(TRIM(BOTH FROM p1.permanent_residency_type), ''::text), 'pinCode', NULLIF(TRIM(BOTH FROM p1.permanent_pin_code), ''::text), 'jurisdictionPS', NULLIF(TRIM(BOTH FROM p1.permanent_jurisdiction_ps), ''::text))) AS details
-           FROM ((((public.accused a1
-             JOIN public.crimes c1 ON (((c1.crime_id)::text = (a1.crime_id)::text)))
-             JOIN public.agent_deduplication_tracker adt1 ON (((a1.person_id)::text = ANY (adt1.all_person_ids))))
-             LEFT JOIN public.persons p1 ON (((p1.person_id)::text = (a1.person_id)::text)))
-             LEFT JOIN public.brief_facts_accused bfa1 ON (((bfa1.accused_id)::text = (a1.accused_id)::text)))
-          GROUP BY c1.crime_id) acccount ON (((acccount.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT COALESCE(adt2.canonical_person_id, a2.person_id) AS person_id,
-            count(a2.accused_id) AS count
-           FROM ((public.accused a2
-             LEFT JOIN public.agent_deduplication_tracker adt2 ON (((a2.person_id)::text = ANY (adt2.all_person_ids))))
-             LEFT JOIN public.persons p2 ON (((p2.person_id)::text = (a2.person_id)::text)))
-          GROUP BY COALESCE(adt2.canonical_person_id, a2.person_id)) crimecount ON (((crimecount.person_id)::text = (COALESCE(adt_main.canonical_person_id, a.person_id))::text)))
-     LEFT JOIN ( SELECT COALESCE(adt3.canonical_person_id, a3.person_id) AS person_id,
-            jsonb_agg(jsonb_build_object('id', c3.crime_id, 'value', concat(COALESCE(NULLIF(TRIM(BOTH FROM c3.fir_num), ''::text), ''::text), ' of ', COALESCE(NULLIF(TRIM(BOTH FROM h3.ps_name), ''::text), ''::text), ' of ', COALESCE(NULLIF(TRIM(BOTH FROM h3.dist_name), ''::text), ''::text), ' (', COALESCE(NULLIF(TRIM(BOTH FROM c3.case_status), ''::text), ''::text), ')'))) AS cases
-           FROM (((((public.accused a3
-             LEFT JOIN public.agent_deduplication_tracker adt3 ON (((a3.person_id)::text = ANY (adt3.all_person_ids))))
-             LEFT JOIN public.persons p3 ON (((p3.person_id)::text = (a3.person_id)::text)))
-             JOIN public.crimes c3 ON (((c3.crime_id)::text = (a3.crime_id)::text)))
-             LEFT JOIN public.brief_facts_accused b3 ON (((b3.accused_id)::text = (a3.accused_id)::text)))
-             LEFT JOIN public.hierarchy h3 ON (((h3.ps_code)::text = (c3.ps_code)::text)))
-          GROUP BY COALESCE(adt3.canonical_person_id, a3.person_id)) prevcases ON (((prevcases.person_id)::text = (COALESCE(adt_main.canonical_person_id, a.person_id))::text)))
-     LEFT JOIN ( SELECT bfd.crime_id,
-            array_agg(DISTINCT NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text)) AS types
-           FROM public.brief_facts_drug bfd
-          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-          GROUP BY bfd.crime_id) drug_types ON (((drug_types.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT bfd.crime_id,
-            jsonb_agg(jsonb_build_object('name', bfd.primary_drug_name, 'quantity', NULLIF(concat_ws(', '::text,
-                CASE
-                    WHEN ((bfd.standardized_weight_kg IS NOT NULL) AND (bfd.standardized_weight_kg <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_weight_kg, 2))::text), ' Kg')
-                    ELSE NULL::text
-                END,
-                CASE
-                    WHEN ((bfd.standardized_volume_ml IS NOT NULL) AND (bfd.standardized_volume_ml <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_volume_ml, 2))::text), ' L')
-                    ELSE NULL::text
-                END,
-                CASE
-                    WHEN ((bfd.standardized_count IS NOT NULL) AND (bfd.standardized_count <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_count, 2))::text), ' Packets/Pills')
-                    ELSE NULL::text
-                END), ''::text), 'worth', round((bfd.seizure_worth * (10000000)::numeric), 2))) AS types
-           FROM public.brief_facts_drug bfd
-          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-          GROUP BY bfd.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
+ SELECT id,
+    "crimeId",
+    "personId",
+    unit,
+    ps,
+    year,
+    "firNumber",
+    "firRegNum",
+    section,
+    "crimeRegDate",
+    "briefFacts",
+    "caseClassification",
+    "caseStatus",
+    "drugWithQuantity",
+    "fullName"
+   FROM public.accuseds
   WITH NO DATA;
 
 
 ALTER MATERIALIZED VIEW public.accuseds_mv OWNER TO dev_dopamas;
 
 --
--- TOC entry 283 (class 1259 OID 1422760)
--- Name: advanced_search_accuseds; Type: VIEW; Schema: public; Owner: dopamasprd_ur
+-- TOC entry 304 (class 1259 OID 22052684)
+-- Name: advanced_search_accuseds; Type: VIEW; Schema: public; Owner: dev_dopamas
 --
 
 CREATE VIEW public.advanced_search_accuseds AS
- SELECT NULLIF(TRIM(BOTH FROM c.crime_id), ''::text) AS id,
-    NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) AS "accusedCode",
-    NULLIF(TRIM(BOTH FROM a.type), ''::text) AS type,
-    NULLIF(TRIM(BOTH FROM a.seq_num), ''::text) AS "seqNum",
-    a.is_ccl AS "isCCL",
-    NULLIF(TRIM(BOTH FROM a.beard), ''::text) AS beard,
-    NULLIF(TRIM(BOTH FROM a.build), ''::text) AS build,
-    NULLIF(TRIM(BOTH FROM a.color), ''::text) AS color,
-    NULLIF(TRIM(BOTH FROM a.ear), ''::text) AS ear,
-    NULLIF(TRIM(BOTH FROM a.eyes), ''::text) AS eyes,
-    NULLIF(TRIM(BOTH FROM a.face), ''::text) AS face,
-    NULLIF(TRIM(BOTH FROM a.hair), ''::text) AS hair,
-    NULLIF(TRIM(BOTH FROM a.height), ''::text) AS height,
-    NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text) AS leucoderma,
-    NULLIF(TRIM(BOTH FROM a.mole), ''::text) AS mole,
-    NULLIF(TRIM(BOTH FROM a.mustache), ''::text) AS mustache,
-    NULLIF(TRIM(BOTH FROM a.nose), ''::text) AS nose,
-    NULLIF(TRIM(BOTH FROM a.teeth), ''::text) AS teeth,
-        CASE
-            WHEN ((bfa.accused_type IS NULL) OR (TRIM(BOTH FROM bfa.accused_type) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.accused_type))
-        END AS "accusedType",
-        CASE
-            WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_apprehended IS TRUE) THEN 'Apprehended'::text
-            WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
-            WHEN (ar.is_died IS TRUE) THEN 'Died'::text
-            WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.status))
-        END AS "accusedStatus",
-    NULLIF(TRIM(BOTH FROM c.ps_code), ''::text) AS "psCode",
-    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNum",
-    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
-    NULLIF(TRIM(BOTH FROM c.fir_type), ''::text) AS "firType",
-    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS sections,
-    c.fir_date AS "firDate",
-        CASE
-            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.case_status)
-        END AS "caseStatus",
-        CASE
-            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.class_classification)
-        END AS "caseClass",
-    NULLIF(TRIM(BOTH FROM c.major_head), ''::text) AS "majorHead",
-    NULLIF(TRIM(BOTH FROM c.minor_head), ''::text) AS "minorHead",
-    NULLIF(TRIM(BOTH FROM c.crime_type), ''::text) AS "crimeType",
-    NULLIF(TRIM(BOTH FROM c.io_name), ''::text) AS "ioName",
-    NULLIF(TRIM(BOTH FROM c.io_rank), ''::text) AS "ioRank",
-    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
-    NULLIF(TRIM(BOTH FROM h.ps_name), ''::text) AS "psName",
-    NULLIF(TRIM(BOTH FROM h.circle_code), ''::text) AS "circleCode",
-    NULLIF(TRIM(BOTH FROM h.circle_name), ''::text) AS "circleName",
-    NULLIF(TRIM(BOTH FROM h.sdpo_code), ''::text) AS "sdpoCode",
-    NULLIF(TRIM(BOTH FROM h.sdpo_name), ''::text) AS "sdpoName",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_code), ''::text) AS "subZoneCode",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_name), ''::text) AS "subZoneName",
-    NULLIF(TRIM(BOTH FROM h.dist_code), ''::text) AS "distCode",
-    NULLIF(TRIM(BOTH FROM h.dist_name), ''::text) AS "distName",
-    NULLIF(TRIM(BOTH FROM h.range_code), ''::text) AS "rangeCode",
-    NULLIF(TRIM(BOTH FROM h.range_name), ''::text) AS "rangeName",
-    NULLIF(TRIM(BOTH FROM h.zone_code), ''::text) AS "zoneCode",
-    NULLIF(TRIM(BOTH FROM h.zone_name), ''::text) AS "zoneName",
-    NULLIF(TRIM(BOTH FROM h.adg_code), ''::text) AS "adgCode",
-    NULLIF(TRIM(BOTH FROM h.adg_name), ''::text) AS "adgName",
-    NULLIF(TRIM(BOTH FROM p.name), ''::text) AS name,
-    NULLIF(TRIM(BOTH FROM p.surname), ''::text) AS surname,
-    NULLIF(TRIM(BOTH FROM p.alias), ''::text) AS alias,
-    NULLIF(TRIM(BOTH FROM p.full_name), ''::text) AS "fullName",
-    NULLIF(TRIM(BOTH FROM p.relation_type), ''::text) AS "relationType",
-    NULLIF(TRIM(BOTH FROM p.relative_name), ''::text) AS "relativeName",
-        CASE
-            WHEN ((p.gender IS NULL) OR (TRIM(BOTH FROM p.gender) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.gender)
-        END AS gender,
-    p.is_died AS "isDied",
-    p.date_of_birth AS "dateOfBirth",
-        CASE
-            WHEN (p.age IS NULL) THEN '-100'::integer
-            ELSE p.age
-        END AS age,
-    NULLIF(TRIM(BOTH FROM p.occupation), ''::text) AS occupation,
-    NULLIF(TRIM(BOTH FROM p.education_qualification), ''::text) AS "educationQualification",
-    NULLIF(TRIM(BOTH FROM p.caste), ''::text) AS caste,
-    NULLIF(TRIM(BOTH FROM p.sub_caste), ''::text) AS "subCaste",
-    NULLIF(TRIM(BOTH FROM p.religion), ''::text) AS religion,
-        CASE
-            WHEN ((p.domicile_classification IS NULL) OR (TRIM(BOTH FROM p.domicile_classification) = ''::text)) THEN 'Unknown'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'NATIVE STATE'::text) THEN 'Telangana'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTER STATE'::text) THEN 'Other State'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTERNATIONAL'::text) THEN 'Foreign Nationals'::text
-            ELSE TRIM(BOTH FROM p.domicile_classification)
-        END AS domicile,
-        CASE
-            WHEN ((p.nationality IS NULL) OR (TRIM(BOTH FROM p.nationality) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.nationality)
-        END AS nationality,
-    NULLIF(TRIM(BOTH FROM p.designation), ''::text) AS designation,
-    NULLIF(TRIM(BOTH FROM p.place_of_work), ''::text) AS "placeOfWork",
-    NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text) AS "presentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text) AS "presentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text) AS "presentWardColony",
-    NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text) AS "presentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text) AS "presentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text) AS "presentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.present_district), ''::text) AS "presentDistrict",
-        CASE
-            WHEN ((p.present_state_ut IS NULL) OR (TRIM(BOTH FROM p.present_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.present_state_ut)
-        END AS "presentStateUt",
-    NULLIF(TRIM(BOTH FROM p.present_country), ''::text) AS "presentCountry",
-    NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text) AS "presentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text) AS "presentPinCode",
-    NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text) AS "presentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text) AS "permanentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text) AS "permanentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text) AS "permanentWardColony",
-    NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text) AS "permanentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text) AS "permanentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text) AS "permanentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text) AS "permanentDistrict",
-        CASE
-            WHEN ((p.permanent_state_ut IS NULL) OR (TRIM(BOTH FROM p.permanent_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.permanent_state_ut)
-        END AS "permanentStateUt",
-    NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text) AS "permanentCountry",
-    NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text) AS "permanentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text) AS "permanentPinCode",
-    NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text) AS "permanentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.phone_number), ''::text) AS "phoneNumber",
-    NULLIF(TRIM(BOTH FROM p.country_code), ''::text) AS "countryCode",
-    NULLIF(TRIM(BOTH FROM p.email_id), ''::text) AS "emailId",
-    TRIM(BOTH FROM concat_ws(', '::text, NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text), NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text), NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text), NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text), NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text), NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text), NULLIF(TRIM(BOTH FROM p.present_district), ''::text), NULLIF(TRIM(BOTH FROM p.present_state_ut), ''::text), NULLIF(TRIM(BOTH FROM p.present_country), ''::text), NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text), NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text), NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text))) AS "presentAddress",
-    TRIM(BOTH FROM concat_ws(', '::text, NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_state_ut), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text))) AS "permanentAddress",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugDetails",
-        CASE
-            WHEN (c.fir_date IS NULL) THEN NULL::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (0)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (30)::double precision)) THEN '0 - 30 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (30)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (60)::double precision)) THEN '31 - 60 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (60)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (90)::double precision)) THEN '61 - 90 Days'::text
-            WHEN (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (90)::double precision) THEN 'More than 90 Days'::text
-            ELSE NULL::text
-        END AS "stipulatedPeriodForCS"
-   FROM ((((((public.accused a
+ SELECT a.accused_id AS id,
+    c.crime_id AS "crimeId",
+    p.full_name AS "fullName",
+    p.age,
+    p.gender,
+    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugDetails"
+   FROM (((public.accused a
      LEFT JOIN public.crimes c ON (((a.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (c.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-     LEFT JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN public.brief_facts_accused bfa ON (((a.accused_id)::text = (bfa.accused_id)::text)))
      LEFT JOIN public.persons p ON (((a.person_id)::text = (p.person_id)::text)))
-     LEFT JOIN ( SELECT q.crime_id,
-            jsonb_agg(jsonb_build_object('name', q.drug_name, 'quantityKg', q.total_quantity_kg, 'quantityMl', q.total_quantity_ml, 'quantityCount', q.total_quantity_count, 'worth', q.total_worth)) AS types
-           FROM ( SELECT bfd.crime_id,
-                    bfd.drug_name,
-                    sum(bfd.standardized_weight_kg) AS total_quantity_kg,
-                    sum(bfd.standardized_volume_ml) AS total_quantity_ml,
-                    sum(bfd.standardized_count) AS total_quantity_count,
-                    sum(bfd.seizure_worth) AS total_worth
+     LEFT JOIN ( SELECT aggregated.accused_id,
+            jsonb_agg(jsonb_build_object('name', aggregated.primary_drug_name, 'quantityKg', aggregated.total_kg, 'quantityUnits', aggregated.total_count)) AS types
+           FROM ( SELECT bfd.accused_id,
+                    bfd.primary_drug_name,
+                    sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_kg,
+                    sum(COALESCE(bfd.count_total, (0)::numeric)) AS total_count
                    FROM public.brief_facts_drug bfd
-                  WHERE (NULLIF(TRIM(BOTH FROM bfd.drug_name), ''::text) IS NOT NULL)
-                  GROUP BY bfd.crime_id, bfd.drug_name) q
-          GROUP BY q.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)));
+                  WHERE (bfd.accused_id IS NOT NULL)
+                  GROUP BY bfd.accused_id, bfd.primary_drug_name) aggregated
+          GROUP BY aggregated.accused_id) drug_quantities ON (((drug_quantities.accused_id)::text = (a.accused_id)::text)));
 
 
-ALTER VIEW public.advanced_search_accuseds OWNER TO dopamasprd_ur;
+ALTER VIEW public.advanced_search_accuseds OWNER TO dev_dopamas;
 
 --
--- TOC entry 297 (class 1259 OID 10097286)
--- Name: advanced_search_accuseds_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: postgres
+-- TOC entry 306 (class 1259 OID 22052698)
+-- Name: advanced_search_accuseds_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
 --
 
 CREATE MATERIALIZED VIEW public.advanced_search_accuseds_mv AS
- SELECT NULLIF(TRIM(BOTH FROM c.crime_id), ''::text) AS id,
-    NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) AS "accusedCode",
-    NULLIF(TRIM(BOTH FROM a.type), ''::text) AS type,
-    NULLIF(TRIM(BOTH FROM a.seq_num), ''::text) AS "seqNum",
-    a.is_ccl AS "isCCL",
-    NULLIF(TRIM(BOTH FROM a.beard), ''::text) AS beard,
-    NULLIF(TRIM(BOTH FROM a.build), ''::text) AS build,
-    NULLIF(TRIM(BOTH FROM a.color), ''::text) AS color,
-    NULLIF(TRIM(BOTH FROM a.ear), ''::text) AS ear,
-    NULLIF(TRIM(BOTH FROM a.eyes), ''::text) AS eyes,
-    NULLIF(TRIM(BOTH FROM a.face), ''::text) AS face,
-    NULLIF(TRIM(BOTH FROM a.hair), ''::text) AS hair,
-    NULLIF(TRIM(BOTH FROM a.height), ''::text) AS height,
-    NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text) AS leucoderma,
-    NULLIF(TRIM(BOTH FROM a.mole), ''::text) AS mole,
-    NULLIF(TRIM(BOTH FROM a.mustache), ''::text) AS mustache,
-    NULLIF(TRIM(BOTH FROM a.nose), ''::text) AS nose,
-    NULLIF(TRIM(BOTH FROM a.teeth), ''::text) AS teeth,
-        CASE
-            WHEN ((bfa.accused_type IS NULL) OR (TRIM(BOTH FROM bfa.accused_type) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.accused_type))
-        END AS "accusedType",
-        CASE
-            WHEN (ar.arrested_date IS NOT NULL) THEN 'Arrested'::text
-            WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_apprehended IS TRUE) THEN 'Arrested'::text
-            WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
-            WHEN (ar.is_died IS TRUE) THEN 'Died'::text
-            WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
-            ELSE initcap(TRIM(BOTH FROM bfa.status))
-        END AS "accusedStatus",
-    NULLIF(TRIM(BOTH FROM c.ps_code), ''::text) AS "psCode",
-    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNum",
-    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
-    NULLIF(TRIM(BOTH FROM c.fir_type), ''::text) AS "firType",
-    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS sections,
-    c.fir_date AS "firDate",
-    NULLIF(TRIM(BOTH FROM c.major_head), ''::text) AS "majorHead",
-    NULLIF(TRIM(BOTH FROM c.minor_head), ''::text) AS "minorHead",
-    NULLIF(TRIM(BOTH FROM c.crime_type), ''::text) AS "crimeType",
-    NULLIF(TRIM(BOTH FROM c.io_name), ''::text) AS "ioName",
-    NULLIF(TRIM(BOTH FROM c.io_rank), ''::text) AS "ioRank",
-    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
-        CASE
-            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.case_status)
-        END AS "caseStatus",
-        CASE
-            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.class_classification)
-        END AS "caseClass",
-        CASE
-            WHEN (c.fir_date IS NULL) THEN NULL::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (0)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (30)::double precision)) THEN '0 - 30 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (30)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (60)::double precision)) THEN '31 - 60 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (60)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (90)::double precision)) THEN '61 - 90 Days'::text
-            WHEN (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (90)::double precision) THEN 'More than 90 Days'::text
-            ELSE NULL::text
-        END AS "stipulatedPeriodForCS",
-        CASE
-            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.ps_name)
-        END AS "psName",
-    NULLIF(TRIM(BOTH FROM h.circle_code), ''::text) AS "circleCode",
-    NULLIF(TRIM(BOTH FROM h.circle_name), ''::text) AS "circleName",
-    NULLIF(TRIM(BOTH FROM h.sdpo_code), ''::text) AS "sdpoCode",
-    NULLIF(TRIM(BOTH FROM h.sdpo_name), ''::text) AS "sdpoName",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_code), ''::text) AS "subZoneCode",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_name), ''::text) AS "subZoneName",
-    NULLIF(TRIM(BOTH FROM h.dist_code), ''::text) AS "distCode",
-        CASE
-            WHEN ((h.dist_name IS NULL) OR (TRIM(BOTH FROM h.dist_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.dist_name)
-        END AS "distName",
-    NULLIF(TRIM(BOTH FROM h.range_code), ''::text) AS "rangeCode",
-    NULLIF(TRIM(BOTH FROM h.range_name), ''::text) AS "rangeName",
-    NULLIF(TRIM(BOTH FROM h.zone_code), ''::text) AS "zoneCode",
-    NULLIF(TRIM(BOTH FROM h.zone_name), ''::text) AS "zoneName",
-    NULLIF(TRIM(BOTH FROM h.adg_code), ''::text) AS "adgCode",
-    NULLIF(TRIM(BOTH FROM h.adg_name), ''::text) AS "adgName",
-    NULLIF(TRIM(BOTH FROM p.name), ''::text) AS name,
-    NULLIF(TRIM(BOTH FROM p.surname), ''::text) AS surname,
-    NULLIF(TRIM(BOTH FROM p.alias), ''::text) AS alias,
-    NULLIF(TRIM(BOTH FROM p.full_name), ''::text) AS "fullName",
-    NULLIF(TRIM(BOTH FROM p.relation_type), ''::text) AS "relationType",
-    NULLIF(TRIM(BOTH FROM p.relative_name), ''::text) AS "relativeName",
-        CASE
-            WHEN ((p.gender IS NULL) OR (TRIM(BOTH FROM p.gender) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.gender)
-        END AS gender,
-    p.is_died AS "isDied",
-    p.date_of_birth AS "dateOfBirth",
-    p.age,
-        CASE
-            WHEN ((p.domicile_classification IS NULL) OR (TRIM(BOTH FROM p.domicile_classification) = ''::text)) THEN 'Unknown'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'NATIVE STATE'::text) THEN 'Telangana'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTER STATE'::text) THEN 'Other State'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTERNATIONAL'::text) THEN 'Foreign Nationals'::text
-            ELSE TRIM(BOTH FROM p.domicile_classification)
-        END AS domicile,
-    NULLIF(TRIM(BOTH FROM p.occupation), ''::text) AS occupation,
-    NULLIF(TRIM(BOTH FROM p.education_qualification), ''::text) AS "educationQualification",
-    NULLIF(TRIM(BOTH FROM p.caste), ''::text) AS caste,
-    NULLIF(TRIM(BOTH FROM p.sub_caste), ''::text) AS "subCaste",
-    NULLIF(TRIM(BOTH FROM p.religion), ''::text) AS religion,
-        CASE
-            WHEN ((p.nationality IS NULL) OR (TRIM(BOTH FROM p.nationality) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.nationality)
-        END AS nationality,
-    NULLIF(TRIM(BOTH FROM p.designation), ''::text) AS designation,
-    NULLIF(TRIM(BOTH FROM p.place_of_work), ''::text) AS "placeOfWork",
-    NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text) AS "presentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text) AS "presentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text) AS "presentWardColony",
-    NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text) AS "presentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text) AS "presentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text) AS "presentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.present_district), ''::text) AS "presentDistrict",
-        CASE
-            WHEN ((p.present_state_ut IS NULL) OR (TRIM(BOTH FROM p.present_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.present_state_ut)
-        END AS "presentStateUt",
-    NULLIF(TRIM(BOTH FROM p.present_country), ''::text) AS "presentCountry",
-    NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text) AS "presentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text) AS "presentPinCode",
-    NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text) AS "presentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text) AS "permanentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text) AS "permanentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text) AS "permanentWardColony",
-    NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text) AS "permanentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text) AS "permanentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text) AS "permanentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text) AS "permanentDistrict",
-        CASE
-            WHEN ((p.permanent_state_ut IS NULL) OR (TRIM(BOTH FROM p.permanent_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.permanent_state_ut)
-        END AS "permanentStateUt",
-    NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text) AS "permanentCountry",
-    NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text) AS "permanentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text) AS "permanentPinCode",
-    NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text) AS "permanentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.phone_number), ''::text) AS "phoneNumber",
-    NULLIF(TRIM(BOTH FROM p.country_code), ''::text) AS "countryCode",
-    NULLIF(TRIM(BOTH FROM p.email_id), ''::text) AS "emailId",
-    TRIM(BOTH FROM concat_ws(', '::text, NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text), NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text), NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text), NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text), NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text), NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text), NULLIF(TRIM(BOTH FROM p.present_district), ''::text), NULLIF(TRIM(BOTH FROM p.present_state_ut), ''::text), NULLIF(TRIM(BOTH FROM p.present_country), ''::text), NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text), NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text), NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text))) AS "presentAddress",
-    TRIM(BOTH FROM concat_ws(', '::text, NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_state_ut), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text), NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text))) AS "permanentAddress",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugDetails"
-   FROM (((((((public.accused a
-     LEFT JOIN public.agent_deduplication_tracker adt_main ON (((a.person_id)::text = ANY (adt_main.all_person_ids))))
-     LEFT JOIN public.crimes c ON (((a.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (c.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-     LEFT JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN public.brief_facts_accused bfa ON (((a.accused_id)::text = (bfa.accused_id)::text)))
-     LEFT JOIN public.persons p ON (((p.person_id)::text = (COALESCE(adt_main.canonical_person_id, a.person_id))::text)))
-     LEFT JOIN ( SELECT q.crime_id,
-            jsonb_agg(jsonb_build_object('name', q.primary_drug_name, 'quantityKg', q.total_quantity_kg, 'quantityMl', q.total_quantity_ml, 'quantityCount', q.total_quantity_count, 'worth', q.total_worth)) AS types
-           FROM ( SELECT bfd.crime_id,
-                    bfd.primary_drug_name,
-                    round(sum(bfd.standardized_weight_kg), 2) AS total_quantity_kg,
-                    round(sum(bfd.standardized_volume_ml), 2) AS total_quantity_ml,
-                    round(sum(bfd.standardized_count), 2) AS total_quantity_count,
-                    round(sum((bfd.seizure_worth * (10000000)::numeric)), 2) AS total_worth
-                   FROM public.brief_facts_drug bfd
-                  WHERE (NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL)
-                  GROUP BY bfd.crime_id, bfd.primary_drug_name) q
-          GROUP BY q.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
+ SELECT id,
+    "crimeId",
+    "fullName",
+    age,
+    gender,
+    "drugDetails"
+   FROM public.advanced_search_accuseds
   WITH NO DATA;
 
 
-ALTER MATERIALIZED VIEW public.advanced_search_accuseds_mv OWNER TO postgres;
+ALTER MATERIALIZED VIEW public.advanced_search_accuseds_mv OWNER TO dev_dopamas;
 
 --
--- TOC entry 277 (class 1259 OID 1421138)
--- Name: advanced_search_firs; Type: VIEW; Schema: public; Owner: dopamasprd_ur
+-- TOC entry 303 (class 1259 OID 22052679)
+-- Name: advanced_search_firs; Type: VIEW; Schema: public; Owner: dev_dopamas
 --
 
 CREATE VIEW public.advanced_search_firs AS
  SELECT NULLIF(TRIM(BOTH FROM c.crime_id), ''::text) AS id,
-    NULLIF(TRIM(BOTH FROM c.ps_code), ''::text) AS "psCode",
-    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNum",
-    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
-    NULLIF(TRIM(BOTH FROM c.fir_type), ''::text) AS "firType",
-    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS sections,
+    c.fir_num AS "firNum",
     c.fir_date AS "firDate",
-        CASE
-            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.case_status)
-        END AS "caseStatus",
-        CASE
-            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.class_classification)
-        END AS "caseClass",
-    NULLIF(TRIM(BOTH FROM c.major_head), ''::text) AS "majorHead",
-    NULLIF(TRIM(BOTH FROM c.minor_head), ''::text) AS "minorHead",
-    NULLIF(TRIM(BOTH FROM c.crime_type), ''::text) AS "crimeType",
-    NULLIF(TRIM(BOTH FROM c.io_name), ''::text) AS "ioName",
-    NULLIF(TRIM(BOTH FROM c.io_rank), ''::text) AS "ioRank",
-    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
-    NULLIF(TRIM(BOTH FROM h.ps_name), ''::text) AS "psName",
-    NULLIF(TRIM(BOTH FROM h.circle_code), ''::text) AS "circleCode",
-    NULLIF(TRIM(BOTH FROM h.circle_name), ''::text) AS "circleName",
-    NULLIF(TRIM(BOTH FROM h.sdpo_code), ''::text) AS "sdpoCode",
-    NULLIF(TRIM(BOTH FROM h.sdpo_name), ''::text) AS "sdpoName",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_code), ''::text) AS "subZoneCode",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_name), ''::text) AS "subZoneName",
-    NULLIF(TRIM(BOTH FROM h.dist_code), ''::text) AS "distCode",
-    NULLIF(TRIM(BOTH FROM h.dist_name), ''::text) AS "distName",
-    NULLIF(TRIM(BOTH FROM h.range_code), ''::text) AS "rangeCode",
-    NULLIF(TRIM(BOTH FROM h.range_name), ''::text) AS "rangeName",
-    NULLIF(TRIM(BOTH FROM h.zone_code), ''::text) AS "zoneCode",
-    NULLIF(TRIM(BOTH FROM h.zone_name), ''::text) AS "zoneName",
-    NULLIF(TRIM(BOTH FROM h.adg_code), ''::text) AS "adgCode",
-    NULLIF(TRIM(BOTH FROM h.adg_name), ''::text) AS "adgName",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugDetails",
-        CASE
-            WHEN (c.fir_date IS NULL) THEN NULL::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (0)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (30)::double precision)) THEN '0 - 30 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (30)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (60)::double precision)) THEN '31 - 60 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (60)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (90)::double precision)) THEN '61 - 90 Days'::text
-            WHEN (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (90)::double precision) THEN 'More than 90 Days'::text
-            ELSE NULL::text
-        END AS "stipulatedPeriodForCS"
-   FROM ((public.crimes c
-     LEFT JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN ( SELECT q.crime_id,
-            jsonb_agg(jsonb_build_object('name', q.drug_name, 'quantityKg', q.total_quantity_kg, 'quantityMl', q.total_quantity_ml, 'quantityCount', q.total_quantity_count, 'worth', q.total_worth)) AS types
-           FROM ( SELECT bfd.crime_id,
-                    bfd.drug_name,
-                    sum(bfd.standardized_weight_kg) AS total_quantity_kg,
-                    sum(bfd.standardized_volume_ml) AS total_quantity_ml,
-                    sum(bfd.standardized_count) AS total_quantity_count,
-                    sum(bfd.seizure_worth) AS total_worth
-                   FROM public.brief_facts_drug bfd
-                  WHERE (NULLIF(TRIM(BOTH FROM bfd.drug_name), ''::text) IS NOT NULL)
-                  GROUP BY bfd.crime_id, bfd.drug_name) q
-          GROUP BY q.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)));
-
-
-ALTER VIEW public.advanced_search_firs OWNER TO dopamasprd_ur;
-
---
--- TOC entry 298 (class 1259 OID 10097293)
--- Name: advanced_search_firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: postgres
---
-
-CREATE MATERIALIZED VIEW public.advanced_search_firs_mv AS
- SELECT NULLIF(TRIM(BOTH FROM c.crime_id), ''::text) AS id,
-    NULLIF(TRIM(BOTH FROM c.ps_code), ''::text) AS "psCode",
-    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNum",
-    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
-    NULLIF(TRIM(BOTH FROM c.fir_type), ''::text) AS "firType",
-    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS sections,
-    c.fir_date AS "firDate",
-    NULLIF(TRIM(BOTH FROM c.major_head), ''::text) AS "majorHead",
-    NULLIF(TRIM(BOTH FROM c.minor_head), ''::text) AS "minorHead",
-    NULLIF(TRIM(BOTH FROM c.crime_type), ''::text) AS "crimeType",
-    NULLIF(TRIM(BOTH FROM c.io_name), ''::text) AS "ioName",
-    NULLIF(TRIM(BOTH FROM c.io_rank), ''::text) AS "ioRank",
-    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
-        CASE
-            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.case_status)
-        END AS "caseStatus",
-        CASE
-            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.class_classification)
-        END AS "caseClass",
-        CASE
-            WHEN (c.fir_date IS NULL) THEN NULL::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (0)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (30)::double precision)) THEN '0 - 30 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (30)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (60)::double precision)) THEN '31 - 60 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (60)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (90)::double precision)) THEN '61 - 90 Days'::text
-            WHEN (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (90)::double precision) THEN 'More than 90 Days'::text
-            ELSE NULL::text
-        END AS "stipulatedPeriodForCS",
-        CASE
-            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.ps_name)
-        END AS "psName",
-    NULLIF(TRIM(BOTH FROM h.circle_code), ''::text) AS "circleCode",
-    NULLIF(TRIM(BOTH FROM h.circle_name), ''::text) AS "circleName",
-    NULLIF(TRIM(BOTH FROM h.sdpo_code), ''::text) AS "sdpoCode",
-    NULLIF(TRIM(BOTH FROM h.sdpo_name), ''::text) AS "sdpoName",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_code), ''::text) AS "subZoneCode",
-    NULLIF(TRIM(BOTH FROM h.sub_zone_name), ''::text) AS "subZoneName",
-    NULLIF(TRIM(BOTH FROM h.dist_code), ''::text) AS "distCode",
-        CASE
-            WHEN ((h.dist_name IS NULL) OR (TRIM(BOTH FROM h.dist_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.dist_name)
-        END AS "distName",
-    NULLIF(TRIM(BOTH FROM h.range_code), ''::text) AS "rangeCode",
-    NULLIF(TRIM(BOTH FROM h.range_name), ''::text) AS "rangeName",
-    NULLIF(TRIM(BOTH FROM h.zone_code), ''::text) AS "zoneCode",
-    NULLIF(TRIM(BOTH FROM h.zone_name), ''::text) AS "zoneName",
-    NULLIF(TRIM(BOTH FROM h.adg_code), ''::text) AS "adgCode",
-    NULLIF(TRIM(BOTH FROM h.adg_name), ''::text) AS "adgName",
+    c.ps_code AS "psCode",
+    h.ps_name AS "psName",
+    h.dist_name AS "districtName",
     COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugDetails"
    FROM ((public.crimes c
      LEFT JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN ( SELECT q.crime_id,
-            jsonb_agg(jsonb_build_object('name', q.primary_drug_name, 'quantityKg', q.total_quantity_kg, 'quantityMl', q.total_quantity_ml, 'quantityCount', q.total_quantity_count, 'worth', q.total_worth)) AS types
+     LEFT JOIN ( SELECT aggregated.crime_id,
+            jsonb_agg(jsonb_build_object('name', aggregated.primary_drug_name, 'quantityKg', aggregated.total_kg, 'quantityMl', aggregated.total_ml, 'worth', aggregated.total_worth)) AS types
            FROM ( SELECT bfd.crime_id,
                     bfd.primary_drug_name,
-                    round(sum(bfd.standardized_weight_kg), 2) AS total_quantity_kg,
-                    round(sum(bfd.standardized_volume_ml), 2) AS total_quantity_ml,
-                    round(sum(bfd.standardized_count), 2) AS total_quantity_count,
-                    round(sum((bfd.seizure_worth * (10000000)::numeric)), 2) AS total_worth
+                    sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_kg,
+                    sum(COALESCE(bfd.volume_ml, (0)::numeric)) AS total_ml,
+                    sum(COALESCE(bfd.seizure_worth, (0)::numeric)) AS total_worth
                    FROM public.brief_facts_drug bfd
-                  WHERE (NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL)
-                  GROUP BY bfd.crime_id, bfd.primary_drug_name) q
-          GROUP BY q.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
+                  GROUP BY bfd.crime_id, bfd.primary_drug_name) aggregated
+          GROUP BY aggregated.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)));
+
+
+ALTER VIEW public.advanced_search_firs OWNER TO dev_dopamas;
+
+--
+-- TOC entry 305 (class 1259 OID 22052689)
+-- Name: advanced_search_firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
+--
+
+CREATE MATERIALIZED VIEW public.advanced_search_firs_mv AS
+ SELECT id,
+    "firNum",
+    "firDate",
+    "psCode",
+    "psName",
+    "districtName",
+    "drugDetails"
+   FROM public.advanced_search_firs
   WITH NO DATA;
 
 
-ALTER MATERIALIZED VIEW public.advanced_search_firs_mv OWNER TO postgres;
+ALTER MATERIALIZED VIEW public.advanced_search_firs_mv OWNER TO dev_dopamas;
 
 --
--- TOC entry 289 (class 1259 OID 2028671)
+-- TOC entry 286 (class 1259 OID 2028671)
 -- Name: agent_deduplication_tracker_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
 --
 
@@ -1868,13 +1153,41 @@ CREATE SEQUENCE public.agent_deduplication_tracker_id_seq
 ALTER SEQUENCE public.agent_deduplication_tracker_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4400 (class 0 OID 0)
--- Dependencies: 289
+-- TOC entry 4405 (class 0 OID 0)
+-- Dependencies: 286
 -- Name: agent_deduplication_tracker_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
 
 ALTER SEQUENCE public.agent_deduplication_tracker_id_seq OWNED BY public.agent_deduplication_tracker.id;
 
+
+--
+-- TOC entry 274 (class 1259 OID 1420494)
+-- Name: arrests; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.arrests (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    crime_id character varying(50) NOT NULL,
+    person_id character varying(50),
+    accused_seq_no text,
+    accused_code text,
+    accused_type text,
+    is_arrested boolean,
+    arrested_date timestamp with time zone,
+    is_41a_crpc boolean,
+    is_41a_explain_submitted boolean,
+    date_of_issue_41a date,
+    is_ccl boolean,
+    is_apprehended boolean,
+    is_absconding boolean,
+    is_died boolean,
+    date_created timestamp with time zone,
+    date_modified timestamp with time zone
+);
+
+
+ALTER TABLE public.arrests OWNER TO dev_dopamas;
 
 --
 -- TOC entry 262 (class 1259 OID 1404603)
@@ -1952,7 +1265,7 @@ CREATE SEQUENCE public.brief_facts_drugs_id_seq
 ALTER SEQUENCE public.brief_facts_drugs_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4401 (class 0 OID 0)
+-- TOC entry 4406 (class 0 OID 0)
 -- Dependencies: 271
 -- Name: brief_facts_drugs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -1961,7 +1274,7 @@ ALTER SEQUENCE public.brief_facts_drugs_id_seq OWNED BY public.brief_facts_drugs
 
 
 --
--- TOC entry 285 (class 1259 OID 1639314)
+-- TOC entry 282 (class 1259 OID 1639314)
 -- Name: charge_sheet_updates; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -1982,8 +1295,8 @@ CREATE TABLE public.charge_sheet_updates (
 ALTER TABLE public.charge_sheet_updates OWNER TO dev_dopamas;
 
 --
--- TOC entry 4402 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4407 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: TABLE charge_sheet_updates; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -1991,8 +1304,8 @@ COMMENT ON TABLE public.charge_sheet_updates IS 'Stores charge sheet update reco
 
 
 --
--- TOC entry 4403 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4408 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.update_charge_sheet_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2000,8 +1313,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.update_charge_sheet_id IS 'Unique 
 
 
 --
--- TOC entry 4404 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4409 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.crime_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2009,8 +1322,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.crime_id IS 'Reference to the crim
 
 
 --
--- TOC entry 4405 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4410 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.charge_sheet_no; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2018,8 +1331,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.charge_sheet_no IS 'Charge sheet n
 
 
 --
--- TOC entry 4406 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4411 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.charge_sheet_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2027,8 +1340,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.charge_sheet_date IS 'Date when th
 
 
 --
--- TOC entry 4407 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4412 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.charge_sheet_status; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2036,8 +1349,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.charge_sheet_status IS 'Current st
 
 
 --
--- TOC entry 4408 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4413 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.taken_on_file_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2045,8 +1358,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.taken_on_file_date IS 'Date when t
 
 
 --
--- TOC entry 4409 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4414 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.taken_on_file_case_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2054,8 +1367,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.taken_on_file_case_type IS 'Type o
 
 
 --
--- TOC entry 4410 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4415 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.taken_on_file_court_case_no; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2063,8 +1376,8 @@ COMMENT ON COLUMN public.charge_sheet_updates.taken_on_file_court_case_no IS 'Co
 
 
 --
--- TOC entry 4411 (class 0 OID 0)
--- Dependencies: 285
+-- TOC entry 4416 (class 0 OID 0)
+-- Dependencies: 282
 -- Name: COLUMN charge_sheet_updates.date_created; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
@@ -2072,7 +1385,7 @@ COMMENT ON COLUMN public.charge_sheet_updates.date_created IS 'Timestamp when th
 
 
 --
--- TOC entry 284 (class 1259 OID 1639313)
+-- TOC entry 281 (class 1259 OID 1639313)
 -- Name: charge_sheet_updates_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
 --
 
@@ -2088,8 +1401,8 @@ CREATE SEQUENCE public.charge_sheet_updates_id_seq
 ALTER SEQUENCE public.charge_sheet_updates_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4412 (class 0 OID 0)
--- Dependencies: 284
+-- TOC entry 4417 (class 0 OID 0)
+-- Dependencies: 281
 -- Name: charge_sheet_updates_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
 
@@ -2097,7 +1410,7 @@ ALTER SEQUENCE public.charge_sheet_updates_id_seq OWNED BY public.charge_sheet_u
 
 
 --
--- TOC entry 281 (class 1259 OID 1422340)
+-- TOC entry 279 (class 1259 OID 1422340)
 -- Name: chargesheet_accused; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -2116,7 +1429,7 @@ CREATE TABLE public.chargesheet_accused (
 ALTER TABLE public.chargesheet_accused OWNER TO dev_dopamas;
 
 --
--- TOC entry 282 (class 1259 OID 1422360)
+-- TOC entry 280 (class 1259 OID 1422360)
 -- Name: chargesheet_acts; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -2135,7 +1448,7 @@ CREATE TABLE public.chargesheet_acts (
 ALTER TABLE public.chargesheet_acts OWNER TO dev_dopamas;
 
 --
--- TOC entry 280 (class 1259 OID 1422324)
+-- TOC entry 278 (class 1259 OID 1422324)
 -- Name: chargesheet_files; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -2150,7 +1463,7 @@ CREATE TABLE public.chargesheet_files (
 ALTER TABLE public.chargesheet_files OWNER TO dev_dopamas;
 
 --
--- TOC entry 279 (class 1259 OID 1422309)
+-- TOC entry 277 (class 1259 OID 1422309)
 -- Name: chargesheets; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -2170,6 +1483,479 @@ CREATE TABLE public.chargesheets (
 
 
 ALTER TABLE public.chargesheets OWNER TO dev_dopamas;
+
+--
+-- TOC entry 302 (class 1259 OID 22052669)
+-- Name: criminal_profiles_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
+--
+
+CREATE MATERIALIZED VIEW public.criminal_profiles_mv AS
+ SELECT adt.canonical_person_id AS id,
+    p.full_name AS "fullName",
+    p.age,
+    p.gender,
+    COALESCE(drug_summary.associated_drugs, ARRAY[]::text[]) AS "associatedDrugs"
+   FROM ((public.agent_deduplication_tracker adt
+     JOIN public.persons p ON (((p.person_id)::text = (adt.canonical_person_id)::text)))
+     LEFT JOIN LATERAL ( SELECT array_agg(concat(agg.primary_drug_name, ' (', round(agg.total_kg, 2), ' Kg)')) AS associated_drugs
+           FROM ( SELECT bfd.primary_drug_name,
+                    sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_kg
+                   FROM public.brief_facts_drug bfd
+                  WHERE (((bfd.crime_id)::text = ANY (adt.all_crime_ids)) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))
+                  GROUP BY bfd.primary_drug_name) agg) drug_summary ON (true))
+  WITH NO DATA;
+
+
+ALTER MATERIALIZED VIEW public.criminal_profiles_mv OWNER TO dev_dopamas;
+
+--
+-- TOC entry 287 (class 1259 OID 2028672)
+-- Name: dedup_cluster_state; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.dedup_cluster_state (
+    id bigint NOT NULL,
+    cluster_id integer NOT NULL,
+    person_index integer NOT NULL,
+    person_id character varying(50) NOT NULL,
+    is_representative boolean DEFAULT false NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+ALTER TABLE public.dedup_cluster_state OWNER TO dev_dopamas;
+
+--
+-- TOC entry 288 (class 1259 OID 2028677)
+-- Name: dedup_cluster_state_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.dedup_cluster_state_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.dedup_cluster_state_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4418 (class 0 OID 0)
+-- Dependencies: 288
+-- Name: dedup_cluster_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.dedup_cluster_state_id_seq OWNED BY public.dedup_cluster_state.id;
+
+
+--
+-- TOC entry 289 (class 1259 OID 2028678)
+-- Name: dedup_comparison_progress; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.dedup_comparison_progress (
+    id bigint NOT NULL,
+    person_i_index integer NOT NULL,
+    person_j_index integer NOT NULL,
+    person_i_id character varying(50) NOT NULL,
+    person_j_id character varying(50) NOT NULL,
+    match_score_numeric double precision NOT NULL,
+    is_match boolean DEFAULT false NOT NULL,
+    matching_method character varying(100),
+    completed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+ALTER TABLE public.dedup_comparison_progress OWNER TO dev_dopamas;
+
+--
+-- TOC entry 293 (class 1259 OID 10185018)
+-- Name: dedup_comparison_progress_backup; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.dedup_comparison_progress_backup (
+    id bigint,
+    person_i_index integer,
+    person_j_index integer,
+    person_i_id character varying(50),
+    person_j_id character varying(50),
+    match_score_numeric double precision,
+    is_match boolean,
+    matching_method character varying(100),
+    completed_at timestamp without time zone
+);
+
+
+ALTER TABLE public.dedup_comparison_progress_backup OWNER TO dev_dopamas;
+
+--
+-- TOC entry 290 (class 1259 OID 2028683)
+-- Name: dedup_comparison_progress_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.dedup_comparison_progress_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.dedup_comparison_progress_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4419 (class 0 OID 0)
+-- Dependencies: 290
+-- Name: dedup_comparison_progress_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.dedup_comparison_progress_id_seq OWNED BY public.dedup_comparison_progress.id;
+
+
+--
+-- TOC entry 291 (class 1259 OID 2028684)
+-- Name: dedup_run_metadata; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.dedup_run_metadata (
+    id bigint NOT NULL,
+    run_id character varying(50) NOT NULL,
+    total_persons integer NOT NULL,
+    last_processed_index integer DEFAULT 0 NOT NULL,
+    status character varying(20) DEFAULT 'running'::character varying NOT NULL,
+    started_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    completed_at timestamp without time zone
+);
+
+
+ALTER TABLE public.dedup_run_metadata OWNER TO dev_dopamas;
+
+--
+-- TOC entry 292 (class 1259 OID 2028691)
+-- Name: dedup_run_metadata_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.dedup_run_metadata_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.dedup_run_metadata_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4420 (class 0 OID 0)
+-- Dependencies: 292
+-- Name: dedup_run_metadata_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.dedup_run_metadata_id_seq OWNED BY public.dedup_run_metadata.id;
+
+
+--
+-- TOC entry 273 (class 1259 OID 1420054)
+-- Name: disposal; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.disposal (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    crime_id character varying(50) NOT NULL,
+    disposal_type text NOT NULL,
+    disposed_at timestamp with time zone,
+    disposal text,
+    case_status text,
+    date_created timestamp with time zone NOT NULL,
+    date_modified timestamp with time zone NOT NULL
+);
+
+
+ALTER TABLE public.disposal OWNER TO dev_dopamas;
+
+--
+-- TOC entry 295 (class 1259 OID 20996612)
+-- Name: drug_categories; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.drug_categories (
+    id integer NOT NULL,
+    raw_name text NOT NULL,
+    standard_name text NOT NULL,
+    category_group text NOT NULL,
+    is_verified boolean DEFAULT true,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.drug_categories OWNER TO dev_dopamas;
+
+--
+-- TOC entry 294 (class 1259 OID 20996611)
+-- Name: drug_categories_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.drug_categories_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.drug_categories_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4421 (class 0 OID 0)
+-- Dependencies: 294
+-- Name: drug_categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.drug_categories_id_seq OWNED BY public.drug_categories.id;
+
+
+--
+-- TOC entry 297 (class 1259 OID 20996626)
+-- Name: drug_ignore_list; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.drug_ignore_list (
+    id integer NOT NULL,
+    term text NOT NULL,
+    reason text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.drug_ignore_list OWNER TO dev_dopamas;
+
+--
+-- TOC entry 296 (class 1259 OID 20996625)
+-- Name: drug_ignore_list_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.drug_ignore_list_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.drug_ignore_list_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4422 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: drug_ignore_list_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.drug_ignore_list_id_seq OWNED BY public.drug_ignore_list.id;
+
+
+--
+-- TOC entry 266 (class 1259 OID 1412954)
+-- Name: files_summary; Type: VIEW; Schema: public; Owner: dev_dopamas
+--
+
+CREATE VIEW public.files_summary AS
+ SELECT source_type,
+    source_field,
+    count(DISTINCT parent_id) AS parent_records_count,
+    count(*) AS total_files,
+    count(DISTINCT file_id) AS unique_files
+   FROM public.files
+  GROUP BY source_type, source_field;
+
+
+ALTER VIEW public.files_summary OWNER TO dev_dopamas;
+
+--
+-- TOC entry 300 (class 1259 OID 22033580)
+-- Name: firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
+--
+
+CREATE MATERIALIZED VIEW public.firs_mv AS
+ SELECT c.crime_id AS id,
+    c.fir_num AS "firNumber",
+    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity"
+   FROM (public.crimes c
+     LEFT JOIN ( SELECT aggregated.crime_id,
+            jsonb_agg(jsonb_build_object('name', aggregated.primary_drug_name, 'quantity', concat(round(aggregated.total_weight, 2), ' Kg'))) AS types
+           FROM ( SELECT bfd.crime_id,
+                    bfd.primary_drug_name,
+                    sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_weight
+                   FROM public.brief_facts_drug bfd
+                  GROUP BY bfd.crime_id, bfd.primary_drug_name) aggregated
+          GROUP BY aggregated.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
+  WITH NO DATA;
+
+
+ALTER MATERIALIZED VIEW public.firs_mv OWNER TO dev_dopamas;
+
+--
+-- TOC entry 283 (class 1259 OID 1639518)
+-- Name: fsl_case_property; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.fsl_case_property (
+    case_property_id character varying(255) NOT NULL,
+    case_type character varying(100),
+    crime_id character varying(50) NOT NULL,
+    mo_id character varying(255),
+    status character varying(100),
+    send_date timestamp with time zone,
+    fsl_date timestamp with time zone,
+    date_disposal timestamp with time zone,
+    release_date timestamp with time zone,
+    return_date timestamp with time zone,
+    date_custody timestamp with time zone,
+    date_sent_to_expert timestamp with time zone,
+    court_order_date timestamp with time zone,
+    date_created timestamp with time zone,
+    date_modified timestamp with time zone,
+    forwarding_through character varying(255),
+    court_name character varying(500),
+    fsl_court_name character varying(500),
+    cpr_court_name character varying(500),
+    court_order_number character varying(255),
+    fsl_no character varying(255),
+    fsl_request_id character varying(255),
+    report_received boolean DEFAULT false,
+    opinion text,
+    opinion_furnished character varying(255),
+    strength_of_evidence character varying(255),
+    expert_type character varying(255),
+    other_expert_type character varying(255),
+    cpr_no character varying(255),
+    direction_by_court text,
+    details_disposal text,
+    place_disposal character varying(500),
+    release_order_no character varying(255),
+    place_custody character varying(500),
+    assign_custody character varying(255),
+    property_received_back boolean DEFAULT false
+);
+
+
+ALTER TABLE public.fsl_case_property OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4423 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: TABLE fsl_case_property; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.fsl_case_property IS 'Main table storing case property records from DOPAMS API';
+
+
+--
+-- TOC entry 4424 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.case_property_id IS 'Primary key from API (CASE_PROPERTY_ID) - MongoDB ObjectId (24 hex characters)';
+
+
+--
+-- TOC entry 4425 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.crime_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.crime_id IS 'Reference to crime/case (CRIME_ID) - Foreign key to crimes table';
+
+
+--
+-- TOC entry 4426 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.mo_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.mo_id IS 'Material Object ID (MO_ID)';
+
+
+--
+-- TOC entry 4427 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.status; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.status IS 'Current status (e.g., Send To FSL, Send To Court)';
+
+
+--
+-- TOC entry 4428 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.date_created; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.date_created IS 'Record creation timestamp from API (DATE_CREATED)';
+
+
+--
+-- TOC entry 4429 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.date_modified; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.date_modified IS 'Record modification timestamp from API (DATE_MODIFIED)';
+
+
+--
+-- TOC entry 4430 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.fsl_no; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.fsl_no IS 'FSL case number';
+
+
+--
+-- TOC entry 4431 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.report_received; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.report_received IS 'Whether FSL report has been received';
+
+
+--
+-- TOC entry 4432 (class 0 OID 0)
+-- Dependencies: 283
+-- Name: COLUMN fsl_case_property.property_received_back; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.fsl_case_property.property_received_back IS 'Whether property has been received back';
+
+
+--
+-- TOC entry 284 (class 1259 OID 1639532)
+-- Name: fsl_case_property_media; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.fsl_case_property_media (
+    media_id uuid NOT NULL,
+    case_property_id character varying(255) NOT NULL,
+    file_id character varying(255)
+);
+
+
+ALTER TABLE public.fsl_case_property_media OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4433 (class 0 OID 0)
+-- Dependencies: 284
+-- Name: TABLE fsl_case_property_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.fsl_case_property_media IS 'Media files associated with case properties';
+
 
 --
 -- TOC entry 231 (class 1259 OID 1397634)
@@ -2241,7 +2027,7 @@ CREATE TABLE public.interrogation_reports (
 ALTER TABLE public.interrogation_reports OWNER TO dev_dopamas;
 
 --
--- TOC entry 4413 (class 0 OID 0)
+-- TOC entry 4434 (class 0 OID 0)
 -- Dependencies: 231
 -- Name: TABLE interrogation_reports; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2266,12 +2052,37 @@ CREATE TABLE public.ir_associate_details (
 ALTER TABLE public.ir_associate_details OWNER TO dev_dopamas;
 
 --
--- TOC entry 4414 (class 0 OID 0)
+-- TOC entry 4435 (class 0 OID 0)
 -- Dependencies: 253
 -- Name: TABLE ir_associate_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_associate_details IS 'Associate information for each IR record. One record per associate.';
+
+
+--
+-- TOC entry 252 (class 1259 OID 1397796)
+-- Name: ir_associate_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_associate_details_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_associate_details_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4436 (class 0 OID 0)
+-- Dependencies: 252
+-- Name: ir_associate_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_associate_details_id_seq OWNED BY public.ir_associate_details.id;
 
 
 --
@@ -2294,12 +2105,37 @@ CREATE TABLE public.ir_consumer_details (
 ALTER TABLE public.ir_consumer_details OWNER TO dev_dopamas;
 
 --
--- TOC entry 4415 (class 0 OID 0)
+-- TOC entry 4437 (class 0 OID 0)
 -- Dependencies: 245
 -- Name: TABLE ir_consumer_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_consumer_details IS 'Consumer information for each IR record. One record per consumer.';
+
+
+--
+-- TOC entry 244 (class 1259 OID 1397740)
+-- Name: ir_consumer_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_consumer_details_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_consumer_details_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4438 (class 0 OID 0)
+-- Dependencies: 244
+-- Name: ir_consumer_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_consumer_details_id_seq OWNED BY public.ir_consumer_details.id;
 
 
 --
@@ -2325,12 +2161,37 @@ CREATE TABLE public.ir_defence_counsel (
 ALTER TABLE public.ir_defence_counsel OWNER TO dev_dopamas;
 
 --
--- TOC entry 4416 (class 0 OID 0)
+-- TOC entry 4439 (class 0 OID 0)
 -- Dependencies: 251
 -- Name: TABLE ir_defence_counsel; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_defence_counsel IS 'Defence counsel information for each IR record. One record per counsel.';
+
+
+--
+-- TOC entry 250 (class 1259 OID 1397782)
+-- Name: ir_defence_counsel_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_defence_counsel_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4440 (class 0 OID 0)
+-- Dependencies: 250
+-- Name: ir_defence_counsel_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNED BY public.ir_defence_counsel.id;
 
 
 --
@@ -2349,12 +2210,37 @@ CREATE TABLE public.ir_dopams_links (
 ALTER TABLE public.ir_dopams_links OWNER TO dev_dopamas;
 
 --
--- TOC entry 4417 (class 0 OID 0)
+-- TOC entry 4441 (class 0 OID 0)
 -- Dependencies: 261
 -- Name: TABLE ir_dopams_links; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_dopams_links IS 'DOPAMS links for each IR record. One record per phone number with DOPAMS data.';
+
+
+--
+-- TOC entry 260 (class 1259 OID 1397856)
+-- Name: ir_dopams_links_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_dopams_links_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_dopams_links_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4442 (class 0 OID 0)
+-- Dependencies: 260
+-- Name: ir_dopams_links_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_dopams_links_id_seq OWNED BY public.ir_dopams_links.id;
 
 
 --
@@ -2377,12 +2263,37 @@ CREATE TABLE public.ir_family_history (
 ALTER TABLE public.ir_family_history OWNER TO dev_dopamas;
 
 --
--- TOC entry 4418 (class 0 OID 0)
+-- TOC entry 4443 (class 0 OID 0)
 -- Dependencies: 233
 -- Name: TABLE ir_family_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_family_history IS 'Family members associated with each IR record. One record per family member.';
+
+
+--
+-- TOC entry 232 (class 1259 OID 1397653)
+-- Name: ir_family_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_family_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_family_history_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4444 (class 0 OID 0)
+-- Dependencies: 232
+-- Name: ir_family_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_family_history_id_seq OWNED BY public.ir_family_history.id;
 
 
 --
@@ -2408,12 +2319,85 @@ CREATE TABLE public.ir_financial_history (
 ALTER TABLE public.ir_financial_history OWNER TO dev_dopamas;
 
 --
--- TOC entry 4419 (class 0 OID 0)
+-- TOC entry 4445 (class 0 OID 0)
 -- Dependencies: 243
 -- Name: TABLE ir_financial_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_financial_history IS 'Financial information for each IR record. One record per financial account/history.';
+
+
+--
+-- TOC entry 242 (class 1259 OID 1397726)
+-- Name: ir_financial_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_financial_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_financial_history_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4446 (class 0 OID 0)
+-- Dependencies: 242
+-- Name: ir_financial_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_financial_history_id_seq OWNED BY public.ir_financial_history.id;
+
+
+--
+-- TOC entry 259 (class 1259 OID 1397841)
+-- Name: ir_interrogation_report_refs; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_interrogation_report_refs (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    report_ref_id text NOT NULL
+);
+
+
+ALTER TABLE public.ir_interrogation_report_refs OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4447 (class 0 OID 0)
+-- Dependencies: 259
+-- Name: TABLE ir_interrogation_report_refs; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_interrogation_report_refs IS 'Interrogation report references (UUIDs) for each IR record. One record per reference.';
+
+
+--
+-- TOC entry 258 (class 1259 OID 1397840)
+-- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_interrogation_report_refs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4448 (class 0 OID 0)
+-- Dependencies: 258
+-- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNED BY public.ir_interrogation_report_refs.id;
 
 
 --
@@ -2434,12 +2418,85 @@ CREATE TABLE public.ir_local_contacts (
 ALTER TABLE public.ir_local_contacts OWNER TO dev_dopamas;
 
 --
--- TOC entry 4420 (class 0 OID 0)
+-- TOC entry 4449 (class 0 OID 0)
 -- Dependencies: 235
 -- Name: TABLE ir_local_contacts; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_local_contacts IS 'Local contacts for each IR record. One record per contact.';
+
+
+--
+-- TOC entry 234 (class 1259 OID 1397670)
+-- Name: ir_local_contacts_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_local_contacts_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_local_contacts_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4450 (class 0 OID 0)
+-- Dependencies: 234
+-- Name: ir_local_contacts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_local_contacts_id_seq OWNED BY public.ir_local_contacts.id;
+
+
+--
+-- TOC entry 257 (class 1259 OID 1397825)
+-- Name: ir_media; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_media (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    media_id text NOT NULL
+);
+
+
+ALTER TABLE public.ir_media OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4451 (class 0 OID 0)
+-- Dependencies: 257
+-- Name: TABLE ir_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_media IS 'Media references (UUIDs) for each IR record. One record per media reference.';
+
+
+--
+-- TOC entry 256 (class 1259 OID 1397824)
+-- Name: ir_media_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_media_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_media_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4452 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: ir_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_media_id_seq OWNED BY public.ir_media.id;
 
 
 --
@@ -2459,12 +2516,37 @@ CREATE TABLE public.ir_modus_operandi (
 ALTER TABLE public.ir_modus_operandi OWNER TO dev_dopamas;
 
 --
--- TOC entry 4421 (class 0 OID 0)
+-- TOC entry 4453 (class 0 OID 0)
 -- Dependencies: 247
 -- Name: TABLE ir_modus_operandi; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_modus_operandi IS 'Modus operandi information for each IR record. One record per MO entry.';
+
+
+--
+-- TOC entry 246 (class 1259 OID 1397754)
+-- Name: ir_modus_operandi_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_modus_operandi_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4454 (class 0 OID 0)
+-- Dependencies: 246
+-- Name: ir_modus_operandi_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNED BY public.ir_modus_operandi.id;
 
 
 --
@@ -2494,12 +2576,37 @@ CREATE TABLE public.ir_previous_offences_confessed (
 ALTER TABLE public.ir_previous_offences_confessed OWNER TO dev_dopamas;
 
 --
--- TOC entry 4422 (class 0 OID 0)
+-- TOC entry 4455 (class 0 OID 0)
 -- Dependencies: 249
 -- Name: TABLE ir_previous_offences_confessed; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_previous_offences_confessed IS 'Previous offences confessed for each IR record. One record per offence.';
+
+
+--
+-- TOC entry 248 (class 1259 OID 1397768)
+-- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_previous_offences_confessed_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4456 (class 0 OID 0)
+-- Dependencies: 248
+-- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNED BY public.ir_previous_offences_confessed.id;
 
 
 --
@@ -2517,12 +2624,37 @@ CREATE TABLE public.ir_regular_habits (
 ALTER TABLE public.ir_regular_habits OWNER TO dev_dopamas;
 
 --
--- TOC entry 4423 (class 0 OID 0)
+-- TOC entry 4457 (class 0 OID 0)
 -- Dependencies: 237
 -- Name: TABLE ir_regular_habits; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_regular_habits IS 'Regular habits for each IR record. One record per habit (junction table for array of strings).';
+
+
+--
+-- TOC entry 236 (class 1259 OID 1397684)
+-- Name: ir_regular_habits_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_regular_habits_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_regular_habits_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4458 (class 0 OID 0)
+-- Dependencies: 236
+-- Name: ir_regular_habits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_regular_habits_id_seq OWNED BY public.ir_regular_habits.id;
 
 
 --
@@ -2544,12 +2676,37 @@ CREATE TABLE public.ir_shelter (
 ALTER TABLE public.ir_shelter OWNER TO dev_dopamas;
 
 --
--- TOC entry 4424 (class 0 OID 0)
+-- TOC entry 4459 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: TABLE ir_shelter; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_shelter IS 'Shelter information for each IR record. One record per shelter entry.';
+
+
+--
+-- TOC entry 254 (class 1259 OID 1397810)
+-- Name: ir_shelter_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_shelter_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_shelter_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4460 (class 0 OID 0)
+-- Dependencies: 254
+-- Name: ir_shelter_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_shelter_id_seq OWNED BY public.ir_shelter.id;
 
 
 --
@@ -2571,12 +2728,37 @@ CREATE TABLE public.ir_sim_details (
 ALTER TABLE public.ir_sim_details OWNER TO dev_dopamas;
 
 --
--- TOC entry 4425 (class 0 OID 0)
+-- TOC entry 4461 (class 0 OID 0)
 -- Dependencies: 241
 -- Name: TABLE ir_sim_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.ir_sim_details IS 'SIM card details for each IR record. One record per SIM card.';
+
+
+--
+-- TOC entry 240 (class 1259 OID 1397712)
+-- Name: ir_sim_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_sim_details_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_sim_details_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4462 (class 0 OID 0)
+-- Dependencies: 240
+-- Name: ir_sim_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_sim_details_id_seq OWNED BY public.ir_sim_details.id;
 
 
 --
@@ -2600,7 +2782,7 @@ CREATE TABLE public.ir_types_of_drugs (
 ALTER TABLE public.ir_types_of_drugs OWNER TO dev_dopamas;
 
 --
--- TOC entry 4426 (class 0 OID 0)
+-- TOC entry 4463 (class 0 OID 0)
 -- Dependencies: 239
 -- Name: TABLE ir_types_of_drugs; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2609,580 +2791,11 @@ COMMENT ON TABLE public.ir_types_of_drugs IS 'Drug information for each IR recor
 
 
 --
--- TOC entry 296 (class 1259 OID 4954506)
--- Name: criminal_profiles_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dopamasprd_ur
+-- TOC entry 238 (class 1259 OID 1397698)
+-- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
 --
 
-CREATE MATERIALIZED VIEW public.criminal_profiles_mv AS
- SELECT adt.canonical_person_id AS id,
-    NULLIF(TRIM(BOTH FROM p.alias), ''::text) AS alias,
-    NULLIF(TRIM(BOTH FROM p.name), ''::text) AS name,
-    NULLIF(TRIM(BOTH FROM p.surname), ''::text) AS surname,
-    NULLIF(TRIM(BOTH FROM p.full_name), ''::text) AS "fullName",
-    NULLIF(TRIM(BOTH FROM p.relative_name), ''::text) AS "relativeName",
-    NULLIF(TRIM(BOTH FROM p.relation_type), ''::text) AS "relationType",
-        CASE
-            WHEN ((p.gender IS NULL) OR (TRIM(BOTH FROM p.gender) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.gender)
-        END AS gender,
-    p.is_died AS "isDied",
-    p.date_of_birth AS "dateOfBirth",
-    p.age,
-        CASE
-            WHEN ((p.domicile_classification IS NULL) OR (TRIM(BOTH FROM p.domicile_classification) = ''::text)) THEN 'Unknown'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'NATIVE STATE'::text) THEN 'Telangana'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTER STATE'::text) THEN 'Other State'::text
-            WHEN (upper(TRIM(BOTH FROM p.domicile_classification)) = 'INTERNATIONAL'::text) THEN 'Foreign Nationals'::text
-            ELSE TRIM(BOTH FROM p.domicile_classification)
-        END AS domicile,
-    NULLIF(TRIM(BOTH FROM p.occupation), ''::text) AS occupation,
-    NULLIF(TRIM(BOTH FROM p.education_qualification), ''::text) AS "educationQualification",
-    NULLIF(TRIM(BOTH FROM p.caste), ''::text) AS caste,
-    NULLIF(TRIM(BOTH FROM p.sub_caste), ''::text) AS "subCaste",
-    NULLIF(TRIM(BOTH FROM p.religion), ''::text) AS religion,
-        CASE
-            WHEN ((p.nationality IS NULL) OR (TRIM(BOTH FROM p.nationality) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.nationality)
-        END AS nationality,
-    NULLIF(TRIM(BOTH FROM p.designation), ''::text) AS designation,
-    NULLIF(TRIM(BOTH FROM p.place_of_work), ''::text) AS "placeOfWork",
-    NULLIF(TRIM(BOTH FROM p.present_house_no), ''::text) AS "presentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.present_street_road_no), ''::text) AS "presentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.present_ward_colony), ''::text) AS "presentWardColony",
-    NULLIF(TRIM(BOTH FROM p.present_landmark_milestone), ''::text) AS "presentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.present_locality_village), ''::text) AS "presentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.present_area_mandal), ''::text) AS "presentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.present_district), ''::text) AS "presentDistrict",
-        CASE
-            WHEN ((p.present_state_ut IS NULL) OR (TRIM(BOTH FROM p.present_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.present_state_ut)
-        END AS "presentStateUt",
-    NULLIF(TRIM(BOTH FROM p.present_country), ''::text) AS "presentCountry",
-    NULLIF(TRIM(BOTH FROM p.present_residency_type), ''::text) AS "presentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.present_pin_code), ''::text) AS "presentPinCode",
-    NULLIF(TRIM(BOTH FROM p.present_jurisdiction_ps), ''::text) AS "presentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text) AS "permanentHouseNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text) AS "permanentStreetRoadNo",
-    NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text) AS "permanentWardColony",
-    NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text) AS "permanentLandmarkMilestone",
-    NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text) AS "permanentLocalityVillage",
-    NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text) AS "permanentAreaMandal",
-    NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text) AS "permanentDistrict",
-        CASE
-            WHEN ((p.permanent_state_ut IS NULL) OR (TRIM(BOTH FROM p.permanent_state_ut) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM p.permanent_state_ut)
-        END AS "permanentStateUt",
-    NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text) AS "permanentCountry",
-    NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text) AS "permanentResidencyType",
-    NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text) AS "permanentPinCode",
-    NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text) AS "permanentJurisdictionPs",
-    NULLIF(TRIM(BOTH FROM p.phone_number), ''::text) AS "phoneNumber",
-    NULLIF(TRIM(BOTH FROM p.country_code), ''::text) AS "countryCode",
-    NULLIF(TRIM(BOTH FROM p.email_id), ''::text) AS "emailId",
-    COALESCE(identity_documents.docs, '[]'::jsonb) AS "identityDocuments",
-    COALESCE(person_documents.docs, '[]'::jsonb) AS documents,
-    COALESCE(crimes_details.details, '[]'::jsonb) AS crimes,
-    crimes_details.latest_crime_id AS "latestCrimeId",
-    crimes_details.latest_crime_no AS "latestCrimeNo",
-    COALESCE(crimes_details.no_of_crimes, (0)::bigint) AS "noOfCrimes",
-    COALESCE(arrest_stats.arrest_count, (0)::bigint) AS "arrestCount",
-    COALESCE(crimes_details.previously_involved_cases, '[]'::jsonb) AS "previouslyInvolvedCases",
-    COALESCE(drug_summary.associated_drugs, ARRAY[]::text[]) AS "associatedDrugs",
-    ARRAY[]::text[] AS "DOPAMSLinks",
-    NULL::text AS counselled,
-    ARRAY[]::text[] AS "socialMedia",
-    NULL::text AS "RTAData",
-    NULL::text AS "bankAcountDetails",
-    NULL::text AS "passportDetails_Foreigners",
-    NULL::text AS "purposeOfVISA_Foreigners",
-    NULL::text AS "validityOfVISA_Foreigners",
-    NULL::text AS "localaddress_Foreigners",
-    NULL::text AS "nativeAddress_Foreigners",
-    NULL::text AS "statusOfTheAccused",
-    NULL::text AS "historySheet",
-    NULL::text AS "propertyForfeited",
-    NULL::text AS "PITNDPSInitiated",
-    NULL::text AS photo
-   FROM ((((((public.agent_deduplication_tracker adt
-     JOIN public.persons p ON (((p.person_id)::text = (adt.canonical_person_id)::text)))
-     LEFT JOIN LATERAL ( SELECT jsonb_agg(ordered_crimes.crime_data ORDER BY ordered_crimes.fir_date DESC NULLS LAST) AS details,
-            (array_agg(ordered_crimes.crime_id ORDER BY ordered_crimes.fir_date DESC NULLS LAST))[1] AS latest_crime_id,
-            (array_agg(ordered_crimes.fir_num ORDER BY ordered_crimes.fir_date DESC NULLS LAST))[1] AS latest_crime_no,
-            count(DISTINCT ordered_crimes.crime_id) AS no_of_crimes,
-            jsonb_agg(jsonb_build_object('id', ordered_crimes.crime_id, 'value', ordered_crimes.prev_case_string)) AS previously_involved_cases
-           FROM ( SELECT c.crime_id,
-                    c.fir_num,
-                    c.fir_date,
-                    jsonb_build_object('unit', NULLIF(TRIM(BOTH FROM h.dist_name), ''::text), 'ps', COALESCE(NULLIF(TRIM(BOTH FROM h.ps_name), ''::text), NULLIF(TRIM(BOTH FROM c.ps_code), ''::text)), 'year',
-                        CASE
-                            WHEN (c.fir_date IS NOT NULL) THEN (EXTRACT(year FROM c.fir_date))::integer
-                            ELSE NULL::integer
-                        END, 'id', NULLIF(TRIM(BOTH FROM c.crime_id), ''::text), 'firNumber', NULLIF(TRIM(BOTH FROM c.fir_num), ''::text), 'firRegNum', NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text), 'firType', NULLIF(TRIM(BOTH FROM c.fir_type), ''::text), 'section', NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text), 'crimeRegDate',
-                        CASE
-                            WHEN (c.fir_date IS NOT NULL) THEN ((c.fir_date)::date)::text
-                            ELSE NULL::text
-                        END, 'majorHead', NULLIF(TRIM(BOTH FROM c.major_head), ''::text), 'minorHead', NULLIF(TRIM(BOTH FROM c.minor_head), ''::text), 'crimeType', NULLIF(TRIM(BOTH FROM c.crime_type), ''::text), 'ioName', NULLIF(TRIM(BOTH FROM c.io_name), ''::text), 'ioRank', NULLIF(TRIM(BOTH FROM c.io_rank), ''::text), 'briefFacts', NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text), 'accusedCode', NULLIF(TRIM(BOTH FROM a.accused_code), ''::text), 'accusedType',
-                        CASE
-                            WHEN ((bfa.accused_type IS NULL) OR (TRIM(BOTH FROM bfa.accused_type) = ''::text)) THEN 'Unknown'::text
-                            ELSE initcap(TRIM(BOTH FROM bfa.accused_type))
-                        END, 'accusedStatus',
-                        CASE
-                            WHEN (ar.arrested_date IS NOT NULL) THEN 'Arrested'::text
-                            WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
-                            WHEN (ar.is_apprehended IS TRUE) THEN 'Arrested'::text
-                            WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
-                            WHEN (ar.is_died IS TRUE) THEN 'Died'::text
-                            WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
-                            ELSE initcap(TRIM(BOTH FROM bfa.status))
-                        END, 'seqNum', NULLIF(TRIM(BOTH FROM a.seq_num), ''::text), 'isCCL', a.is_ccl, 'beard', NULLIF(TRIM(BOTH FROM a.beard), ''::text), 'build', NULLIF(TRIM(BOTH FROM a.build), ''::text), 'color', NULLIF(TRIM(BOTH FROM a.color), ''::text), 'ear', NULLIF(TRIM(BOTH FROM a.ear), ''::text), 'eyes', NULLIF(TRIM(BOTH FROM a.eyes), ''::text), 'face', NULLIF(TRIM(BOTH FROM a.face), ''::text), 'hair', NULLIF(TRIM(BOTH FROM a.hair), ''::text), 'height', NULLIF(TRIM(BOTH FROM a.height), ''::text), 'leucoderma', NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text), 'mole', NULLIF(TRIM(BOTH FROM a.mole), ''::text), 'mustache', NULLIF(TRIM(BOTH FROM a.mustache), ''::text), 'nose', NULLIF(TRIM(BOTH FROM a.nose), ''::text), 'teeth', NULLIF(TRIM(BOTH FROM a.teeth), ''::text), 'caseStatus', NULLIF(TRIM(BOTH FROM c.case_status), ''::text), 'chargesheets', COALESCE(cs_data.chargesheets, '[]'::jsonb), 'interrogationReports', COALESCE(ir_data.interrogation_reports, '[]'::jsonb)) AS crime_data,
-                    concat_ws(' '::text, NULLIF(TRIM(BOTH FROM c.fir_num), ''::text),
-                        CASE
-                            WHEN (NULLIF(TRIM(BOTH FROM h.ps_name), ''::text) IS NOT NULL) THEN concat('of ', TRIM(BOTH FROM h.ps_name))
-                            ELSE NULL::text
-                        END,
-                        CASE
-                            WHEN (NULLIF(TRIM(BOTH FROM h.dist_name), ''::text) IS NOT NULL) THEN concat('of ', TRIM(BOTH FROM h.dist_name))
-                            ELSE NULL::text
-                        END,
-                        CASE
-                            WHEN (NULLIF(TRIM(BOTH FROM c.case_status), ''::text) IS NOT NULL) THEN concat('(', TRIM(BOTH FROM c.case_status), ')')
-                            ELSE NULL::text
-                        END) AS prev_case_string
-                   FROM (((((((unnest(adt.all_crime_ids) ac(crime_id)
-                     LEFT JOIN public.crimes c ON (((c.crime_id)::text = ac.crime_id)))
-                     LEFT JOIN public.hierarchy h ON (((h.ps_code)::text = (c.ps_code)::text)))
-                     LEFT JOIN public.accused a ON ((((a.crime_id)::text = (c.crime_id)::text) AND ((a.person_id)::text = (adt.canonical_person_id)::text))))
-                     LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (c.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                     LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                     LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', cs.id, 'chargesheetNo', NULLIF(TRIM(BOTH FROM cs.chargesheet_no), ''::text), 'chargesheetNoIcjs', NULLIF(TRIM(BOTH FROM cs.chargesheet_no_icjs), ''::text), 'chargesheetDate', cs.chargesheet_date, 'chargesheetType', NULLIF(TRIM(BOTH FROM cs.chargesheet_type), ''::text), 'courtName', NULLIF(TRIM(BOTH FROM cs.court_name), ''::text), 'isCcl', cs.is_ccl, 'isEsigned', cs.is_esigned, 'dateCreated', cs.date_created, 'dateModified', cs.date_modified, 'acts', COALESCE(cs_acts.acts, '[]'::jsonb), 'accuseds', cs_accuseds.accused)) AS chargesheets
-                           FROM ((public.chargesheets cs
-                             LEFT JOIN ( SELECT ca.chargesheet_id,
-                                    jsonb_agg(jsonb_build_object('id', ca.id, 'actDescription', NULLIF(TRIM(BOTH FROM ca.act_description), ''::text), 'section', NULLIF(TRIM(BOTH FROM ca.section), ''::text), 'rwRequired', ca.rw_required, 'sectionDescription', NULLIF(TRIM(BOTH FROM ca.section_description), ''::text), 'graveParticulars', NULLIF(TRIM(BOTH FROM ca.grave_particulars), ''::text), 'createdAt', ca.created_at)) AS acts
-                                   FROM public.chargesheet_acts ca
-                                  GROUP BY ca.chargesheet_id) cs_acts ON (((cs_acts.chargesheet_id)::text = (cs.id)::text)))
-                             LEFT JOIN LATERAL ( SELECT jsonb_build_object('id', csa.id, 'personId', csa.accused_person_id, 'chargeStatus', NULLIF(TRIM(BOTH FROM csa.charge_status), ''::text), 'requestedForNbw', csa.requested_for_nbw, 'reasonForNoCharge', NULLIF(TRIM(BOTH FROM csa.reason_for_no_charge), ''::text), 'isPersonMasterPresent', csa.is_person_master_present, 'createdAt', csa.created_at, 'value', concat_ws(' '::text,
-CASE
- WHEN ((a_cs.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM a_cs.accused_code), ''::text) IS NOT NULL)) THEN (TRIM(BOTH FROM a_cs.accused_code) || ':'::text)
- ELSE NULL::text
-END, NULLIF(TRIM(BOTH FROM COALESCE(p_cs.full_name, p_cs.name)), ''::text),
-CASE
- WHEN (ar_cs.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_cs.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_cs.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_cs.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_cs.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_cs.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_cs.status))) || ')'::text)
- ELSE NULL::text
-END)) AS accused
-                                   FROM ((((((public.chargesheet_accused csa
-                                     JOIN public.chargesheets cs_acc ON (((cs_acc.id)::text = (csa.chargesheet_id)::text)))
-                                     LEFT JOIN public.agent_deduplication_tracker adt_cs ON (((csa.accused_person_id)::text = ANY (adt_cs.all_person_ids))))
-                                     LEFT JOIN public.persons p_cs ON (((p_cs.person_id)::text = (adt_cs.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_cs ON ((((a_cs.person_id)::text = (csa.accused_person_id)::text) AND ((a_cs.crime_id)::text = (cs_acc.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_cs ON ((((ar_cs.crime_id)::text = (a_cs.crime_id)::text) AND (ar_cs.accused_seq_no = (a_cs.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_cs ON (((bfa_cs.accused_id)::text = (a_cs.accused_id)::text)))
-                                  WHERE (((csa.chargesheet_id)::text = (cs.id)::text) AND ((csa.accused_person_id)::text = ANY (adt.all_person_ids)))
-                                 LIMIT 1) cs_accuseds ON (true))
-                          WHERE (((cs.crime_id)::text = (c.crime_id)::text) AND ((EXISTS ( SELECT 1
-                                   FROM public.chargesheet_accused csa_filter
-                                  WHERE (((csa_filter.chargesheet_id)::text = (cs.id)::text) AND ((csa_filter.accused_person_id)::text = ANY (adt.all_person_ids))))) OR (EXISTS ( SELECT 1
-                                   FROM public.agent_deduplication_tracker adt_filter
-                                  WHERE (((adt_filter.canonical_person_id)::text = (adt.canonical_person_id)::text) AND (EXISTS ( SELECT 1
-   FROM public.chargesheet_accused csa_filter2
-  WHERE (((csa_filter2.chargesheet_id)::text = (cs.id)::text) AND ((csa_filter2.accused_person_id)::text = ANY (adt_filter.all_person_ids))))))))))
-                          GROUP BY cs.crime_id) cs_data ON (true))
-                     LEFT JOIN LATERAL ( SELECT jsonb_agg(((((((jsonb_build_object('interrogationReportId', ir.interrogation_report_id, 'crimeId', ir.crime_id, 'personId', ir.person_id) || jsonb_build_object('physicalBeard', NULLIF(TRIM(BOTH FROM ir.physical_beard), ''::text), 'physicalBuild', NULLIF(TRIM(BOTH FROM ir.physical_build), ''::text), 'physicalBurnMarks', NULLIF(TRIM(BOTH FROM ir.physical_burn_marks), ''::text), 'physicalColor', NULLIF(TRIM(BOTH FROM ir.physical_color), ''::text), 'physicalDeformitiesOrPeculiarities', NULLIF(TRIM(BOTH FROM ir.physical_deformities_or_peculiarities), ''::text), 'physicalDeformities', NULLIF(TRIM(BOTH FROM ir.physical_deformities), ''::text), 'physicalEar', NULLIF(TRIM(BOTH FROM ir.physical_ear), ''::text), 'physicalEyes', NULLIF(TRIM(BOTH FROM ir.physical_eyes), ''::text), 'physicalFace', NULLIF(TRIM(BOTH FROM ir.physical_face), ''::text), 'physicalHair', NULLIF(TRIM(BOTH FROM ir.physical_hair), ''::text), 'physicalHeight', NULLIF(TRIM(BOTH FROM ir.physical_height), ''::text), 'physicalIdentificationMarks', NULLIF(TRIM(BOTH FROM ir.physical_identification_marks), ''::text), 'physicalLanguageOrDialect', ir.physical_language_or_dialect, 'physicalLeucoderma', NULLIF(TRIM(BOTH FROM ir.physical_leucoderma), ''::text), 'physicalMole', NULLIF(TRIM(BOTH FROM ir.physical_mole), ''::text), 'physicalMustache', NULLIF(TRIM(BOTH FROM ir.physical_mustache), ''::text), 'physicalNose', NULLIF(TRIM(BOTH FROM ir.physical_nose), ''::text), 'physicalScar', NULLIF(TRIM(BOTH FROM ir.physical_scar), ''::text), 'physicalTattoo', NULLIF(TRIM(BOTH FROM ir.physical_tattoo), ''::text), 'physicalTeeth', NULLIF(TRIM(BOTH FROM ir.physical_teeth), ''::text))) || jsonb_build_object('socioLivingStatus', NULLIF(TRIM(BOTH FROM ir.socio_living_status), ''::text), 'socioMaritalStatus', NULLIF(TRIM(BOTH FROM ir.socio_marital_status), ''::text), 'socioEducation', NULLIF(TRIM(BOTH FROM ir.socio_education), ''::text), 'socioOccupation', NULLIF(TRIM(BOTH FROM ir.socio_occupation), ''::text), 'socioIncomeGroup', NULLIF(TRIM(BOTH FROM ir.socio_income_group), ''::text))) || jsonb_build_object('offenceTime', NULLIF(TRIM(BOTH FROM ir.offence_time), ''::text), 'otherOffenceTime', NULLIF(TRIM(BOTH FROM ir.other_offence_time), ''::text), 'shareOfAmountSpent', NULLIF(TRIM(BOTH FROM ir.share_of_amount_spent), ''::text), 'otherShareOfAmountSpent', NULLIF(TRIM(BOTH FROM ir.other_share_of_amount_spent), ''::text), 'shareRemarks', ir.share_remarks)) || jsonb_build_object('isInJail', ir.is_in_jail, 'fromWhereSentInJail', ir.from_where_sent_in_jail, 'inJailCrimeNum', NULLIF(TRIM(BOTH FROM ir.in_jail_crime_num), ''::text), 'inJailDistUnit', NULLIF(TRIM(BOTH FROM ir.in_jail_dist_unit), ''::text), 'isOnBail', ir.is_on_bail, 'fromWhereSentOnBail', ir.from_where_sent_on_bail, 'onBailCrimeNum', NULLIF(TRIM(BOTH FROM ir.on_bail_crime_num), ''::text), 'dateOfBail', ir.date_of_bail)) || jsonb_build_object('isAbsconding', ir.is_absconding, 'wantedInPoliceStation', NULLIF(TRIM(BOTH FROM ir.wanted_in_police_station), ''::text), 'abscondingCrimeNum', NULLIF(TRIM(BOTH FROM ir.absconding_crime_num), ''::text), 'isNormalLife', ir.is_normal_life, 'ekingLivelihoodByLaborWork', ir.eking_livelihood_by_labor_work, 'isRehabilitated', ir.is_rehabilitated, 'rehabilitationDetails', ir.rehabilitation_details, 'isDead', ir.is_dead, 'deathDetails', ir.death_details)) || jsonb_build_object('isFacingTrial', ir.is_facing_trial, 'facingTrialPsName', NULLIF(TRIM(BOTH FROM ir.facing_trial_ps_name), ''::text), 'facingTrialCrimeNum', NULLIF(TRIM(BOTH FROM ir.facing_trial_crime_num), ''::text), 'otherRegularHabits', ir.other_regular_habits, 'otherIndulgenceBeforeOffence', ir.other_indulgence_before_offence, 'timeSinceModusOperandi', ir.time_since_modus_operandi, 'dateCreated', ir.date_created, 'dateModified', ir.date_modified, 'associateDetails', COALESCE(ir_associate_details_data.associate_details, '[]'::jsonb), 'consumerDetails', COALESCE(ir_consumer_details_data.consumer_details, '[]'::jsonb), 'defenceCounsel', COALESCE(ir_defence_counsel_data.defence_counsel, '[]'::jsonb), 'dopamsLinks', COALESCE(ir_dopams_links_data.dopams_links, '[]'::jsonb), 'familyHistory', COALESCE(ir_family_history_data.family_history, '[]'::jsonb), 'financialHistory', COALESCE(ir_financial_history_data.financial_history, '[]'::jsonb), 'localContacts', COALESCE(ir_local_contacts_data.local_contacts, '[]'::jsonb), 'modusOperandi', COALESCE(ir_modus_operandi_data.modus_operandi, '[]'::jsonb), 'previousOffencesConfessed', COALESCE(ir_previous_offences_data.previous_offences, '[]'::jsonb), 'regularHabits', COALESCE(ir_regular_habits_data.regular_habits, '[]'::jsonb), 'shelter', COALESCE(ir_shelter_data.shelter, '[]'::jsonb), 'simDetails', COALESCE(ir_sim_details_data.sim_details, '[]'::jsonb), 'typesOfDrugs', COALESCE(ir_types_of_drugs_data.types_of_drugs, '[]'::jsonb)))) AS interrogation_reports
-                           FROM (((((((((((((public.interrogation_reports ir
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', iad.id, 'personId', iad.person_id, 'gang', NULLIF(TRIM(BOTH FROM iad.gang), ''::text), 'relation', NULLIF(TRIM(BOTH FROM iad.relation), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_ad.full_name, p_ad.name)), ''::text),
-CASE
- WHEN (ar_ad.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_ad.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_ad.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_ad.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_ad.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_ad.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_ad.status))) || ')'::text)
- ELSE NULL::text
-END))) AS associate_details
-                                   FROM (((((public.ir_associate_details iad
-                                     LEFT JOIN public.agent_deduplication_tracker adt_ad ON (((iad.person_id)::text = ANY (adt_ad.all_person_ids))))
-                                     LEFT JOIN public.persons p_ad ON (((p_ad.person_id)::text = (adt_ad.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_ad ON ((((a_ad.person_id)::text = (iad.person_id)::text) AND ((a_ad.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_ad ON ((((ar_ad.crime_id)::text = (a_ad.crime_id)::text) AND (ar_ad.accused_seq_no = (a_ad.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_ad ON (((bfa_ad.accused_id)::text = (a_ad.accused_id)::text)))
-                                  WHERE ((iad.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_associate_details_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', icd.id, 'consumerPersonId', icd.consumer_person_id, 'placeOfConsumption', NULLIF(TRIM(BOTH FROM icd.place_of_consumption), ''::text), 'otherSources', NULLIF(TRIM(BOTH FROM icd.other_sources), ''::text), 'otherSourcesPhoneNo', NULLIF(TRIM(BOTH FROM icd.other_sources_phone_no), ''::text), 'aadharCardNumber', NULLIF(TRIM(BOTH FROM icd.aadhar_card_number), ''::text), 'aadharCardNumberPhoneNo', NULLIF(TRIM(BOTH FROM icd.aadhar_card_number_phone_no), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_cd.full_name, p_cd.name)), ''::text),
-CASE
- WHEN (ar_cd.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_cd.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_cd.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_cd.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_cd.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_cd.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_cd.status))) || ')'::text)
- ELSE NULL::text
-END))) AS consumer_details
-                                   FROM (((((public.ir_consumer_details icd
-                                     LEFT JOIN public.agent_deduplication_tracker adt_cd ON (((icd.consumer_person_id)::text = ANY (adt_cd.all_person_ids))))
-                                     LEFT JOIN public.persons p_cd ON (((p_cd.person_id)::text = (adt_cd.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_cd ON ((((a_cd.person_id)::text = (icd.consumer_person_id)::text) AND ((a_cd.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_cd ON ((((ar_cd.crime_id)::text = (a_cd.crime_id)::text) AND (ar_cd.accused_seq_no = (a_cd.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_cd ON (((bfa_cd.accused_id)::text = (a_cd.accused_id)::text)))
-                                  WHERE ((icd.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_consumer_details_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', idc.id, 'distDivision', NULLIF(TRIM(BOTH FROM idc.dist_division), ''::text), 'psCode', NULLIF(TRIM(BOTH FROM idc.ps_code), ''::text), 'crimeNum', NULLIF(TRIM(BOTH FROM idc.crime_num), ''::text), 'lawSection', NULLIF(TRIM(BOTH FROM idc.law_section), ''::text), 'scCcNum', NULLIF(TRIM(BOTH FROM idc.sc_cc_num), ''::text), 'defenceCounselAddress', NULLIF(TRIM(BOTH FROM idc.defence_counsel_address), ''::text), 'defenceCounselPhone', NULLIF(TRIM(BOTH FROM idc.defence_counsel_phone), ''::text), 'assistance', NULLIF(TRIM(BOTH FROM idc.assistance), ''::text), 'defenceCounselPersonId', idc.defence_counsel_person_id, 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_dc.full_name, p_dc.name)), ''::text),
-CASE
- WHEN (ar_dc.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_dc.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_dc.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_dc.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_dc.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_dc.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_dc.status))) || ')'::text)
- ELSE NULL::text
-END))) AS defence_counsel
-                                   FROM (((((public.ir_defence_counsel idc
-                                     LEFT JOIN public.agent_deduplication_tracker adt_dc ON (((idc.defence_counsel_person_id)::text = ANY (adt_dc.all_person_ids))))
-                                     LEFT JOIN public.persons p_dc ON (((p_dc.person_id)::text = (adt_dc.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_dc ON ((((a_dc.person_id)::text = (idc.defence_counsel_person_id)::text) AND ((a_dc.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_dc ON ((((ar_dc.crime_id)::text = (a_dc.crime_id)::text) AND (ar_dc.accused_seq_no = (a_dc.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_dc ON (((bfa_dc.accused_id)::text = (a_dc.accused_id)::text)))
-                                  WHERE ((idc.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_defence_counsel_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', idl.id, 'phoneNumber', NULLIF(TRIM(BOTH FROM idl.phone_number), ''::text), 'dopamsData', idl.dopams_data)) AS dopams_links
-                                   FROM public.ir_dopams_links idl
-                                  WHERE ((idl.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_dopams_links_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', ifh.id, 'personId', ifh.person_id, 'relation', NULLIF(TRIM(BOTH FROM ifh.relation), ''::text), 'familyMemberPeculiarity', NULLIF(TRIM(BOTH FROM ifh.family_member_peculiarity), ''::text), 'criminalBackground', ifh.criminal_background, 'isAlive', ifh.is_alive, 'familyStayTogether', ifh.family_stay_together, 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_fh.full_name, p_fh.name)), ''::text),
-CASE
- WHEN (ar_fh.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_fh.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_fh.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_fh.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_fh.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_fh.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_fh.status))) || ')'::text)
- ELSE NULL::text
-END))) AS family_history
-                                   FROM (((((public.ir_family_history ifh
-                                     LEFT JOIN public.agent_deduplication_tracker adt_fh ON (((ifh.person_id)::text = ANY (adt_fh.all_person_ids))))
-                                     LEFT JOIN public.persons p_fh ON (((p_fh.person_id)::text = (adt_fh.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_fh ON ((((a_fh.person_id)::text = (ifh.person_id)::text) AND ((a_fh.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_fh ON ((((ar_fh.crime_id)::text = (a_fh.crime_id)::text) AND (ar_fh.accused_seq_no = (a_fh.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_fh ON (((bfa_fh.accused_id)::text = (a_fh.accused_id)::text)))
-                                  WHERE ((ifh.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_family_history_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', ifin.id, 'accountHolderPersonId', ifin.account_holder_person_id, 'panNo', NULLIF(TRIM(BOTH FROM ifin.pan_no), ''::text), 'upiId', NULLIF(TRIM(BOTH FROM ifin.upi_id), ''::text), 'nameOfBank', NULLIF(TRIM(BOTH FROM ifin.name_of_bank), ''::text), 'accountNumber', NULLIF(TRIM(BOTH FROM ifin.account_number), ''::text), 'branchName', NULLIF(TRIM(BOTH FROM ifin.branch_name), ''::text), 'ifscCode', NULLIF(TRIM(BOTH FROM ifin.ifsc_code), ''::text), 'immovablePropertyAcquired', NULLIF(TRIM(BOTH FROM ifin.immovable_property_acquired), ''::text), 'movablePropertyAcquired', NULLIF(TRIM(BOTH FROM ifin.movable_property_acquired), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_fin.full_name, p_fin.name)), ''::text),
-CASE
- WHEN (ar_fin.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_fin.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_fin.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_fin.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_fin.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_fin.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_fin.status))) || ')'::text)
- ELSE NULL::text
-END))) AS financial_history
-                                   FROM (((((public.ir_financial_history ifin
-                                     LEFT JOIN public.agent_deduplication_tracker adt_fin ON (((ifin.account_holder_person_id)::text = ANY (adt_fin.all_person_ids))))
-                                     LEFT JOIN public.persons p_fin ON (((p_fin.person_id)::text = (adt_fin.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_fin ON ((((a_fin.person_id)::text = (ifin.account_holder_person_id)::text) AND ((a_fin.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_fin ON ((((ar_fin.crime_id)::text = (a_fin.crime_id)::text) AND (ar_fin.accused_seq_no = (a_fin.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_fin ON (((bfa_fin.accused_id)::text = (a_fin.accused_id)::text)))
-                                  WHERE ((ifin.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_financial_history_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', ilc.id, 'personId', ilc.person_id, 'town', NULLIF(TRIM(BOTH FROM ilc.town), ''::text), 'address', NULLIF(TRIM(BOTH FROM ilc.address), ''::text), 'jurisdictionPs', NULLIF(TRIM(BOTH FROM ilc.jurisdiction_ps), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_lc.full_name, p_lc.name)), ''::text),
-CASE
- WHEN (ar_lc.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_lc.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_lc.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_lc.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_lc.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_lc.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_lc.status))) || ')'::text)
- ELSE NULL::text
-END))) AS local_contacts
-                                   FROM (((((public.ir_local_contacts ilc
-                                     LEFT JOIN public.agent_deduplication_tracker adt_lc ON (((ilc.person_id)::text = ANY (adt_lc.all_person_ids))))
-                                     LEFT JOIN public.persons p_lc ON (((p_lc.person_id)::text = (adt_lc.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_lc ON ((((a_lc.person_id)::text = (ilc.person_id)::text) AND ((a_lc.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_lc ON ((((ar_lc.crime_id)::text = (a_lc.crime_id)::text) AND (ar_lc.accused_seq_no = (a_lc.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_lc ON (((bfa_lc.accused_id)::text = (a_lc.accused_id)::text)))
-                                  WHERE ((ilc.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_local_contacts_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', imo.id, 'crimeHead', NULLIF(TRIM(BOTH FROM imo.crime_head), ''::text), 'crimeSubHead', NULLIF(TRIM(BOTH FROM imo.crime_sub_head), ''::text), 'modusOperandi', NULLIF(TRIM(BOTH FROM imo.modus_operandi), ''::text))) AS modus_operandi
-                                   FROM public.ir_modus_operandi imo
-                                  WHERE ((imo.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_modus_operandi_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', ipoc.id, 'arrestDate', ipoc.arrest_date, 'arrestedBy', NULLIF(TRIM(BOTH FROM ipoc.arrested_by), ''::text), 'arrestPlace', NULLIF(TRIM(BOTH FROM ipoc.arrest_place), ''::text), 'crimeNum', NULLIF(TRIM(BOTH FROM ipoc.crime_num), ''::text), 'distUnitDivision', NULLIF(TRIM(BOTH FROM ipoc.dist_unit_division), ''::text), 'gangMember', NULLIF(TRIM(BOTH FROM ipoc.gang_member), ''::text), 'interrogatedBy', NULLIF(TRIM(BOTH FROM ipoc.interrogated_by), ''::text), 'lawSection', NULLIF(TRIM(BOTH FROM ipoc.law_section), ''::text), 'othersIdentify', NULLIF(TRIM(BOTH FROM ipoc.others_identify), ''::text), 'propertyRecovered', NULLIF(TRIM(BOTH FROM ipoc.property_recovered), ''::text), 'propertyStolen', NULLIF(TRIM(BOTH FROM ipoc.property_stolen), ''::text), 'psCode', NULLIF(TRIM(BOTH FROM ipoc.ps_code), ''::text), 'remarks', NULLIF(TRIM(BOTH FROM ipoc.remarks), ''::text))) AS previous_offences
-                                   FROM public.ir_previous_offences_confessed ipoc
-                                  WHERE ((ipoc.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_previous_offences_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', irh.id, 'habit', NULLIF(TRIM(BOTH FROM irh.habit), ''::text))) AS regular_habits
-                                   FROM public.ir_regular_habits irh
-                                  WHERE ((irh.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_regular_habits_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', ish.id, 'preparationOfOffence', NULLIF(TRIM(BOTH FROM ish.preparation_of_offence), ''::text), 'afterOffence', NULLIF(TRIM(BOTH FROM ish.after_offence), ''::text), 'regularResidency', NULLIF(TRIM(BOTH FROM ish.regular_residency), ''::text), 'remarks', NULLIF(TRIM(BOTH FROM ish.remarks), ''::text), 'otherRegularResidency', NULLIF(TRIM(BOTH FROM ish.other_regular_residency), ''::text))) AS shelter
-                                   FROM public.ir_shelter ish
-                                  WHERE ((ish.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_shelter_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', isd.id, 'phoneNumber', NULLIF(TRIM(BOTH FROM isd.phone_number), ''::text), 'sdr', NULLIF(TRIM(BOTH FROM isd.sdr), ''::text), 'imei', NULLIF(TRIM(BOTH FROM isd.imei), ''::text), 'trueCallerName', NULLIF(TRIM(BOTH FROM isd.true_caller_name), ''::text), 'personId', isd.person_id, 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_sd.full_name, p_sd.name)), ''::text),
-CASE
- WHEN (ar_sd.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_sd.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_sd.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_sd.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_sd.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_sd.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_sd.status))) || ')'::text)
- ELSE NULL::text
-END))) AS sim_details
-                                   FROM (((((public.ir_sim_details isd
-                                     LEFT JOIN public.agent_deduplication_tracker adt_sd ON (((isd.person_id)::text = ANY (adt_sd.all_person_ids))))
-                                     LEFT JOIN public.persons p_sd ON (((p_sd.person_id)::text = (adt_sd.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_sd ON ((((a_sd.person_id)::text = (isd.person_id)::text) AND ((a_sd.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_sd ON ((((ar_sd.crime_id)::text = (a_sd.crime_id)::text) AND (ar_sd.accused_seq_no = (a_sd.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_sd ON (((bfa_sd.accused_id)::text = (a_sd.accused_id)::text)))
-                                  WHERE ((isd.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_sim_details_data ON (true))
-                             LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('id', itod.id, 'typeOfDrug', NULLIF(TRIM(BOTH FROM itod.type_of_drug), ''::text), 'quantity', NULLIF(TRIM(BOTH FROM itod.quantity), ''::text), 'purchaseAmountInInr', NULLIF(TRIM(BOTH FROM itod.purchase_amount_in_inr), ''::text), 'modeOfPayment', NULLIF(TRIM(BOTH FROM itod.mode_of_payment), ''::text), 'modeOfTransport', NULLIF(TRIM(BOTH FROM itod.mode_of_transport), ''::text), 'supplierPersonId', itod.supplier_person_id, 'receiversPersonId', itod.receivers_person_id, 'supplierValue', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_supp.full_name, p_supp.name)), ''::text),
-CASE
- WHEN (ar_supp.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_supp.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_supp.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_supp.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_supp.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_supp.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_supp.status))) || ')'::text)
- ELSE NULL::text
-END), 'receiverValue', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_rec.full_name, p_rec.name)), ''::text),
-CASE
- WHEN (ar_rec.is_arrested IS TRUE) THEN '(Arrested)'::text
- WHEN (ar_rec.is_apprehended IS TRUE) THEN '(Apprehended)'::text
- WHEN (ar_rec.is_absconding IS TRUE) THEN '(Absconding)'::text
- WHEN (ar_rec.is_died IS TRUE) THEN '(Died)'::text
- WHEN ((bfa_rec.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_rec.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_rec.status))) || ')'::text)
- ELSE NULL::text
-END))) AS types_of_drugs
-                                   FROM ((((((((((public.ir_types_of_drugs itod
-                                     LEFT JOIN public.agent_deduplication_tracker adt_supp ON (((itod.supplier_person_id)::text = ANY (adt_supp.all_person_ids))))
-                                     LEFT JOIN public.persons p_supp ON (((p_supp.person_id)::text = (adt_supp.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_supp ON ((((a_supp.person_id)::text = (itod.supplier_person_id)::text) AND ((a_supp.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_supp ON ((((ar_supp.crime_id)::text = (a_supp.crime_id)::text) AND (ar_supp.accused_seq_no = (a_supp.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_supp ON (((bfa_supp.accused_id)::text = (a_supp.accused_id)::text)))
-                                     LEFT JOIN public.agent_deduplication_tracker adt_rec ON (((itod.receivers_person_id)::text = ANY (adt_rec.all_person_ids))))
-                                     LEFT JOIN public.persons p_rec ON (((p_rec.person_id)::text = (adt_rec.canonical_person_id)::text)))
-                                     LEFT JOIN public.accused a_rec ON ((((a_rec.person_id)::text = (itod.receivers_person_id)::text) AND ((a_rec.crime_id)::text = (ir.crime_id)::text))))
-                                     LEFT JOIN public.arrests ar_rec ON ((((ar_rec.crime_id)::text = (a_rec.crime_id)::text) AND (ar_rec.accused_seq_no = (a_rec.seq_num)::text))))
-                                     LEFT JOIN public.brief_facts_accused bfa_rec ON (((bfa_rec.accused_id)::text = (a_rec.accused_id)::text)))
-                                  WHERE ((itod.interrogation_report_id)::text = (ir.interrogation_report_id)::text)) ir_types_of_drugs_data ON (true))
-                          WHERE (((ir.crime_id)::text = (c.crime_id)::text) AND ((ir.person_id IS NOT NULL) AND ((ir.person_id)::text = ANY (adt.all_person_ids))))) ir_data ON (true))) ordered_crimes) crimes_details ON (true))
-     LEFT JOIN LATERAL ( SELECT count(*) AS arrest_count
-           FROM public.arrests a_ar
-          WHERE (((a_ar.person_id)::text = ANY (adt.all_person_ids)) AND (a_ar.is_arrested IS TRUE))) arrest_stats ON (true))
-     LEFT JOIN LATERAL ( SELECT array_agg(drug_strings.drug_string) AS associated_drugs
-           FROM ( SELECT agg.primary_drug_name,
-                        CASE
-                            WHEN (qty_parts.qty IS NULL) THEN (agg.primary_drug_name)::text
-                            ELSE concat(agg.primary_drug_name, ' ( ', qty_parts.qty, ' )')
-                        END AS drug_string
-                   FROM (( SELECT bfd.primary_drug_name,
-                            sum(bfd.standardized_weight_kg) AS total_kg,
-                            sum(bfd.standardized_volume_ml) AS total_ml,
-                            sum(bfd.standardized_count) AS total_count
-                           FROM public.brief_facts_drug bfd
-                          WHERE (((bfd.crime_id)::text = ANY (adt.all_crime_ids)) AND (NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-                          GROUP BY bfd.primary_drug_name) agg
-                     CROSS JOIN LATERAL ( SELECT NULLIF(concat_ws(', '::text,
-                                CASE
-                                    WHEN ((agg.total_kg IS NOT NULL) AND (agg.total_kg <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (agg.total_kg)::text), ' Kgs')
-                                    ELSE NULL::text
-                                END,
-                                CASE
-                                    WHEN ((agg.total_ml IS NOT NULL) AND (agg.total_ml <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (agg.total_ml)::text), ' Mls')
-                                    ELSE NULL::text
-                                END,
-                                CASE
-                                    WHEN ((agg.total_count IS NOT NULL) AND (agg.total_count <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (agg.total_count)::text), ' Packets/Pills')
-                                    ELSE NULL::text
-                                END), ''::text) AS qty) qty_parts)) drug_strings) drug_summary ON (true))
-     LEFT JOIN ( SELECT f.parent_id AS person_id,
-            jsonb_agg(jsonb_build_object('type', f.source_field, 'link', f.file_url, 'identityType', f.identity_type, 'identityNumber', f.identity_number)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
-           FROM public.files f
-          WHERE ((f.source_type)::text = 'person'::text)
-          GROUP BY f.parent_id) identity_documents ON (((identity_documents.person_id)::text = (p.person_id)::text)))
-     LEFT JOIN ( SELECT f.parent_id AS person_id,
-            jsonb_agg(jsonb_build_object('name', f.notes, 'link', f.file_url)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
-           FROM public.files f
-          WHERE (((f.source_type)::text = 'person'::text) AND ((f.source_field)::text = 'MEDIA'::text))
-          GROUP BY f.parent_id) person_documents ON (((person_documents.person_id)::text = (p.person_id)::text)))
-  WITH NO DATA;
-
-
-ALTER MATERIALIZED VIEW public.criminal_profiles_mv OWNER TO dopamasprd_ur;
-
---
--- TOC entry 290 (class 1259 OID 2028672)
--- Name: dedup_cluster_state; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.dedup_cluster_state (
-    id bigint NOT NULL,
-    cluster_id integer NOT NULL,
-    person_index integer NOT NULL,
-    person_id character varying(50) NOT NULL,
-    is_representative boolean DEFAULT false NOT NULL,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-
-ALTER TABLE public.dedup_cluster_state OWNER TO dev_dopamas;
-
---
--- TOC entry 291 (class 1259 OID 2028677)
--- Name: dedup_cluster_state_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.dedup_cluster_state_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.dedup_cluster_state_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4428 (class 0 OID 0)
--- Dependencies: 291
--- Name: dedup_cluster_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.dedup_cluster_state_id_seq OWNED BY public.dedup_cluster_state.id;
-
-
---
--- TOC entry 292 (class 1259 OID 2028678)
--- Name: dedup_comparison_progress; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.dedup_comparison_progress (
-    id bigint NOT NULL,
-    person_i_index integer NOT NULL,
-    person_j_index integer NOT NULL,
-    person_i_id character varying(50) NOT NULL,
-    person_j_id character varying(50) NOT NULL,
-    match_score_numeric double precision NOT NULL,
-    is_match boolean DEFAULT false NOT NULL,
-    matching_method character varying(100),
-    completed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-
-ALTER TABLE public.dedup_comparison_progress OWNER TO dev_dopamas;
-
---
--- TOC entry 300 (class 1259 OID 10185018)
--- Name: dedup_comparison_progress_backup; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.dedup_comparison_progress_backup (
-    id bigint,
-    person_i_index integer,
-    person_j_index integer,
-    person_i_id character varying(50),
-    person_j_id character varying(50),
-    match_score_numeric double precision,
-    is_match boolean,
-    matching_method character varying(100),
-    completed_at timestamp without time zone
-);
-
-
-ALTER TABLE public.dedup_comparison_progress_backup OWNER TO dev_dopamas;
-
---
--- TOC entry 293 (class 1259 OID 2028683)
--- Name: dedup_comparison_progress_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.dedup_comparison_progress_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.dedup_comparison_progress_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4429 (class 0 OID 0)
--- Dependencies: 293
--- Name: dedup_comparison_progress_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.dedup_comparison_progress_id_seq OWNED BY public.dedup_comparison_progress.id;
-
-
---
--- TOC entry 294 (class 1259 OID 2028684)
--- Name: dedup_run_metadata; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.dedup_run_metadata (
-    id bigint NOT NULL,
-    run_id character varying(50) NOT NULL,
-    total_persons integer NOT NULL,
-    last_processed_index integer DEFAULT 0 NOT NULL,
-    status character varying(20) DEFAULT 'running'::character varying NOT NULL,
-    started_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    completed_at timestamp without time zone
-);
-
-
-ALTER TABLE public.dedup_run_metadata OWNER TO dev_dopamas;
-
---
--- TOC entry 295 (class 1259 OID 2028691)
--- Name: dedup_run_metadata_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.dedup_run_metadata_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.dedup_run_metadata_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4430 (class 0 OID 0)
--- Dependencies: 295
--- Name: dedup_run_metadata_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.dedup_run_metadata_id_seq OWNED BY public.dedup_run_metadata.id;
-
-
---
--- TOC entry 274 (class 1259 OID 1420054)
--- Name: disposal; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.disposal (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    crime_id character varying(50) NOT NULL,
-    disposal_type text NOT NULL,
-    disposed_at timestamp with time zone,
-    disposal text,
-    case_status text,
-    date_created timestamp with time zone NOT NULL,
-    date_modified timestamp with time zone NOT NULL
-);
-
-
-ALTER TABLE public.disposal OWNER TO dev_dopamas;
-
---
--- TOC entry 304 (class 1259 OID 20996612)
--- Name: drug_categories; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.drug_categories (
-    id integer NOT NULL,
-    raw_name text NOT NULL,
-    standard_name text NOT NULL,
-    category_group text NOT NULL,
-    is_verified boolean DEFAULT true,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-);
-
-
-ALTER TABLE public.drug_categories OWNER TO dev_dopamas;
-
---
--- TOC entry 303 (class 1259 OID 20996611)
--- Name: drug_categories_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.drug_categories_id_seq
+CREATE SEQUENCE public.ir_types_of_drugs_id_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
@@ -3191,213 +2804,19 @@ CREATE SEQUENCE public.drug_categories_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.drug_categories_id_seq OWNER TO dev_dopamas;
+ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4431 (class 0 OID 0)
--- Dependencies: 303
--- Name: drug_categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+-- TOC entry 4464 (class 0 OID 0)
+-- Dependencies: 238
+-- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
 
-ALTER SEQUENCE public.drug_categories_id_seq OWNED BY public.drug_categories.id;
-
-
---
--- TOC entry 306 (class 1259 OID 20996626)
--- Name: drug_ignore_list; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.drug_ignore_list (
-    id integer NOT NULL,
-    term text NOT NULL,
-    reason text,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-);
-
-
-ALTER TABLE public.drug_ignore_list OWNER TO dev_dopamas;
-
---
--- TOC entry 305 (class 1259 OID 20996625)
--- Name: drug_ignore_list_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.drug_ignore_list_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.drug_ignore_list_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4432 (class 0 OID 0)
--- Dependencies: 305
--- Name: drug_ignore_list_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.drug_ignore_list_id_seq OWNED BY public.drug_ignore_list.id;
+ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNED BY public.ir_types_of_drugs.id;
 
 
 --
--- TOC entry 266 (class 1259 OID 1412954)
--- Name: files_summary; Type: VIEW; Schema: public; Owner: dev_dopamas
---
-
-CREATE VIEW public.files_summary AS
- SELECT source_type,
-    source_field,
-    count(DISTINCT parent_id) AS parent_records_count,
-    count(*) AS total_files,
-    count(DISTINCT file_id) AS unique_files
-   FROM public.files
-  GROUP BY source_type, source_field;
-
-
-ALTER VIEW public.files_summary OWNER TO dev_dopamas;
-
---
--- TOC entry 286 (class 1259 OID 1639518)
--- Name: fsl_case_property; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.fsl_case_property (
-    case_property_id character varying(255) NOT NULL,
-    case_type character varying(100),
-    crime_id character varying(50) NOT NULL,
-    mo_id character varying(255),
-    status character varying(100),
-    send_date timestamp with time zone,
-    fsl_date timestamp with time zone,
-    date_disposal timestamp with time zone,
-    release_date timestamp with time zone,
-    return_date timestamp with time zone,
-    date_custody timestamp with time zone,
-    date_sent_to_expert timestamp with time zone,
-    court_order_date timestamp with time zone,
-    date_created timestamp with time zone,
-    date_modified timestamp with time zone,
-    forwarding_through character varying(255),
-    court_name character varying(500),
-    fsl_court_name character varying(500),
-    cpr_court_name character varying(500),
-    court_order_number character varying(255),
-    fsl_no character varying(255),
-    fsl_request_id character varying(255),
-    report_received boolean DEFAULT false,
-    opinion text,
-    opinion_furnished character varying(255),
-    strength_of_evidence character varying(255),
-    expert_type character varying(255),
-    other_expert_type character varying(255),
-    cpr_no character varying(255),
-    direction_by_court text,
-    details_disposal text,
-    place_disposal character varying(500),
-    release_order_no character varying(255),
-    place_custody character varying(500),
-    assign_custody character varying(255),
-    property_received_back boolean DEFAULT false
-);
-
-
-ALTER TABLE public.fsl_case_property OWNER TO dev_dopamas;
-
---
--- TOC entry 4433 (class 0 OID 0)
--- Dependencies: 286
--- Name: TABLE fsl_case_property; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.fsl_case_property IS 'Main table storing case property records from DOPAMS API';
-
-
---
--- TOC entry 4434 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.case_property_id IS 'Primary key from API (CASE_PROPERTY_ID) - MongoDB ObjectId (24 hex characters)';
-
-
---
--- TOC entry 4435 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.crime_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.crime_id IS 'Reference to crime/case (CRIME_ID) - Foreign key to crimes table';
-
-
---
--- TOC entry 4436 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.mo_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.mo_id IS 'Material Object ID (MO_ID)';
-
-
---
--- TOC entry 4437 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.status; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.status IS 'Current status (e.g., Send To FSL, Send To Court)';
-
-
---
--- TOC entry 4438 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.date_created; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.date_created IS 'Record creation timestamp from API (DATE_CREATED)';
-
-
---
--- TOC entry 4439 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.date_modified; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.date_modified IS 'Record modification timestamp from API (DATE_MODIFIED)';
-
-
---
--- TOC entry 4440 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.fsl_no; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.fsl_no IS 'FSL case number';
-
-
---
--- TOC entry 4441 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.report_received; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.report_received IS 'Whether FSL report has been received';
-
-
---
--- TOC entry 4442 (class 0 OID 0)
--- Dependencies: 286
--- Name: COLUMN fsl_case_property.property_received_back; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.fsl_case_property.property_received_back IS 'Whether property has been received back';
-
-
---
--- TOC entry 276 (class 1259 OID 1420933)
+-- TOC entry 275 (class 1259 OID 1420933)
 -- Name: mo_seizures; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
 
@@ -3505,7 +2924,7 @@ CREATE TABLE public.old_interragation_report (
 ALTER TABLE public.old_interragation_report OWNER TO dev_dopamas;
 
 --
--- TOC entry 4443 (class 0 OID 0)
+-- TOC entry 4465 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: TABLE old_interragation_report; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3514,1112 +2933,12 @@ COMMENT ON TABLE public.old_interragation_report IS 'Interrogation report with f
 
 
 --
--- TOC entry 4444 (class 0 OID 0)
+-- TOC entry 4466 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN old_interragation_report.crime_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON COLUMN public.old_interragation_report.crime_id IS 'Reference to the crime record';
-
-
---
--- TOC entry 230 (class 1259 OID 1397619)
--- Name: properties; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.properties (
-    property_id character varying(50) NOT NULL,
-    crime_id character varying(50) NOT NULL,
-    case_property_id character varying(50),
-    property_status character varying(100),
-    recovered_from character varying(255),
-    place_of_recovery text,
-    date_of_seizure timestamp without time zone,
-    nature character varying(255),
-    belongs character varying(100),
-    estimate_value numeric(15,2) DEFAULT 0,
-    recovered_value numeric(15,2) DEFAULT 0,
-    particular_of_property text,
-    category character varying(100),
-    additional_details jsonb,
-    media jsonb DEFAULT '[]'::jsonb,
-    date_created timestamp without time zone,
-    date_modified timestamp without time zone
-);
-
-
-ALTER TABLE public.properties OWNER TO dev_dopamas;
-
---
--- TOC entry 4445 (class 0 OID 0)
--- Dependencies: 230
--- Name: TABLE properties; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.properties IS 'Seized and recovered property details linked to crimes';
-
-
---
--- TOC entry 4446 (class 0 OID 0)
--- Dependencies: 230
--- Name: COLUMN properties.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.properties.case_property_id IS 'Reference to related case property (may be null)';
-
-
---
--- TOC entry 4447 (class 0 OID 0)
--- Dependencies: 230
--- Name: COLUMN properties.additional_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.properties.additional_details IS 'JSONB field containing flexible additional data (drug details, vehicle info, etc.)';
-
-
---
--- TOC entry 4448 (class 0 OID 0)
--- Dependencies: 230
--- Name: COLUMN properties.media; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.properties.media IS 'JSONB array of media attachments';
-
-
---
--- TOC entry 299 (class 1259 OID 10126136)
--- Name: firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: postgres
---
-
-CREATE MATERIALIZED VIEW public.firs_mv AS
- SELECT c.crime_id AS id,
-        CASE
-            WHEN ((h.dist_name IS NULL) OR (TRIM(BOTH FROM h.dist_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.dist_name)
-        END AS unit,
-        CASE
-            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.ps_name)
-        END AS ps,
-    (EXTRACT(year FROM c.fir_date))::integer AS year,
-    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNumber",
-    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
-    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS section,
-    NULLIF(TRIM(BOTH FROM c.fir_type), ''::text) AS "firType",
-    NULLIF(TRIM(BOTH FROM c.crime_type), ''::text) AS "crimeType",
-    c.fir_date AS "crimeRegDate",
-    NULLIF(TRIM(BOTH FROM c.major_head), ''::text) AS "majorHead",
-    NULLIF(TRIM(BOTH FROM c.minor_head), ''::text) AS "minorHead",
-    NULLIF(TRIM(BOTH FROM c.io_name), ''::text) AS "ioName",
-    NULLIF(TRIM(BOTH FROM c.io_rank), ''::text) AS "ioRank",
-    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
-        CASE
-            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.class_classification)
-        END AS "caseClassification",
-        CASE
-            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM c.case_status)
-        END AS "caseStatus",
-        CASE
-            WHEN (c.fir_date IS NULL) THEN NULL::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (0)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (30)::double precision)) THEN '0 - 30 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (30)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (60)::double precision)) THEN '31 - 60 Days'::text
-            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (60)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (90)::double precision)) THEN '61 - 90 Days'::text
-            WHEN (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (90)::double precision) THEN 'More than 90 Days'::text
-            ELSE NULL::text
-        END AS "stipulatedPeriodForCS",
-    COALESCE(accused_count.count, 0) AS "noOfAccusedInvolved",
-    COALESCE(accused_details.details, '[]'::jsonb) AS "accusedDetails",
-    COALESCE(drug_types.types, '{}'::text[]) AS "drugType",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity",
-    COALESCE(property_details.details, '[]'::jsonb) AS "propertyDetails",
-    COALESCE(mo_seizures_details.details, '[]'::jsonb) AS "moSeizuresDetails",
-    COALESCE(chargesheets_data.chargesheets, '[]'::jsonb) AS chargesheets,
-    COALESCE(chargesheet_updates_data.chargesheet_updates, '[]'::jsonb) AS "chargesheetUpdates",
-    COALESCE(disposal_details.details, '[]'::jsonb) AS "disposalDetails",
-    COALESCE(ir_details_data.details, '[]'::jsonb) AS "irDetails",
-    COALESCE(fsl_case_property_details.details, '[]'::jsonb) AS "casePropertyDetails",
-    COALESCE(crime_documents.docs, '[]'::jsonb) AS documents,
-    fir_copy_file.file_url AS "firCopy",
-    COALESCE(property_documents.docs, '[]'::jsonb) AS "propertyDocuments",
-    COALESCE(ir_documents.docs, '[]'::jsonb) AS "irDocuments"
-   FROM ((((((((((((((((public.crimes c
-     LEFT JOIN public.hierarchy h ON (((h.ps_code)::text = (c.ps_code)::text)))
-     LEFT JOIN ( SELECT a.crime_id,
-            (count(a.accused_id))::integer AS count
-           FROM (public.accused a
-             LEFT JOIN public.agent_deduplication_tracker adt_count ON (((a.person_id)::text = ANY (adt_count.all_person_ids))))
-          GROUP BY a.crime_id) accused_count ON (((accused_count.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT a.crime_id,
-            jsonb_agg(jsonb_build_object('id', p.person_id, 'accusedId', a.accused_id, 'accusedCode', NULLIF(TRIM(BOTH FROM a.accused_code), ''::text), 'seqNum', NULLIF(TRIM(BOTH FROM a.seq_num), ''::text), 'isCCL', a.is_ccl, 'beard', NULLIF(TRIM(BOTH FROM a.beard), ''::text), 'build', NULLIF(TRIM(BOTH FROM a.build), ''::text), 'color', NULLIF(TRIM(BOTH FROM a.color), ''::text), 'ear', NULLIF(TRIM(BOTH FROM a.ear), ''::text), 'eyes', NULLIF(TRIM(BOTH FROM a.eyes), ''::text), 'face', NULLIF(TRIM(BOTH FROM a.face), ''::text), 'hair', NULLIF(TRIM(BOTH FROM a.hair), ''::text), 'height', NULLIF(TRIM(BOTH FROM a.height), ''::text), 'leucoderma', NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text), 'mole', NULLIF(TRIM(BOTH FROM a.mole), ''::text), 'mustache', NULLIF(TRIM(BOTH FROM a.mustache), ''::text), 'nose', NULLIF(TRIM(BOTH FROM a.nose), ''::text), 'teeth', NULLIF(TRIM(BOTH FROM a.teeth), ''::text), 'name', NULLIF(TRIM(BOTH FROM (p.name)::text), ''::text), 'surname', NULLIF(TRIM(BOTH FROM (p.surname)::text), ''::text), 'alias', NULLIF(TRIM(BOTH FROM (p.alias)::text), ''::text), 'fullName', NULLIF(TRIM(BOTH FROM (p.full_name)::text), ''::text), 'relativeName', NULLIF(TRIM(BOTH FROM (p.relative_name)::text), ''::text), 'emailId', NULLIF(TRIM(BOTH FROM (p.email_id)::text), ''::text), 'status',
-                CASE
-                    WHEN (ar.arrested_date IS NOT NULL) THEN 'Arrested'::text
-                    WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
-                    WHEN (ar.is_apprehended IS TRUE) THEN 'Arrested'::text
-                    WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
-                    WHEN (ar.is_died IS TRUE) THEN 'Died'::text
-                    WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
-                    ELSE initcap(TRIM(BOTH FROM bfa.status))
-                END, 'type', NULLIF(TRIM(BOTH FROM (bfa.accused_type)::text), ''::text), 'value', concat_ws(' '::text,
-                CASE
-                    WHEN (NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) IS NOT NULL) THEN (TRIM(BOTH FROM a.accused_code) || ':'::text)
-                    ELSE NULL::text
-                END, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                CASE
-                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                    WHEN (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                    ELSE NULL::text
-                END), 'houseNo', NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text), 'streetRoadNo', NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text), 'wardColony', NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text), 'landmarkMilestone', NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text), 'localityVillage', NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text), 'areaMandal', NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text), 'district', NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text), 'stateUT', NULLIF(TRIM(BOTH FROM p.permanent_state_ut), ''::text), 'country', NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text), 'residencyType', NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text), 'pinCode', NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text), 'jurisdictionPS', NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text))) AS details
-           FROM ((((public.accused a
-             LEFT JOIN public.agent_deduplication_tracker adt ON (((a.person_id)::text = ANY (adt.all_person_ids))))
-             LEFT JOIN public.persons p ON (((p.person_id)::text = (a.person_id)::text)))
-             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-          GROUP BY a.crime_id) accused_details ON (((accused_details.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT p.crime_id,
-            jsonb_agg(jsonb_build_object('id', p.property_id, 'propertyStatus', NULLIF(TRIM(BOTH FROM (p.property_status)::text), ''::text), 'recoveredFrom', NULLIF(TRIM(BOTH FROM (p.recovered_from)::text), ''::text), 'placeOfRecovery', NULLIF(TRIM(BOTH FROM p.place_of_recovery), ''::text), 'dateOfSeizure', NULLIF(TRIM(BOTH FROM (p.date_of_seizure)::text), ''::text), 'nature', NULLIF(TRIM(BOTH FROM (p.nature)::text), ''::text), 'belongs', NULLIF(TRIM(BOTH FROM (p.belongs)::text), ''::text), 'estimatedValue', NULLIF(TRIM(BOTH FROM (p.estimate_value)::text), ''::text), 'recoveredValue', NULLIF(TRIM(BOTH FROM (p.recovered_value)::text), ''::text), 'particularOfProperty', NULLIF(TRIM(BOTH FROM p.particular_of_property), ''::text), 'category', NULLIF(TRIM(BOTH FROM (p.category)::text), ''::text))) AS details
-           FROM public.properties p
-          WHERE (TRIM(BOTH FROM p.property_status) <> 'Seized'::text)
-          GROUP BY p.crime_id) property_details ON (((property_details.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT bfd.crime_id,
-            array_agg(DISTINCT NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text)) AS types
-           FROM public.brief_facts_drug bfd
-          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-          GROUP BY bfd.crime_id) drug_types ON (((drug_types.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT bfd.crime_id,
-            jsonb_agg(jsonb_build_object('name', bfd.primary_drug_name, 'quantity', NULLIF(concat_ws(', '::text,
-                CASE
-                    WHEN ((bfd.standardized_weight_kg IS NOT NULL) AND (bfd.standardized_weight_kg <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_weight_kg, 2))::text), ' Kg')
-                    ELSE NULL::text
-                END,
-                CASE
-                    WHEN ((bfd.standardized_volume_ml IS NOT NULL) AND (bfd.standardized_volume_ml <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_volume_ml, 2))::text), ' L')
-                    ELSE NULL::text
-                END,
-                CASE
-                    WHEN ((bfd.standardized_count IS NOT NULL) AND (bfd.standardized_count <> (0)::numeric)) THEN concat(TRIM(BOTH FROM (round(bfd.standardized_count, 2))::text), ' Packets/Pills')
-                    ELSE NULL::text
-                END), ''::text), 'worth', round((bfd.seizure_worth * (10000000)::numeric), 2))) AS types
-           FROM public.brief_facts_drug bfd
-          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND ((bfd.primary_drug_name)::text <> 'NO_DRUGS_DETECTED'::text))
-          GROUP BY bfd.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT f.parent_id AS crime_id,
-            max((f.file_url)::text) AS file_url
-           FROM public.files f
-          WHERE (((f.source_type)::text = 'crime'::text) AND ((f.source_field)::text = 'FIR_COPY'::text))
-          GROUP BY f.parent_id) fir_copy_file ON (((fir_copy_file.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT f.parent_id AS crime_id,
-            jsonb_agg(jsonb_build_object('name', f.notes, 'link', f.file_url)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
-           FROM public.files f
-          WHERE (((f.source_type)::text = 'crime'::text) AND ((f.source_field)::text = 'MEDIA'::text))
-          GROUP BY f.parent_id) crime_documents ON (((crime_documents.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT ms.crime_id,
-            jsonb_agg(jsonb_build_object('id', ms.mo_seizure_id, 'seqNo', NULLIF(TRIM(BOTH FROM ms.seq_no), ''::text), 'moId', NULLIF(TRIM(BOTH FROM ms.mo_id), ''::text), 'type', NULLIF(TRIM(BOTH FROM (ms.type)::text), ''::text), 'subType', NULLIF(TRIM(BOTH FROM ms.sub_type), ''::text), 'description', NULLIF(TRIM(BOTH FROM ms.description), ''::text), 'seizedFrom', NULLIF(TRIM(BOTH FROM ms.seized_from), ''::text), 'seizedAt', NULLIF(TRIM(BOTH FROM (ms.seized_at)::text), ''::text), 'seizedBy', NULLIF(TRIM(BOTH FROM ms.seized_by), ''::text), 'strengthOfEvidence', NULLIF(TRIM(BOTH FROM ms.strength_of_evidence), ''::text), 'posAddress1', NULLIF(TRIM(BOTH FROM ms.pos_address1), ''::text), 'posAddress2', NULLIF(TRIM(BOTH FROM ms.pos_address2), ''::text), 'posCity', NULLIF(TRIM(BOTH FROM ms.pos_city), ''::text), 'posDistrict', NULLIF(TRIM(BOTH FROM ms.pos_district), ''::text), 'posPincode', NULLIF(TRIM(BOTH FROM ms.pos_pincode), ''::text), 'posLandmark', NULLIF(TRIM(BOTH FROM ms.pos_landmark), ''::text), 'posDescription', NULLIF(TRIM(BOTH FROM ms.pos_description), ''::text), 'posLatitude', NULLIF(TRIM(BOTH FROM ms.pos_latitude), ''::text), 'posLongitude', NULLIF(TRIM(BOTH FROM ms.pos_longitude), ''::text), 'moMediaUrl', NULLIF(TRIM(BOTH FROM ms.mo_media_url), ''::text), 'moMediaName', NULLIF(TRIM(BOTH FROM ms.mo_media_name), ''::text), 'moMediaFileId', NULLIF(TRIM(BOTH FROM ms.mo_media_file_id), ''::text))) AS details
-           FROM public.mo_seizures ms
-          GROUP BY ms.crime_id) mo_seizures_details ON (((mo_seizures_details.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT p.crime_id,
-            jsonb_agg(jsonb_build_object('type', f.source_field, 'link', f.file_url)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
-           FROM (public.properties p
-             JOIN public.files f ON ((((f.parent_id)::text = (p.property_id)::text) AND ((f.source_type)::text = 'property'::text))))
-          GROUP BY p.crime_id) property_documents ON (((property_documents.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT ir.crime_id,
-            jsonb_agg(jsonb_build_object('type', f.source_field, 'link', f.file_url)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
-           FROM (public.interrogation_reports ir
-             JOIN public.files f ON ((((f.parent_id)::text = (ir.interrogation_report_id)::text) AND ((f.source_type)::text = 'interrogation'::text))))
-          GROUP BY ir.crime_id) ir_documents ON (((ir_documents.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT cs.crime_id,
-            jsonb_agg(jsonb_build_object('id', cs.id, 'chargesheetNo', NULLIF(TRIM(BOTH FROM cs.chargesheet_no), ''::text), 'chargesheetNoIcjs', NULLIF(TRIM(BOTH FROM cs.chargesheet_no_icjs), ''::text), 'chargesheetDate', cs.chargesheet_date, 'chargesheetType', NULLIF(TRIM(BOTH FROM cs.chargesheet_type), ''::text), 'courtName', NULLIF(TRIM(BOTH FROM cs.court_name), ''::text), 'isCcl', cs.is_ccl, 'isEsigned', cs.is_esigned, 'dateCreated', cs.date_created, 'dateModified', cs.date_modified, 'acts', COALESCE(cs_acts.acts, '[]'::jsonb), 'accuseds', COALESCE(cs_accuseds.accuseds, '[]'::jsonb))) AS chargesheets
-           FROM ((public.chargesheets cs
-             LEFT JOIN ( SELECT ca.chargesheet_id,
-                    jsonb_agg(jsonb_build_object('id', ca.id, 'actDescription', NULLIF(TRIM(BOTH FROM ca.act_description), ''::text), 'section', NULLIF(TRIM(BOTH FROM ca.section), ''::text), 'rwRequired', ca.rw_required, 'sectionDescription', NULLIF(TRIM(BOTH FROM ca.section_description), ''::text), 'graveParticulars', NULLIF(TRIM(BOTH FROM ca.grave_particulars), ''::text), 'createdAt', ca.created_at)) AS acts
-                   FROM public.chargesheet_acts ca
-                  GROUP BY ca.chargesheet_id) cs_acts ON (((cs_acts.chargesheet_id)::text = (cs.id)::text)))
-             LEFT JOIN ( SELECT csa.chargesheet_id,
-                    jsonb_agg(jsonb_build_object('id', csa.id, 'personId', csa.accused_person_id, 'chargeStatus', NULLIF(TRIM(BOTH FROM csa.charge_status), ''::text), 'requestedForNbw', csa.requested_for_nbw, 'reasonForNoCharge', NULLIF(TRIM(BOTH FROM csa.reason_for_no_charge), ''::text), 'isPersonMasterPresent', csa.is_person_master_present, 'createdAt', csa.created_at, 'value', concat_ws(' '::text,
-                        CASE
-                            WHEN ((a.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) IS NOT NULL)) THEN (TRIM(BOTH FROM a.accused_code) || ':'::text)
-                            ELSE NULL::text
-                        END, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                        CASE
-                            WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                            WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                            WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                            WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                            WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                            ELSE NULL::text
-                        END))) AS accuseds
-                   FROM ((((((public.chargesheet_accused csa
-                     JOIN public.chargesheets cs_acc ON (((cs_acc.id)::text = (csa.chargesheet_id)::text)))
-                     LEFT JOIN public.agent_deduplication_tracker adt_cs ON (((csa.accused_person_id)::text = ANY (adt_cs.all_person_ids))))
-                     LEFT JOIN public.persons p ON (((p.person_id)::text = (csa.accused_person_id)::text)))
-                     LEFT JOIN public.accused a ON ((((a.person_id)::text = (csa.accused_person_id)::text) AND ((a.crime_id)::text = (cs_acc.crime_id)::text))))
-                     LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                     LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                  GROUP BY csa.chargesheet_id) cs_accuseds ON (((cs_accuseds.chargesheet_id)::text = (cs.id)::text)))
-          GROUP BY cs.crime_id) chargesheets_data ON (((chargesheets_data.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT d.crime_id,
-            jsonb_agg(jsonb_build_object('id', d.id, 'disposalType', NULLIF(TRIM(BOTH FROM d.disposal_type), ''::text), 'disposedAt', d.disposed_at, 'disposal', NULLIF(TRIM(BOTH FROM d.disposal), ''::text), 'caseStatus', NULLIF(TRIM(BOTH FROM d.case_status), ''::text), 'dateCreated', d.date_created, 'dateModified', d.date_modified)) AS details
-           FROM public.disposal d
-          GROUP BY d.crime_id) disposal_details ON (((disposal_details.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT base.crime_id,
-            jsonb_agg(((jsonb_build_object('id', base.interrogation_report_id, 'personId', NULLIF(TRIM(BOTH FROM (base.person_id)::text), ''::text), 'value', base.person_value, 'physicalBeard', NULLIF(TRIM(BOTH FROM base.physical_beard), ''::text), 'physicalBuild', NULLIF(TRIM(BOTH FROM base.physical_build), ''::text), 'physicalBurnMarks', NULLIF(TRIM(BOTH FROM base.physical_burn_marks), ''::text), 'physicalColor', NULLIF(TRIM(BOTH FROM base.physical_color), ''::text), 'physicalDeformitiesOrPeculiarities', NULLIF(TRIM(BOTH FROM base.physical_deformities_or_peculiarities), ''::text), 'physicalDeformities', NULLIF(TRIM(BOTH FROM base.physical_deformities), ''::text), 'physicalEar', NULLIF(TRIM(BOTH FROM base.physical_ear), ''::text), 'physicalEyes', NULLIF(TRIM(BOTH FROM base.physical_eyes), ''::text), 'physicalFace', NULLIF(TRIM(BOTH FROM base.physical_face), ''::text), 'physicalHair', NULLIF(TRIM(BOTH FROM base.physical_hair), ''::text), 'physicalHeight', NULLIF(TRIM(BOTH FROM base.physical_height), ''::text), 'physicalIdentificationMarks', NULLIF(TRIM(BOTH FROM base.physical_identification_marks), ''::text), 'physicalLanguageOrDialect', base.physical_language_or_dialect, 'physicalLeucoderma', NULLIF(TRIM(BOTH FROM base.physical_leucoderma), ''::text), 'physicalMole', NULLIF(TRIM(BOTH FROM base.physical_mole), ''::text), 'physicalMustache', NULLIF(TRIM(BOTH FROM base.physical_mustache), ''::text), 'physicalNose', NULLIF(TRIM(BOTH FROM base.physical_nose), ''::text), 'physicalScar', NULLIF(TRIM(BOTH FROM base.physical_scar), ''::text), 'physicalTattoo', NULLIF(TRIM(BOTH FROM base.physical_tattoo), ''::text), 'physicalTeeth', NULLIF(TRIM(BOTH FROM base.physical_teeth), ''::text), 'socioLivingStatus', NULLIF(TRIM(BOTH FROM base.socio_living_status), ''::text), 'socioMaritalStatus', NULLIF(TRIM(BOTH FROM base.socio_marital_status), ''::text), 'socioEducation', NULLIF(TRIM(BOTH FROM base.socio_education), ''::text), 'socioOccupation', NULLIF(TRIM(BOTH FROM base.socio_occupation), ''::text), 'socioIncomeGroup', NULLIF(TRIM(BOTH FROM base.socio_income_group), ''::text)) || jsonb_build_object('offenceTime', NULLIF(TRIM(BOTH FROM base.offence_time), ''::text), 'otherOffenceTime', NULLIF(TRIM(BOTH FROM base.other_offence_time), ''::text), 'shareOfAmountSpent', NULLIF(TRIM(BOTH FROM base.share_of_amount_spent), ''::text), 'otherShareOfAmountSpent', NULLIF(TRIM(BOTH FROM base.other_share_of_amount_spent), ''::text), 'shareRemarks', NULLIF(TRIM(BOTH FROM base.share_remarks), ''::text), 'isInJail', base.is_in_jail, 'fromWhereSentInJail', NULLIF(TRIM(BOTH FROM base.from_where_sent_in_jail), ''::text), 'inJailCrimeNum', NULLIF(TRIM(BOTH FROM base.in_jail_crime_num), ''::text), 'inJailDistUnit', NULLIF(TRIM(BOTH FROM base.in_jail_dist_unit), ''::text), 'isOnBail', base.is_on_bail, 'fromWhereSentOnBail', NULLIF(TRIM(BOTH FROM base.from_where_sent_on_bail), ''::text), 'onBailCrimeNum', NULLIF(TRIM(BOTH FROM base.on_bail_crime_num), ''::text), 'dateOfBail', base.date_of_bail, 'isAbsconding', base.is_absconding, 'wantedInPoliceStation', NULLIF(TRIM(BOTH FROM base.wanted_in_police_station), ''::text), 'abscondingCrimeNum', NULLIF(TRIM(BOTH FROM base.absconding_crime_num), ''::text))) || jsonb_build_object('isNormalLife', base.is_normal_life, 'ekingLivelihoodByLaborWork', NULLIF(TRIM(BOTH FROM base.eking_livelihood_by_labor_work), ''::text), 'isRehabilitated', base.is_rehabilitated, 'rehabilitationDetails', NULLIF(TRIM(BOTH FROM base.rehabilitation_details), ''::text), 'isDead', base.is_dead, 'deathDetails', NULLIF(TRIM(BOTH FROM base.death_details), ''::text), 'isFacingTrial', base.is_facing_trial, 'facingTrialPsName', NULLIF(TRIM(BOTH FROM base.facing_trial_ps_name), ''::text), 'facingTrialCrimeNum', NULLIF(TRIM(BOTH FROM base.facing_trial_crime_num), ''::text), 'otherRegularHabits', NULLIF(TRIM(BOTH FROM base.other_regular_habits), ''::text), 'otherIndulgenceBeforeOffence', NULLIF(TRIM(BOTH FROM base.other_indulgence_before_offence), ''::text), 'timeSinceModusOperandi', NULLIF(TRIM(BOTH FROM base.time_since_modus_operandi), ''::text), 'dateCreated', base.date_created, 'dateModified', base.date_modified, 'familyMembers', base.family_members, 'associateDetails', base.associate_details, 'consumerDetails', base.consumer_details, 'defenceCounsel', base.defence_counsel, 'dopamsLinks', base.dopams_links, 'familyHistory', base.family_history, 'financialHistory', base.financial_history, 'localContacts', base.local_contacts, 'modusOperandi', base.modus_operandi, 'previousOffencesConfessed', base.previous_offences_confessed, 'regularHabits', base.regular_habits, 'shelter', base.shelter, 'simDetails', base.sim_details, 'typesOfDrugs', base.types_of_drugs))) AS details
-           FROM ( SELECT ir.crime_id,
-                    (ir.interrogation_report_id)::text AS interrogation_report_id,
-                    ir.person_id,
-                    concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p_ir.full_name, p_ir.name)), ''::text),
-                        CASE
-                            WHEN (ar_ir.is_arrested IS TRUE) THEN '(Arrested)'::text
-                            WHEN (ar_ir.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                            WHEN (ar_ir.is_absconding IS TRUE) THEN '(Absconding)'::text
-                            WHEN (ar_ir.is_died IS TRUE) THEN '(Died)'::text
-                            WHEN ((bfa_ir.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa_ir.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa_ir.status))) || ')'::text)
-                            ELSE NULL::text
-                        END) AS person_value,
-                    ir.physical_beard,
-                    ir.physical_build,
-                    ir.physical_burn_marks,
-                    ir.physical_color,
-                    ir.physical_deformities_or_peculiarities,
-                    ir.physical_deformities,
-                    ir.physical_ear,
-                    ir.physical_eyes,
-                    ir.physical_face,
-                    ir.physical_hair,
-                    ir.physical_height,
-                    ir.physical_identification_marks,
-                    ir.physical_language_or_dialect,
-                    ir.physical_leucoderma,
-                    ir.physical_mole,
-                    ir.physical_mustache,
-                    ir.physical_nose,
-                    ir.physical_scar,
-                    ir.physical_tattoo,
-                    ir.physical_teeth,
-                    ir.socio_living_status,
-                    ir.socio_marital_status,
-                    ir.socio_education,
-                    ir.socio_occupation,
-                    ir.socio_income_group,
-                    ir.offence_time,
-                    ir.other_offence_time,
-                    ir.share_of_amount_spent,
-                    ir.other_share_of_amount_spent,
-                    ir.share_remarks,
-                    ir.is_in_jail,
-                    ir.from_where_sent_in_jail,
-                    ir.in_jail_crime_num,
-                    ir.in_jail_dist_unit,
-                    ir.is_on_bail,
-                    ir.from_where_sent_on_bail,
-                    ir.on_bail_crime_num,
-                    ir.date_of_bail,
-                    ir.is_absconding,
-                    ir.wanted_in_police_station,
-                    ir.absconding_crime_num,
-                    ir.is_normal_life,
-                    ir.eking_livelihood_by_labor_work,
-                    ir.is_rehabilitated,
-                    ir.rehabilitation_details,
-                    ir.is_dead,
-                    ir.death_details,
-                    ir.is_facing_trial,
-                    ir.facing_trial_ps_name,
-                    ir.facing_trial_crime_num,
-                    ir.other_regular_habits,
-                    ir.other_indulgence_before_offence,
-                    ir.time_since_modus_operandi,
-                    ir.date_created,
-                    ir.date_modified,
-                    NULL::jsonb AS family_members,
-                    COALESCE(associate_details_agg_ir.details, '[]'::jsonb) AS associate_details,
-                    COALESCE(consumer_details_agg_ir.details, '[]'::jsonb) AS consumer_details,
-                    COALESCE(defence_counsel_agg_ir.details, '[]'::jsonb) AS defence_counsel,
-                    COALESCE(dopams_links_agg_ir.details, '[]'::jsonb) AS dopams_links,
-                    COALESCE(family_history_agg_ir.details, '[]'::jsonb) AS family_history,
-                    COALESCE(financial_history_agg_ir.details, '[]'::jsonb) AS financial_history,
-                    COALESCE(local_contacts_agg_ir.details, '[]'::jsonb) AS local_contacts,
-                    COALESCE(modus_operandi_agg_ir.details, '[]'::jsonb) AS modus_operandi,
-                    COALESCE(previous_offences_confessed_agg_ir.details, '[]'::jsonb) AS previous_offences_confessed,
-                    COALESCE(regular_habits_agg_ir.details, '[]'::jsonb) AS regular_habits,
-                    COALESCE(shelter_agg_ir.details, '[]'::jsonb) AS shelter,
-                    COALESCE(sim_details_agg_ir.details, '[]'::jsonb) AS sim_details,
-                    COALESCE(types_of_drugs_agg_ir.details, '[]'::jsonb) AS types_of_drugs
-                   FROM ((((((((((((((((((public.interrogation_reports ir
-                     LEFT JOIN public.agent_deduplication_tracker adt_ir ON (((ir.person_id)::text = ANY (adt_ir.all_person_ids))))
-                     LEFT JOIN public.persons p_ir ON (((p_ir.person_id)::text = (ir.person_id)::text)))
-                     LEFT JOIN public.accused a_ir ON ((((a_ir.person_id)::text = (ir.person_id)::text) AND ((a_ir.crime_id)::text = (ir.crime_id)::text))))
-                     LEFT JOIN public.arrests ar_ir ON ((((ar_ir.crime_id)::text = (a_ir.crime_id)::text) AND (ar_ir.accused_seq_no = (a_ir.seq_num)::text))))
-                     LEFT JOIN public.brief_facts_accused bfa_ir ON (((bfa_ir.accused_id)::text = (a_ir.accused_id)::text)))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', iad.id, 'personId', iad.person_id, 'gang', NULLIF(TRIM(BOTH FROM iad.gang), ''::text), 'relation', NULLIF(TRIM(BOTH FROM iad.relation), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_associate_details iad
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (iad.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((iad.person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (iad.person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (iad.person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) associate_details_agg_ir ON ((((associate_details_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (associate_details_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', icd.id, 'consumerPersonId', icd.consumer_person_id, 'placeOfConsumption', NULLIF(TRIM(BOTH FROM icd.place_of_consumption), ''::text), 'otherSources', NULLIF(TRIM(BOTH FROM icd.other_sources), ''::text), 'otherSourcesPhoneNo', NULLIF(TRIM(BOTH FROM icd.other_sources_phone_no), ''::text), 'aadharCardNumber', NULLIF(TRIM(BOTH FROM icd.aadhar_card_number), ''::text), 'aadharCardNumberPhoneNo', NULLIF(TRIM(BOTH FROM icd.aadhar_card_number_phone_no), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_consumer_details icd
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (icd.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((icd.consumer_person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (icd.consumer_person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (icd.consumer_person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) consumer_details_agg_ir ON ((((consumer_details_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (consumer_details_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', idc.id, 'distDivision', NULLIF(TRIM(BOTH FROM idc.dist_division), ''::text), 'psCode', NULLIF(TRIM(BOTH FROM idc.ps_code), ''::text), 'crimeNum', NULLIF(TRIM(BOTH FROM idc.crime_num), ''::text), 'lawSection', NULLIF(TRIM(BOTH FROM idc.law_section), ''::text), 'scCcNum', NULLIF(TRIM(BOTH FROM idc.sc_cc_num), ''::text), 'defenceCounselAddress', NULLIF(TRIM(BOTH FROM idc.defence_counsel_address), ''::text), 'defenceCounselPhone', NULLIF(TRIM(BOTH FROM idc.defence_counsel_phone), ''::text), 'assistance', NULLIF(TRIM(BOTH FROM idc.assistance), ''::text), 'defenceCounselPersonId', idc.defence_counsel_person_id, 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_defence_counsel idc
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (idc.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((idc.defence_counsel_person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (idc.defence_counsel_person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (idc.defence_counsel_person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) defence_counsel_agg_ir ON ((((defence_counsel_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (defence_counsel_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', idl.id, 'phoneNumber', NULLIF(TRIM(BOTH FROM idl.phone_number), ''::text), 'dopamsData',
-                                CASE
-                                    WHEN (idl.dopams_data IS NULL) THEN NULL::jsonb
-                                    WHEN (array_length(idl.dopams_data, 1) IS NULL) THEN '[]'::jsonb
-                                    ELSE to_jsonb(idl.dopams_data)
-                                END)) AS details
-                           FROM (public.ir_dopams_links idl
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (idl.interrogation_report_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) dopams_links_agg_ir ON ((((dopams_links_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (dopams_links_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', ifh.id, 'personId', ifh.person_id, 'relation', NULLIF(TRIM(BOTH FROM ifh.relation), ''::text), 'familyMemberPeculiarity', NULLIF(TRIM(BOTH FROM ifh.family_member_peculiarity), ''::text), 'criminalBackground', ifh.criminal_background, 'isAlive', ifh.is_alive, 'familyStayTogether', ifh.family_stay_together, 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_family_history ifh
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (ifh.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((ifh.person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (ifh.person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (ifh.person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) family_history_agg_ir ON ((((family_history_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (family_history_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', ifin.id, 'accountHolderPersonId', ifin.account_holder_person_id, 'panNo', NULLIF(TRIM(BOTH FROM ifin.pan_no), ''::text), 'upiId', NULLIF(TRIM(BOTH FROM ifin.upi_id), ''::text), 'nameOfBank', NULLIF(TRIM(BOTH FROM ifin.name_of_bank), ''::text), 'accountNumber', NULLIF(TRIM(BOTH FROM ifin.account_number), ''::text), 'branchName', NULLIF(TRIM(BOTH FROM ifin.branch_name), ''::text), 'ifscCode', NULLIF(TRIM(BOTH FROM ifin.ifsc_code), ''::text), 'immovablePropertyAcquired', NULLIF(TRIM(BOTH FROM ifin.immovable_property_acquired), ''::text), 'movablePropertyAcquired', NULLIF(TRIM(BOTH FROM ifin.movable_property_acquired), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_financial_history ifin
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (ifin.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((ifin.account_holder_person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (ifin.account_holder_person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (ifin.account_holder_person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) financial_history_agg_ir ON ((((financial_history_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (financial_history_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', ilc.id, 'personId', ilc.person_id, 'town', NULLIF(TRIM(BOTH FROM ilc.town), ''::text), 'address', NULLIF(TRIM(BOTH FROM ilc.address), ''::text), 'jurisdictionPs', NULLIF(TRIM(BOTH FROM ilc.jurisdiction_ps), ''::text), 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_local_contacts ilc
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (ilc.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((ilc.person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (ilc.person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (ilc.person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) local_contacts_agg_ir ON ((((local_contacts_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (local_contacts_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', imo.id, 'crimeHead', NULLIF(TRIM(BOTH FROM imo.crime_head), ''::text), 'crimeSubHead', NULLIF(TRIM(BOTH FROM imo.crime_sub_head), ''::text), 'modusOperandi', NULLIF(TRIM(BOTH FROM imo.modus_operandi), ''::text))) AS details
-                           FROM (public.ir_modus_operandi imo
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (imo.interrogation_report_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) modus_operandi_agg_ir ON ((((modus_operandi_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (modus_operandi_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', ipoc.id, 'arrestDate', ipoc.arrest_date, 'arrestedBy', NULLIF(TRIM(BOTH FROM ipoc.arrested_by), ''::text), 'arrestPlace', NULLIF(TRIM(BOTH FROM ipoc.arrest_place), ''::text), 'crimeNum', NULLIF(TRIM(BOTH FROM ipoc.crime_num), ''::text), 'distUnitDivision', NULLIF(TRIM(BOTH FROM ipoc.dist_unit_division), ''::text), 'gangMember', NULLIF(TRIM(BOTH FROM ipoc.gang_member), ''::text), 'interrogatedBy', NULLIF(TRIM(BOTH FROM ipoc.interrogated_by), ''::text), 'lawSection', NULLIF(TRIM(BOTH FROM ipoc.law_section), ''::text), 'othersIdentify', NULLIF(TRIM(BOTH FROM ipoc.others_identify), ''::text), 'propertyRecovered', NULLIF(TRIM(BOTH FROM ipoc.property_recovered), ''::text), 'propertyStolen', NULLIF(TRIM(BOTH FROM ipoc.property_stolen), ''::text), 'psCode', NULLIF(TRIM(BOTH FROM ipoc.ps_code), ''::text), 'remarks', NULLIF(TRIM(BOTH FROM ipoc.remarks), ''::text))) AS details
-                           FROM (public.ir_previous_offences_confessed ipoc
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (ipoc.interrogation_report_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) previous_offences_confessed_agg_ir ON ((((previous_offences_confessed_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (previous_offences_confessed_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', irh.id, 'habit', NULLIF(TRIM(BOTH FROM irh.habit), ''::text))) AS details
-                           FROM (public.ir_regular_habits irh
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (irh.interrogation_report_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) regular_habits_agg_ir ON ((((regular_habits_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (regular_habits_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', ish.id, 'preparationOfOffence', NULLIF(TRIM(BOTH FROM ish.preparation_of_offence), ''::text), 'afterOffence', NULLIF(TRIM(BOTH FROM ish.after_offence), ''::text), 'regularResidency', NULLIF(TRIM(BOTH FROM ish.regular_residency), ''::text), 'remarks', NULLIF(TRIM(BOTH FROM ish.remarks), ''::text), 'otherRegularResidency', NULLIF(TRIM(BOTH FROM ish.other_regular_residency), ''::text))) AS details
-                           FROM (public.ir_shelter ish
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (ish.interrogation_report_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) shelter_agg_ir ON ((((shelter_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (shelter_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', isd.id, 'phoneNumber', NULLIF(TRIM(BOTH FROM isd.phone_number), ''::text), 'sdr', NULLIF(TRIM(BOTH FROM isd.sdr), ''::text), 'imei', NULLIF(TRIM(BOTH FROM isd.imei), ''::text), 'trueCallerName', NULLIF(TRIM(BOTH FROM isd.true_caller_name), ''::text), 'personId', isd.person_id, 'value', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
-                                CASE
-                                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfa.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM ((((((public.ir_sim_details isd
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (isd.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adt ON (((isd.person_id)::text = ANY (adt.all_person_ids))))
-                             LEFT JOIN public.persons p ON (((p.person_id)::text = (isd.person_id)::text)))
-                             LEFT JOIN public.accused a ON ((((a.person_id)::text = (isd.person_id)::text) AND ((a.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) sim_details_agg_ir ON ((((sim_details_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (sim_details_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                     LEFT JOIN ( SELECT ir_agg.interrogation_report_id,
-                            jsonb_agg(jsonb_build_object('id', itod.id, 'typeOfDrug', NULLIF(TRIM(BOTH FROM itod.type_of_drug), ''::text), 'quantity', NULLIF(TRIM(BOTH FROM itod.quantity), ''::text), 'purchaseAmountInInr', NULLIF(TRIM(BOTH FROM itod.purchase_amount_in_inr), ''::text), 'modeOfPayment', NULLIF(TRIM(BOTH FROM itod.mode_of_payment), ''::text), 'modeOfTransport', NULLIF(TRIM(BOTH FROM itod.mode_of_transport), ''::text), 'supplierPersonId', itod.supplier_person_id, 'receiversPersonId', itod.receivers_person_id, 'supplierValue', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(ps.full_name, ps.name)), ''::text),
-                                CASE
-                                    WHEN (ars.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (ars.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (ars.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (ars.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfas.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfas.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfas.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END), 'receiverValue', concat_ws(' '::text, NULLIF(TRIM(BOTH FROM COALESCE(pr.full_name, pr.name)), ''::text),
-                                CASE
-                                    WHEN (arr.is_arrested IS TRUE) THEN '(Arrested)'::text
-                                    WHEN (arr.is_apprehended IS TRUE) THEN '(Apprehended)'::text
-                                    WHEN (arr.is_absconding IS TRUE) THEN '(Absconding)'::text
-                                    WHEN (arr.is_died IS TRUE) THEN '(Died)'::text
-                                    WHEN ((bfar.accused_id IS NOT NULL) AND (NULLIF(TRIM(BOTH FROM bfar.status), ''::text) IS NOT NULL)) THEN (('('::text || initcap(TRIM(BOTH FROM bfar.status))) || ')'::text)
-                                    ELSE NULL::text
-                                END))) AS details
-                           FROM (((((((((((public.ir_types_of_drugs itod
-                             JOIN public.interrogation_reports ir_agg ON (((ir_agg.interrogation_report_id)::text = (itod.interrogation_report_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adts ON (((itod.supplier_person_id)::text = ANY (adts.all_person_ids))))
-                             LEFT JOIN public.persons ps ON (((ps.person_id)::text = (itod.supplier_person_id)::text)))
-                             LEFT JOIN public.accused accused_supplier ON ((((accused_supplier.person_id)::text = (itod.supplier_person_id)::text) AND ((accused_supplier.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests ars ON ((((ars.crime_id)::text = (accused_supplier.crime_id)::text) AND (ars.accused_seq_no = (accused_supplier.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfas ON (((bfas.accused_id)::text = (accused_supplier.accused_id)::text)))
-                             LEFT JOIN public.agent_deduplication_tracker adtr ON (((itod.receivers_person_id)::text = ANY (adtr.all_person_ids))))
-                             LEFT JOIN public.persons pr ON (((pr.person_id)::text = (itod.receivers_person_id)::text)))
-                             LEFT JOIN public.accused ar ON ((((ar.person_id)::text = (itod.receivers_person_id)::text) AND ((ar.crime_id)::text = (ir_agg.crime_id)::text))))
-                             LEFT JOIN public.arrests arr ON ((((arr.crime_id)::text = (ar.crime_id)::text) AND (arr.accused_seq_no = (ar.seq_num)::text))))
-                             LEFT JOIN public.brief_facts_accused bfar ON (((bfar.accused_id)::text = (ar.accused_id)::text)))
-                          GROUP BY ir_agg.interrogation_report_id) types_of_drugs_agg_ir ON ((((types_of_drugs_agg_ir.interrogation_report_id)::text = (ir.interrogation_report_id)::text) AND (types_of_drugs_agg_ir.interrogation_report_id IS NOT NULL) AND (ir.interrogation_report_id IS NOT NULL))))
-                UNION ALL
-                 SELECT oir.crime_id,
-                    (oir.interrogation_report_id)::text AS interrogation_report_id,
-                    NULL::text AS person_id,
-                    NULL::text AS person_value,
-                    NULL::text AS physical_beard,
-                    NULL::text AS physical_build,
-                    NULL::text AS physical_burn_marks,
-                    NULL::text AS physical_color,
-                    NULL::text AS physical_deformities_or_peculiarities,
-                    NULL::text AS physical_deformities,
-                    NULL::text AS physical_ear,
-                    NULL::text AS physical_eyes,
-                    NULL::text AS physical_face,
-                    NULL::text AS physical_hair,
-                    NULL::text AS physical_height,
-                    NULL::text AS physical_identification_marks,
-                    NULL::text[] AS physical_language_or_dialect,
-                    NULL::text AS physical_leucoderma,
-                    NULL::text AS physical_mole,
-                    NULL::text AS physical_mustache,
-                    NULL::text AS physical_nose,
-                    NULL::text AS physical_scar,
-                    NULL::text AS physical_tattoo,
-                    NULL::text AS physical_teeth,
-                    NULL::text AS socio_living_status,
-                    NULL::text AS socio_marital_status,
-                    NULL::text AS socio_education,
-                    NULL::text AS socio_occupation,
-                    NULL::text AS socio_income_group,
-                    NULL::text AS offence_time,
-                    NULL::text AS other_offence_time,
-                    NULL::text AS share_of_amount_spent,
-                    NULL::text AS other_share_of_amount_spent,
-                    NULL::text AS share_remarks,
-                    NULL::boolean AS is_in_jail,
-                    NULL::text AS from_where_sent_in_jail,
-                    NULL::text AS in_jail_crime_num,
-                    NULL::text AS in_jail_dist_unit,
-                    NULL::boolean AS is_on_bail,
-                    NULL::text AS from_where_sent_on_bail,
-                    NULL::text AS on_bail_crime_num,
-                    NULL::date AS date_of_bail,
-                    NULL::boolean AS is_absconding,
-                    NULL::text AS wanted_in_police_station,
-                    NULL::text AS absconding_crime_num,
-                    NULL::boolean AS is_normal_life,
-                    NULL::text AS eking_livelihood_by_labor_work,
-                    NULL::boolean AS is_rehabilitated,
-                    NULL::text AS rehabilitation_details,
-                    NULL::boolean AS is_dead,
-                    NULL::text AS death_details,
-                    NULL::boolean AS is_facing_trial,
-                    NULL::text AS facing_trial_ps_name,
-                    NULL::text AS facing_trial_crime_num,
-                    NULL::text AS other_regular_habits,
-                    NULL::text AS other_indulgence_before_offence,
-                    NULL::text AS time_since_modus_operandi,
-                    NULL::timestamp(6) without time zone AS date_created,
-                    NULL::timestamp(6) without time zone AS date_modified,
-                    ((jsonb_build_object('aunt',
-                        CASE
-                            WHEN ((oir.int_aunt_name IS NOT NULL) OR (oir.int_aunt_address IS NOT NULL) OR (oir.int_aunt_mobile_no IS NOT NULL) OR (oir.int_aunt_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_aunt_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_aunt_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_aunt_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_aunt_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_aunt), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'brother',
-                        CASE
-                            WHEN ((oir.int_brother_name IS NOT NULL) OR (oir.int_brother_address IS NOT NULL) OR (oir.int_brother_mobile_no IS NOT NULL) OR (oir.int_brother_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_brother_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_brother_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_brother_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_brother_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_brother), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'daughter',
-                        CASE
-                            WHEN ((oir.int_daughter_name IS NOT NULL) OR (oir.int_daughter_address IS NOT NULL) OR (oir.int_daughter_mobile_no IS NOT NULL) OR (oir.int_daughter_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_daughter_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_daughter_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_daughter_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_daughter_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_daughter), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'father',
-                        CASE
-                            WHEN ((oir.int_father_name IS NOT NULL) OR (oir.int_father_address IS NOT NULL) OR (oir.int_father_mobile_no IS NOT NULL) OR (oir.int_father_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_father_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_father_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_father_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_father_occupation), ''::text), 'relationType', NULL::text)
-                            ELSE NULL::jsonb
-                        END) || jsonb_build_object('fatherInLaw',
-                        CASE
-                            WHEN ((oir.int_fil_name IS NOT NULL) OR (oir.int_fil_address IS NOT NULL) OR (oir.int_fil_mobile_no IS NOT NULL) OR (oir.int_fil_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_fil_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_fil_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_fil_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_fil_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_fil), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'friend',
-                        CASE
-                            WHEN ((oir.int_friend_name IS NOT NULL) OR (oir.int_friend_address IS NOT NULL) OR (oir.int_friend_mobile_no IS NOT NULL) OR (oir.int_friend_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_friend_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_friend_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_friend_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_friend_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_friend), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'motherInLaw',
-                        CASE
-                            WHEN ((oir.int_mil_name IS NOT NULL) OR (oir.int_mil_address IS NOT NULL) OR (oir.int_mil_mobile_no IS NOT NULL) OR (oir.int_mil_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_mil_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_mil_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_mil_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_mil_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_mil), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'mother',
-                        CASE
-                            WHEN ((oir.int_mother_name IS NOT NULL) OR (oir.int_mother_address IS NOT NULL) OR (oir.int_mother_mobile_no IS NOT NULL) OR (oir.int_mother_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_mother_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_mother_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_mother_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_mother_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_mother), ''::text))
-                            ELSE NULL::jsonb
-                        END)) || jsonb_build_object('sister',
-                        CASE
-                            WHEN ((oir.int_sister_name IS NOT NULL) OR (oir.int_sister_address IS NOT NULL) OR (oir.int_sister_mobile_no IS NOT NULL) OR (oir.int_sister_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_sister_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_sister_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_sister_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_sister_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_sister), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'son',
-                        CASE
-                            WHEN ((oir.int_son_name IS NOT NULL) OR (oir.int_son_address IS NOT NULL) OR (oir.int_son_mobile_no IS NOT NULL) OR (oir.int_son_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_son_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_son_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_son_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_son_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_son), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'uncle',
-                        CASE
-                            WHEN ((oir.int_uncle_name IS NOT NULL) OR (oir.int_uncle_address IS NOT NULL) OR (oir.int_uncle_mobile_no IS NOT NULL) OR (oir.int_uncle_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_uncle_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_uncle_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_uncle_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_uncle_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_uncle), ''::text))
-                            ELSE NULL::jsonb
-                        END, 'wife',
-                        CASE
-                            WHEN ((oir.int_wife_name IS NOT NULL) OR (oir.int_wife_address IS NOT NULL) OR (oir.int_wife_mobile_no IS NOT NULL) OR (oir.int_wife_occupation IS NOT NULL)) THEN jsonb_build_object('name', NULLIF(TRIM(BOTH FROM oir.int_wife_name), ''::text), 'address', NULLIF(TRIM(BOTH FROM oir.int_wife_address), ''::text), 'mobileNo', NULLIF(TRIM(BOTH FROM oir.int_wife_mobile_no), ''::text), 'occupation', NULLIF(TRIM(BOTH FROM oir.int_wife_occupation), ''::text), 'relationType', NULLIF(TRIM(BOTH FROM oir.int_relation_type_wife), ''::text))
-                            ELSE NULL::jsonb
-                        END)) AS family_members,
-                    '[]'::jsonb AS associate_details,
-                    '[]'::jsonb AS consumer_details,
-                    '[]'::jsonb AS defence_counsel,
-                    '[]'::jsonb AS dopams_links,
-                    '[]'::jsonb AS family_history,
-                    '[]'::jsonb AS financial_history,
-                    '[]'::jsonb AS local_contacts,
-                    '[]'::jsonb AS modus_operandi,
-                    '[]'::jsonb AS previous_offences_confessed,
-                    '[]'::jsonb AS regular_habits,
-                    '[]'::jsonb AS shelter,
-                    '[]'::jsonb AS sim_details,
-                    '[]'::jsonb AS types_of_drugs
-                   FROM public.old_interragation_report oir) base
-          GROUP BY base.crime_id) ir_details_data ON (((ir_details_data.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT fcp.crime_id,
-            jsonb_agg(jsonb_build_object('casePropertyId', fcp.case_property_id, 'caseType', NULLIF(TRIM(BOTH FROM fcp.case_type), ''::text), 'moId', NULLIF(TRIM(BOTH FROM fcp.mo_id), ''::text), 'status', NULLIF(TRIM(BOTH FROM fcp.status), ''::text), 'sendDate', fcp.send_date, 'fslDate', fcp.fsl_date, 'dateDisposal', fcp.date_disposal, 'releaseDate', fcp.release_date, 'returnDate', fcp.return_date, 'dateCustody', fcp.date_custody, 'dateSentToExpert', fcp.date_sent_to_expert, 'courtOrderDate', fcp.court_order_date, 'forwardingThrough', NULLIF(TRIM(BOTH FROM fcp.forwarding_through), ''::text), 'courtName', NULLIF(TRIM(BOTH FROM fcp.court_name), ''::text), 'fslCourtName', NULLIF(TRIM(BOTH FROM fcp.fsl_court_name), ''::text), 'cprCourtName', NULLIF(TRIM(BOTH FROM fcp.cpr_court_name), ''::text), 'courtOrderNumber', NULLIF(TRIM(BOTH FROM fcp.court_order_number), ''::text), 'fslNo', NULLIF(TRIM(BOTH FROM fcp.fsl_no), ''::text), 'fslRequestId', NULLIF(TRIM(BOTH FROM fcp.fsl_request_id), ''::text), 'reportReceived', fcp.report_received, 'opinion', NULLIF(TRIM(BOTH FROM fcp.opinion), ''::text), 'opinionFurnished', NULLIF(TRIM(BOTH FROM fcp.opinion_furnished), ''::text), 'strengthOfEvidence', NULLIF(TRIM(BOTH FROM fcp.strength_of_evidence), ''::text), 'expertType', NULLIF(TRIM(BOTH FROM fcp.expert_type), ''::text), 'otherExpertType', NULLIF(TRIM(BOTH FROM fcp.other_expert_type), ''::text), 'cprNo', NULLIF(TRIM(BOTH FROM fcp.cpr_no), ''::text), 'directionByCourt', NULLIF(TRIM(BOTH FROM fcp.direction_by_court), ''::text), 'detailsDisposal', NULLIF(TRIM(BOTH FROM fcp.details_disposal), ''::text), 'placeDisposal', NULLIF(TRIM(BOTH FROM fcp.place_disposal), ''::text), 'releaseOrderNo', NULLIF(TRIM(BOTH FROM fcp.release_order_no), ''::text), 'placeCustody', NULLIF(TRIM(BOTH FROM fcp.place_custody), ''::text), 'assignCustody', NULLIF(TRIM(BOTH FROM fcp.assign_custody), ''::text), 'propertyReceivedBack', fcp.property_received_back, 'dateCreated', fcp.date_created, 'dateModified', fcp.date_modified)) AS details
-           FROM public.fsl_case_property fcp
-          GROUP BY fcp.crime_id) fsl_case_property_details ON (((fsl_case_property_details.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT csu.crime_id,
-            jsonb_agg(jsonb_build_object('id', csu.id, 'updateChargeSheetId', NULLIF(TRIM(BOTH FROM csu.update_charge_sheet_id), ''::text), 'chargeSheetNo', NULLIF(TRIM(BOTH FROM csu.charge_sheet_no), ''::text), 'chargeSheetDate', csu.charge_sheet_date, 'chargeSheetStatus', NULLIF(TRIM(BOTH FROM csu.charge_sheet_status), ''::text), 'takenOnFileDate', csu.taken_on_file_date, 'takenOnFileCaseType', NULLIF(TRIM(BOTH FROM csu.taken_on_file_case_type), ''::text), 'takenOnFileCourtCaseNo', NULLIF(TRIM(BOTH FROM csu.taken_on_file_court_case_no), ''::text), 'dateCreated', csu.date_created)) AS chargesheet_updates
-           FROM public.charge_sheet_updates csu
-          GROUP BY csu.crime_id) chargesheet_updates_data ON (((chargesheet_updates_data.crime_id)::text = (c.crime_id)::text)))
-  WITH NO DATA;
-
-
-ALTER MATERIALIZED VIEW public.firs_mv OWNER TO postgres;
-
---
--- TOC entry 287 (class 1259 OID 1639532)
--- Name: fsl_case_property_media; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.fsl_case_property_media (
-    media_id uuid NOT NULL,
-    case_property_id character varying(255) NOT NULL,
-    file_id character varying(255)
-);
-
-
-ALTER TABLE public.fsl_case_property_media OWNER TO dev_dopamas;
-
---
--- TOC entry 4449 (class 0 OID 0)
--- Dependencies: 287
--- Name: TABLE fsl_case_property_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.fsl_case_property_media IS 'Media files associated with case properties';
-
-
---
--- TOC entry 252 (class 1259 OID 1397796)
--- Name: ir_associate_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_associate_details_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_associate_details_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4450 (class 0 OID 0)
--- Dependencies: 252
--- Name: ir_associate_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_associate_details_id_seq OWNED BY public.ir_associate_details.id;
-
-
---
--- TOC entry 244 (class 1259 OID 1397740)
--- Name: ir_consumer_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_consumer_details_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_consumer_details_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4451 (class 0 OID 0)
--- Dependencies: 244
--- Name: ir_consumer_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_consumer_details_id_seq OWNED BY public.ir_consumer_details.id;
-
-
---
--- TOC entry 250 (class 1259 OID 1397782)
--- Name: ir_defence_counsel_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_defence_counsel_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4452 (class 0 OID 0)
--- Dependencies: 250
--- Name: ir_defence_counsel_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNED BY public.ir_defence_counsel.id;
-
-
---
--- TOC entry 260 (class 1259 OID 1397856)
--- Name: ir_dopams_links_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_dopams_links_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_dopams_links_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4453 (class 0 OID 0)
--- Dependencies: 260
--- Name: ir_dopams_links_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_dopams_links_id_seq OWNED BY public.ir_dopams_links.id;
-
-
---
--- TOC entry 232 (class 1259 OID 1397653)
--- Name: ir_family_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_family_history_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_family_history_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4454 (class 0 OID 0)
--- Dependencies: 232
--- Name: ir_family_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_family_history_id_seq OWNED BY public.ir_family_history.id;
-
-
---
--- TOC entry 242 (class 1259 OID 1397726)
--- Name: ir_financial_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_financial_history_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_financial_history_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4455 (class 0 OID 0)
--- Dependencies: 242
--- Name: ir_financial_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_financial_history_id_seq OWNED BY public.ir_financial_history.id;
-
-
---
--- TOC entry 259 (class 1259 OID 1397841)
--- Name: ir_interrogation_report_refs; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_interrogation_report_refs (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    report_ref_id text NOT NULL
-);
-
-
-ALTER TABLE public.ir_interrogation_report_refs OWNER TO dev_dopamas;
-
---
--- TOC entry 4456 (class 0 OID 0)
--- Dependencies: 259
--- Name: TABLE ir_interrogation_report_refs; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_interrogation_report_refs IS 'Interrogation report references (UUIDs) for each IR record. One record per reference.';
-
-
---
--- TOC entry 258 (class 1259 OID 1397840)
--- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_interrogation_report_refs_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4457 (class 0 OID 0)
--- Dependencies: 258
--- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNED BY public.ir_interrogation_report_refs.id;
-
-
---
--- TOC entry 234 (class 1259 OID 1397670)
--- Name: ir_local_contacts_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_local_contacts_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_local_contacts_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4458 (class 0 OID 0)
--- Dependencies: 234
--- Name: ir_local_contacts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_local_contacts_id_seq OWNED BY public.ir_local_contacts.id;
-
-
---
--- TOC entry 257 (class 1259 OID 1397825)
--- Name: ir_media; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_media (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    media_id text NOT NULL
-);
-
-
-ALTER TABLE public.ir_media OWNER TO dev_dopamas;
-
---
--- TOC entry 4459 (class 0 OID 0)
--- Dependencies: 257
--- Name: TABLE ir_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_media IS 'Media references (UUIDs) for each IR record. One record per media reference.';
-
-
---
--- TOC entry 256 (class 1259 OID 1397824)
--- Name: ir_media_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_media_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_media_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4460 (class 0 OID 0)
--- Dependencies: 256
--- Name: ir_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_media_id_seq OWNED BY public.ir_media.id;
-
-
---
--- TOC entry 246 (class 1259 OID 1397754)
--- Name: ir_modus_operandi_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_modus_operandi_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4461 (class 0 OID 0)
--- Dependencies: 246
--- Name: ir_modus_operandi_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNED BY public.ir_modus_operandi.id;
-
-
---
--- TOC entry 248 (class 1259 OID 1397768)
--- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_previous_offences_confessed_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4462 (class 0 OID 0)
--- Dependencies: 248
--- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNED BY public.ir_previous_offences_confessed.id;
-
-
---
--- TOC entry 236 (class 1259 OID 1397684)
--- Name: ir_regular_habits_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_regular_habits_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_regular_habits_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4463 (class 0 OID 0)
--- Dependencies: 236
--- Name: ir_regular_habits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_regular_habits_id_seq OWNED BY public.ir_regular_habits.id;
-
-
---
--- TOC entry 254 (class 1259 OID 1397810)
--- Name: ir_shelter_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_shelter_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_shelter_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4464 (class 0 OID 0)
--- Dependencies: 254
--- Name: ir_shelter_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_shelter_id_seq OWNED BY public.ir_shelter.id;
-
-
---
--- TOC entry 240 (class 1259 OID 1397712)
--- Name: ir_sim_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_sim_details_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_sim_details_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4465 (class 0 OID 0)
--- Dependencies: 240
--- Name: ir_sim_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_sim_details_id_seq OWNED BY public.ir_sim_details.id;
-
-
---
--- TOC entry 238 (class 1259 OID 1397698)
--- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_types_of_drugs_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4466 (class 0 OID 0)
--- Dependencies: 238
--- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNED BY public.ir_types_of_drugs.id;
 
 
 --
@@ -4753,6 +3072,70 @@ ALTER SEQUENCE public.person_deduplication_tracker_id_seq OWNED BY public.person
 
 
 --
+-- TOC entry 230 (class 1259 OID 1397619)
+-- Name: properties; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.properties (
+    property_id character varying(50) NOT NULL,
+    crime_id character varying(50) NOT NULL,
+    case_property_id character varying(50),
+    property_status character varying(100),
+    recovered_from character varying(255),
+    place_of_recovery text,
+    date_of_seizure timestamp without time zone,
+    nature character varying(255),
+    belongs character varying(100),
+    estimate_value numeric(15,2) DEFAULT 0,
+    recovered_value numeric(15,2) DEFAULT 0,
+    particular_of_property text,
+    category character varying(100),
+    additional_details jsonb,
+    media jsonb DEFAULT '[]'::jsonb,
+    date_created timestamp without time zone,
+    date_modified timestamp without time zone
+);
+
+
+ALTER TABLE public.properties OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4471 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: TABLE properties; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.properties IS 'Seized and recovered property details linked to crimes';
+
+
+--
+-- TOC entry 4472 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: COLUMN properties.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.properties.case_property_id IS 'Reference to related case property (may be null)';
+
+
+--
+-- TOC entry 4473 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: COLUMN properties.additional_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.properties.additional_details IS 'JSONB field containing flexible additional data (drug details, vehicle info, etc.)';
+
+
+--
+-- TOC entry 4474 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: COLUMN properties.media; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.properties.media IS 'JSONB array of media attachments';
+
+
+--
 -- TOC entry 264 (class 1259 OID 1404739)
 -- Name: user; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
@@ -4772,7 +3155,7 @@ CREATE TABLE public."user" (
 ALTER TABLE public."user" OWNER TO dev_dopamas;
 
 --
--- TOC entry 3892 (class 2604 OID 2028692)
+-- TOC entry 3887 (class 2604 OID 2028692)
 -- Name: agent_deduplication_tracker id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4788,7 +3171,7 @@ ALTER TABLE ONLY public.brief_facts_drugs ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- TOC entry 3889 (class 2604 OID 1639317)
+-- TOC entry 3884 (class 2604 OID 1639317)
 -- Name: charge_sheet_updates id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4796,7 +3179,7 @@ ALTER TABLE ONLY public.charge_sheet_updates ALTER COLUMN id SET DEFAULT nextval
 
 
 --
--- TOC entry 3896 (class 2604 OID 2028693)
+-- TOC entry 3891 (class 2604 OID 2028693)
 -- Name: dedup_cluster_state id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4804,7 +3187,7 @@ ALTER TABLE ONLY public.dedup_cluster_state ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 3899 (class 2604 OID 2028694)
+-- TOC entry 3894 (class 2604 OID 2028694)
 -- Name: dedup_comparison_progress id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4812,7 +3195,7 @@ ALTER TABLE ONLY public.dedup_comparison_progress ALTER COLUMN id SET DEFAULT ne
 
 
 --
--- TOC entry 3902 (class 2604 OID 2028695)
+-- TOC entry 3897 (class 2604 OID 2028695)
 -- Name: dedup_run_metadata id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4820,7 +3203,7 @@ ALTER TABLE ONLY public.dedup_run_metadata ALTER COLUMN id SET DEFAULT nextval('
 
 
 --
--- TOC entry 3907 (class 2604 OID 20996615)
+-- TOC entry 3902 (class 2604 OID 20996615)
 -- Name: drug_categories id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4828,7 +3211,7 @@ ALTER TABLE ONLY public.drug_categories ALTER COLUMN id SET DEFAULT nextval('pub
 
 
 --
--- TOC entry 3910 (class 2604 OID 20996629)
+-- TOC entry 3905 (class 2604 OID 20996629)
 -- Name: drug_ignore_list id; Type: DEFAULT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4982,7 +3365,7 @@ ALTER TABLE ONLY public.accused
 
 
 --
--- TOC entry 4131 (class 2606 OID 2028697)
+-- TOC entry 4129 (class 2606 OID 2028697)
 -- Name: agent_deduplication_tracker agent_deduplication_tracker_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4991,7 +3374,7 @@ ALTER TABLE ONLY public.agent_deduplication_tracker
 
 
 --
--- TOC entry 4087 (class 2606 OID 1420503)
+-- TOC entry 4085 (class 2606 OID 1420503)
 -- Name: arrests arrests_crime_id_accused_seq_no_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5000,7 +3383,7 @@ ALTER TABLE ONLY public.arrests
 
 
 --
--- TOC entry 4089 (class 2606 OID 1420501)
+-- TOC entry 4087 (class 2606 OID 1420501)
 -- Name: arrests arrests_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5027,7 +3410,7 @@ ALTER TABLE ONLY public.brief_facts_crime_summaries
 
 
 --
--- TOC entry 4080 (class 2606 OID 1414256)
+-- TOC entry 4163 (class 2606 OID 22014304)
 -- Name: brief_facts_drug brief_facts_drug_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5045,7 +3428,7 @@ ALTER TABLE ONLY public.brief_facts_drugs
 
 
 --
--- TOC entry 4106 (class 2606 OID 1639319)
+-- TOC entry 4104 (class 2606 OID 1639319)
 -- Name: charge_sheet_updates charge_sheet_updates_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5054,7 +3437,7 @@ ALTER TABLE ONLY public.charge_sheet_updates
 
 
 --
--- TOC entry 4108 (class 2606 OID 1639321)
+-- TOC entry 4106 (class 2606 OID 1639321)
 -- Name: charge_sheet_updates charge_sheet_updates_update_charge_sheet_id_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5063,7 +3446,7 @@ ALTER TABLE ONLY public.charge_sheet_updates
 
 
 --
--- TOC entry 4102 (class 2606 OID 1422349)
+-- TOC entry 4100 (class 2606 OID 1422349)
 -- Name: chargesheet_accused chargesheet_accused_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5072,7 +3455,7 @@ ALTER TABLE ONLY public.chargesheet_accused
 
 
 --
--- TOC entry 4104 (class 2606 OID 1422368)
+-- TOC entry 4102 (class 2606 OID 1422368)
 -- Name: chargesheet_acts chargesheet_acts_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5081,7 +3464,7 @@ ALTER TABLE ONLY public.chargesheet_acts
 
 
 --
--- TOC entry 4100 (class 2606 OID 1422329)
+-- TOC entry 4098 (class 2606 OID 1422329)
 -- Name: chargesheet_files chargesheet_files_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5090,7 +3473,7 @@ ALTER TABLE ONLY public.chargesheet_files
 
 
 --
--- TOC entry 4098 (class 2606 OID 1422318)
+-- TOC entry 4096 (class 2606 OID 1422318)
 -- Name: chargesheets chargesheets_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5117,7 +3500,7 @@ ALTER TABLE ONLY public.crimes
 
 
 --
--- TOC entry 4133 (class 2606 OID 2028699)
+-- TOC entry 4131 (class 2606 OID 2028699)
 -- Name: dedup_cluster_state dedup_cluster_state_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5126,7 +3509,7 @@ ALTER TABLE ONLY public.dedup_cluster_state
 
 
 --
--- TOC entry 4140 (class 2606 OID 2028701)
+-- TOC entry 4138 (class 2606 OID 2028701)
 -- Name: dedup_comparison_progress dedup_comparison_progress_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5135,7 +3518,7 @@ ALTER TABLE ONLY public.dedup_comparison_progress
 
 
 --
--- TOC entry 4149 (class 2606 OID 2028710)
+-- TOC entry 4147 (class 2606 OID 2028710)
 -- Name: dedup_run_metadata dedup_run_metadata_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5144,7 +3527,7 @@ ALTER TABLE ONLY public.dedup_run_metadata
 
 
 --
--- TOC entry 4151 (class 2606 OID 2028712)
+-- TOC entry 4149 (class 2606 OID 2028712)
 -- Name: dedup_run_metadata dedup_run_metadata_run_id_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5153,7 +3536,7 @@ ALTER TABLE ONLY public.dedup_run_metadata
 
 
 --
--- TOC entry 4082 (class 2606 OID 1420063)
+-- TOC entry 4080 (class 2606 OID 1420063)
 -- Name: disposal disposal_crime_id_disposal_type_disposed_at_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5162,7 +3545,7 @@ ALTER TABLE ONLY public.disposal
 
 
 --
--- TOC entry 4084 (class 2606 OID 1420061)
+-- TOC entry 4082 (class 2606 OID 1420061)
 -- Name: disposal disposal_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5171,7 +3554,7 @@ ALTER TABLE ONLY public.disposal
 
 
 --
--- TOC entry 4158 (class 2606 OID 20996621)
+-- TOC entry 4153 (class 2606 OID 20996621)
 -- Name: drug_categories drug_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5180,7 +3563,7 @@ ALTER TABLE ONLY public.drug_categories
 
 
 --
--- TOC entry 4160 (class 2606 OID 20996623)
+-- TOC entry 4155 (class 2606 OID 20996623)
 -- Name: drug_categories drug_categories_raw_name_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5189,7 +3572,7 @@ ALTER TABLE ONLY public.drug_categories
 
 
 --
--- TOC entry 4163 (class 2606 OID 20996634)
+-- TOC entry 4158 (class 2606 OID 20996634)
 -- Name: drug_ignore_list drug_ignore_list_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5198,7 +3581,7 @@ ALTER TABLE ONLY public.drug_ignore_list
 
 
 --
--- TOC entry 4165 (class 2606 OID 20996636)
+-- TOC entry 4160 (class 2606 OID 20996636)
 -- Name: drug_ignore_list drug_ignore_list_term_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5216,7 +3599,7 @@ ALTER TABLE ONLY public.files
 
 
 --
--- TOC entry 4128 (class 2606 OID 1639538)
+-- TOC entry 4126 (class 2606 OID 1639538)
 -- Name: fsl_case_property_media fsl_case_property_media_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5225,7 +3608,7 @@ ALTER TABLE ONLY public.fsl_case_property_media
 
 
 --
--- TOC entry 4119 (class 2606 OID 1639526)
+-- TOC entry 4117 (class 2606 OID 1639526)
 -- Name: fsl_case_property fsl_case_property_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5414,7 +3797,7 @@ ALTER TABLE ONLY public.ir_types_of_drugs
 
 
 --
--- TOC entry 4096 (class 2606 OID 1420939)
+-- TOC entry 4094 (class 2606 OID 1420939)
 -- Name: mo_seizures mo_seizures_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5468,7 +3851,7 @@ ALTER TABLE ONLY public.properties
 
 
 --
--- TOC entry 4138 (class 2606 OID 2028714)
+-- TOC entry 4136 (class 2606 OID 2028714)
 -- Name: dedup_cluster_state uix_cluster_person; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5477,7 +3860,7 @@ ALTER TABLE ONLY public.dedup_cluster_state
 
 
 --
--- TOC entry 4147 (class 2606 OID 2028716)
+-- TOC entry 4145 (class 2606 OID 2028716)
 -- Name: dedup_comparison_progress uix_comparison_pair; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -5537,7 +3920,7 @@ CREATE INDEX idx_accused_person ON public.accused USING btree (person_id);
 
 
 --
--- TOC entry 4156 (class 1259 OID 20656031)
+-- TOC entry 4169 (class 1259 OID 22052656)
 -- Name: idx_accuseds_mv_unique_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5545,15 +3928,7 @@ CREATE UNIQUE INDEX idx_accuseds_mv_unique_id ON public.accuseds_mv USING btree 
 
 
 --
--- TOC entry 4154 (class 1259 OID 21337438)
--- Name: idx_adv_search_firs_mv_id; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE UNIQUE INDEX idx_adv_search_firs_mv_id ON public.advanced_search_firs_mv USING btree (id);
-
-
---
--- TOC entry 4090 (class 1259 OID 1420516)
+-- TOC entry 4088 (class 1259 OID 1420516)
 -- Name: idx_arrests_arrested_date; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5561,7 +3936,7 @@ CREATE INDEX idx_arrests_arrested_date ON public.arrests USING btree (arrested_d
 
 
 --
--- TOC entry 4091 (class 1259 OID 1420514)
+-- TOC entry 4089 (class 1259 OID 1420514)
 -- Name: idx_arrests_crime; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5569,11 +3944,27 @@ CREATE INDEX idx_arrests_crime ON public.arrests USING btree (crime_id);
 
 
 --
--- TOC entry 4092 (class 1259 OID 1420515)
+-- TOC entry 4090 (class 1259 OID 1420515)
 -- Name: idx_arrests_person; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
 CREATE INDEX idx_arrests_person ON public.arrests USING btree (person_id);
+
+
+--
+-- TOC entry 4172 (class 1259 OID 22052704)
+-- Name: idx_as_accuseds_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_as_accuseds_mv_id ON public.advanced_search_accuseds_mv USING btree (id);
+
+
+--
+-- TOC entry 4171 (class 1259 OID 22052695)
+-- Name: idx_as_firs_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_as_firs_mv_id ON public.advanced_search_firs_mv USING btree (id);
 
 
 --
@@ -5582,6 +3973,38 @@ CREATE INDEX idx_arrests_person ON public.arrests USING btree (person_id);
 --
 
 CREATE UNIQUE INDEX idx_bf_accused_crime_accused ON public.brief_facts_accused USING btree (crime_id, accused_id);
+
+
+--
+-- TOC entry 4164 (class 1259 OID 22014316)
+-- Name: idx_bfd_accused_id; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_bfd_accused_id ON public.brief_facts_drug USING btree (accused_id);
+
+
+--
+-- TOC entry 4165 (class 1259 OID 22014315)
+-- Name: idx_bfd_crime_id; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_bfd_crime_id ON public.brief_facts_drug USING btree (crime_id);
+
+
+--
+-- TOC entry 4166 (class 1259 OID 22014318)
+-- Name: idx_bfd_metadata; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_bfd_metadata ON public.brief_facts_drug USING gin (extraction_metadata);
+
+
+--
+-- TOC entry 4167 (class 1259 OID 22014317)
+-- Name: idx_bfd_primary_drug; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_bfd_primary_drug ON public.brief_facts_drug USING btree (primary_drug_name);
 
 
 --
@@ -5641,7 +4064,7 @@ CREATE INDEX idx_brief_facts_summaries_crime_id ON public.brief_facts_crime_summ
 
 
 --
--- TOC entry 4109 (class 1259 OID 1639330)
+-- TOC entry 4107 (class 1259 OID 1639330)
 -- Name: idx_charge_sheet_updates_charge_sheet_date; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5649,7 +4072,7 @@ CREATE INDEX idx_charge_sheet_updates_charge_sheet_date ON public.charge_sheet_u
 
 
 --
--- TOC entry 4110 (class 1259 OID 1639329)
+-- TOC entry 4108 (class 1259 OID 1639329)
 -- Name: idx_charge_sheet_updates_charge_sheet_no; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5657,7 +4080,7 @@ CREATE INDEX idx_charge_sheet_updates_charge_sheet_no ON public.charge_sheet_upd
 
 
 --
--- TOC entry 4111 (class 1259 OID 1639333)
+-- TOC entry 4109 (class 1259 OID 1639333)
 -- Name: idx_charge_sheet_updates_court_case_no; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5665,7 +4088,7 @@ CREATE INDEX idx_charge_sheet_updates_court_case_no ON public.charge_sheet_updat
 
 
 --
--- TOC entry 4112 (class 1259 OID 1639327)
+-- TOC entry 4110 (class 1259 OID 1639327)
 -- Name: idx_charge_sheet_updates_crime_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5673,7 +4096,7 @@ CREATE INDEX idx_charge_sheet_updates_crime_id ON public.charge_sheet_updates US
 
 
 --
--- TOC entry 4113 (class 1259 OID 1639334)
+-- TOC entry 4111 (class 1259 OID 1639334)
 -- Name: idx_charge_sheet_updates_date_status; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5681,7 +4104,7 @@ CREATE INDEX idx_charge_sheet_updates_date_status ON public.charge_sheet_updates
 
 
 --
--- TOC entry 4114 (class 1259 OID 1639331)
+-- TOC entry 4112 (class 1259 OID 1639331)
 -- Name: idx_charge_sheet_updates_status; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5689,7 +4112,7 @@ CREATE INDEX idx_charge_sheet_updates_status ON public.charge_sheet_updates USIN
 
 
 --
--- TOC entry 4115 (class 1259 OID 1639335)
+-- TOC entry 4113 (class 1259 OID 1639335)
 -- Name: idx_charge_sheet_updates_taken_on_file; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5697,7 +4120,7 @@ CREATE INDEX idx_charge_sheet_updates_taken_on_file ON public.charge_sheet_updat
 
 
 --
--- TOC entry 4116 (class 1259 OID 1639332)
+-- TOC entry 4114 (class 1259 OID 1639332)
 -- Name: idx_charge_sheet_updates_taken_on_file_date; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5705,7 +4128,7 @@ CREATE INDEX idx_charge_sheet_updates_taken_on_file_date ON public.charge_sheet_
 
 
 --
--- TOC entry 4117 (class 1259 OID 1639328)
+-- TOC entry 4115 (class 1259 OID 1639328)
 -- Name: idx_charge_sheet_updates_update_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5758,6 +4181,14 @@ CREATE INDEX idx_crimes_fir_reg_num ON public.crimes USING btree (fir_reg_num);
 --
 
 CREATE INDEX idx_crimes_ps_code ON public.crimes USING btree (ps_code);
+
+
+--
+-- TOC entry 4170 (class 1259 OID 22052676)
+-- Name: idx_criminal_profiles_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_criminal_profiles_mv_id ON public.criminal_profiles_mv USING btree (id);
 
 
 --
@@ -5825,7 +4256,7 @@ CREATE INDEX idx_dedup_tracker_tier ON public.person_deduplication_tracker USING
 
 
 --
--- TOC entry 4085 (class 1259 OID 1420069)
+-- TOC entry 4083 (class 1259 OID 1420069)
 -- Name: idx_disposal_crime; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5929,15 +4360,15 @@ CREATE INDEX idx_files_source_type_created ON public.files USING btree (source_t
 
 
 --
--- TOC entry 4155 (class 1259 OID 21343417)
--- Name: idx_firs_mv_unique_id; Type: INDEX; Schema: public; Owner: postgres
+-- TOC entry 4168 (class 1259 OID 22033587)
+-- Name: idx_firs_mv_unique_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
 CREATE UNIQUE INDEX idx_firs_mv_unique_id ON public.firs_mv USING btree (id);
 
 
 --
--- TOC entry 4120 (class 1259 OID 1639548)
+-- TOC entry 4118 (class 1259 OID 1639548)
 -- Name: idx_fsl_case_property_case_type; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5945,7 +4376,7 @@ CREATE INDEX idx_fsl_case_property_case_type ON public.fsl_case_property USING b
 
 
 --
--- TOC entry 4121 (class 1259 OID 1639545)
+-- TOC entry 4119 (class 1259 OID 1639545)
 -- Name: idx_fsl_case_property_crime_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5953,7 +4384,7 @@ CREATE INDEX idx_fsl_case_property_crime_id ON public.fsl_case_property USING bt
 
 
 --
--- TOC entry 4122 (class 1259 OID 1639551)
+-- TOC entry 4120 (class 1259 OID 1639551)
 -- Name: idx_fsl_case_property_date_created; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5961,7 +4392,7 @@ CREATE INDEX idx_fsl_case_property_date_created ON public.fsl_case_property USIN
 
 
 --
--- TOC entry 4123 (class 1259 OID 1639550)
+-- TOC entry 4121 (class 1259 OID 1639550)
 -- Name: idx_fsl_case_property_fsl_date; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5969,7 +4400,7 @@ CREATE INDEX idx_fsl_case_property_fsl_date ON public.fsl_case_property USING bt
 
 
 --
--- TOC entry 4129 (class 1259 OID 1639552)
+-- TOC entry 4127 (class 1259 OID 1639552)
 -- Name: idx_fsl_case_property_media_case_property_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5977,7 +4408,7 @@ CREATE INDEX idx_fsl_case_property_media_case_property_id ON public.fsl_case_pro
 
 
 --
--- TOC entry 4124 (class 1259 OID 1639546)
+-- TOC entry 4122 (class 1259 OID 1639546)
 -- Name: idx_fsl_case_property_mo_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5985,7 +4416,7 @@ CREATE INDEX idx_fsl_case_property_mo_id ON public.fsl_case_property USING btree
 
 
 --
--- TOC entry 4125 (class 1259 OID 1639549)
+-- TOC entry 4123 (class 1259 OID 1639549)
 -- Name: idx_fsl_case_property_send_date; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5993,7 +4424,7 @@ CREATE INDEX idx_fsl_case_property_send_date ON public.fsl_case_property USING b
 
 
 --
--- TOC entry 4126 (class 1259 OID 1639547)
+-- TOC entry 4124 (class 1259 OID 1639547)
 -- Name: idx_fsl_case_property_status; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6033,7 +4464,7 @@ CREATE INDEX idx_hierarchy_zone_code ON public.hierarchy USING btree (zone_code)
 
 
 --
--- TOC entry 4166 (class 1259 OID 20996637)
+-- TOC entry 4161 (class 1259 OID 20996637)
 -- Name: idx_ignore_term; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6313,7 +4744,7 @@ CREATE INDEX idx_ir_types_of_drugs_type ON public.ir_types_of_drugs USING btree 
 
 
 --
--- TOC entry 4093 (class 1259 OID 1420945)
+-- TOC entry 4091 (class 1259 OID 1420945)
 -- Name: idx_mo_seizures_crime; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6321,7 +4752,7 @@ CREATE INDEX idx_mo_seizures_crime ON public.mo_seizures USING btree (crime_id);
 
 
 --
--- TOC entry 4094 (class 1259 OID 1420946)
+-- TOC entry 4092 (class 1259 OID 1420946)
 -- Name: idx_mo_seizures_seized_at; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6457,7 +4888,7 @@ CREATE INDEX idx_summaries_model ON public.brief_facts_crime_summaries USING btr
 
 
 --
--- TOC entry 4134 (class 1259 OID 2028717)
+-- TOC entry 4132 (class 1259 OID 2028717)
 -- Name: ix_dedup_cluster_person_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6465,7 +4896,7 @@ CREATE INDEX ix_dedup_cluster_person_id ON public.dedup_cluster_state USING btre
 
 
 --
--- TOC entry 4135 (class 1259 OID 2028718)
+-- TOC entry 4133 (class 1259 OID 2028718)
 -- Name: ix_dedup_cluster_state_cluster_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6473,7 +4904,7 @@ CREATE INDEX ix_dedup_cluster_state_cluster_id ON public.dedup_cluster_state USI
 
 
 --
--- TOC entry 4136 (class 1259 OID 2028719)
+-- TOC entry 4134 (class 1259 OID 2028719)
 -- Name: ix_dedup_cluster_state_person_index; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6481,7 +4912,7 @@ CREATE INDEX ix_dedup_cluster_state_person_index ON public.dedup_cluster_state U
 
 
 --
--- TOC entry 4141 (class 1259 OID 2028720)
+-- TOC entry 4139 (class 1259 OID 2028720)
 -- Name: ix_dedup_comparison_persons; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6489,7 +4920,7 @@ CREATE INDEX ix_dedup_comparison_persons ON public.dedup_comparison_progress USI
 
 
 --
--- TOC entry 4142 (class 1259 OID 2028721)
+-- TOC entry 4140 (class 1259 OID 2028721)
 -- Name: ix_dedup_comparison_progress_person_i_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6497,7 +4928,7 @@ CREATE INDEX ix_dedup_comparison_progress_person_i_id ON public.dedup_comparison
 
 
 --
--- TOC entry 4143 (class 1259 OID 2028722)
+-- TOC entry 4141 (class 1259 OID 2028722)
 -- Name: ix_dedup_comparison_progress_person_i_index; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6505,7 +4936,7 @@ CREATE INDEX ix_dedup_comparison_progress_person_i_index ON public.dedup_compari
 
 
 --
--- TOC entry 4144 (class 1259 OID 2028723)
+-- TOC entry 4142 (class 1259 OID 2028723)
 -- Name: ix_dedup_comparison_progress_person_j_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6513,7 +4944,7 @@ CREATE INDEX ix_dedup_comparison_progress_person_j_id ON public.dedup_comparison
 
 
 --
--- TOC entry 4145 (class 1259 OID 2028724)
+-- TOC entry 4143 (class 1259 OID 2028724)
 -- Name: ix_dedup_comparison_progress_person_j_index; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6521,7 +4952,7 @@ CREATE INDEX ix_dedup_comparison_progress_person_j_index ON public.dedup_compari
 
 
 --
--- TOC entry 4152 (class 1259 OID 2028725)
+-- TOC entry 4150 (class 1259 OID 2028725)
 -- Name: ix_dedup_run_metadata_run_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6529,7 +4960,7 @@ CREATE INDEX ix_dedup_run_metadata_run_id ON public.dedup_run_metadata USING btr
 
 
 --
--- TOC entry 4153 (class 1259 OID 2028726)
+-- TOC entry 4151 (class 1259 OID 2028726)
 -- Name: ix_dedup_run_status; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6537,7 +4968,7 @@ CREATE INDEX ix_dedup_run_status ON public.dedup_run_metadata USING btree (statu
 
 
 --
--- TOC entry 4161 (class 1259 OID 20996624)
+-- TOC entry 4156 (class 1259 OID 20996624)
 -- Name: trgm_idx_drug_raw_name; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -6553,7 +4984,7 @@ CREATE UNIQUE INDEX user_email_key ON public."user" USING btree (email);
 
 
 --
--- TOC entry 4205 (class 2620 OID 1412953)
+-- TOC entry 4212 (class 2620 OID 1412953)
 -- Name: files trigger_auto_generate_file_paths; Type: TRIGGER; Schema: public; Owner: dev_dopamas
 --
 
@@ -6561,7 +4992,7 @@ CREATE TRIGGER trigger_auto_generate_file_paths BEFORE INSERT OR UPDATE ON publi
 
 
 --
--- TOC entry 4168 (class 2606 OID 1397609)
+-- TOC entry 4174 (class 2606 OID 1397609)
 -- Name: accused accused_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6570,7 +5001,7 @@ ALTER TABLE ONLY public.accused
 
 
 --
--- TOC entry 4169 (class 2606 OID 1397614)
+-- TOC entry 4175 (class 2606 OID 1397614)
 -- Name: accused accused_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6579,7 +5010,7 @@ ALTER TABLE ONLY public.accused
 
 
 --
--- TOC entry 4192 (class 2606 OID 1420504)
+-- TOC entry 4197 (class 2606 OID 1420504)
 -- Name: arrests arrests_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6588,7 +5019,7 @@ ALTER TABLE ONLY public.arrests
 
 
 --
--- TOC entry 4193 (class 2606 OID 1420509)
+-- TOC entry 4198 (class 2606 OID 1420509)
 -- Name: arrests arrests_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6597,16 +5028,25 @@ ALTER TABLE ONLY public.arrests
 
 
 --
--- TOC entry 4190 (class 2606 OID 1414257)
+-- TOC entry 4210 (class 2606 OID 22014310)
+-- Name: brief_facts_drug brief_facts_drug_accused_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
+--
+
+ALTER TABLE ONLY public.brief_facts_drug
+    ADD CONSTRAINT brief_facts_drug_accused_id_fkey FOREIGN KEY (accused_id) REFERENCES public.accused(accused_id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4211 (class 2606 OID 22014305)
 -- Name: brief_facts_drug brief_facts_drug_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
 ALTER TABLE ONLY public.brief_facts_drug
-    ADD CONSTRAINT brief_facts_drug_crime_id_fkey FOREIGN KEY (crime_id) REFERENCES public.crimes(crime_id);
+    ADD CONSTRAINT brief_facts_drug_crime_id_fkey FOREIGN KEY (crime_id) REFERENCES public.crimes(crime_id) ON DELETE CASCADE;
 
 
 --
--- TOC entry 4202 (class 2606 OID 1639322)
+-- TOC entry 4207 (class 2606 OID 1639322)
 -- Name: charge_sheet_updates charge_sheet_updates_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6615,7 +5055,7 @@ ALTER TABLE ONLY public.charge_sheet_updates
 
 
 --
--- TOC entry 4198 (class 2606 OID 1422350)
+-- TOC entry 4203 (class 2606 OID 1422350)
 -- Name: chargesheet_accused chargesheet_accused_chargesheet_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6624,7 +5064,7 @@ ALTER TABLE ONLY public.chargesheet_accused
 
 
 --
--- TOC entry 4200 (class 2606 OID 1422369)
+-- TOC entry 4205 (class 2606 OID 1422369)
 -- Name: chargesheet_acts chargesheet_acts_chargesheet_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6633,7 +5073,7 @@ ALTER TABLE ONLY public.chargesheet_acts
 
 
 --
--- TOC entry 4196 (class 2606 OID 1422330)
+-- TOC entry 4201 (class 2606 OID 1422330)
 -- Name: chargesheet_files chargesheet_files_chargesheet_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6642,7 +5082,7 @@ ALTER TABLE ONLY public.chargesheet_files
 
 
 --
--- TOC entry 4195 (class 2606 OID 1422319)
+-- TOC entry 4200 (class 2606 OID 1422319)
 -- Name: chargesheets chargesheets_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6651,7 +5091,7 @@ ALTER TABLE ONLY public.chargesheets
 
 
 --
--- TOC entry 4167 (class 2606 OID 1397593)
+-- TOC entry 4173 (class 2606 OID 1397593)
 -- Name: crimes crimes_ps_code_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6660,7 +5100,7 @@ ALTER TABLE ONLY public.crimes
 
 
 --
--- TOC entry 4191 (class 2606 OID 1420064)
+-- TOC entry 4196 (class 2606 OID 1420064)
 -- Name: disposal disposal_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6669,7 +5109,7 @@ ALTER TABLE ONLY public.disposal
 
 
 --
--- TOC entry 4188 (class 2606 OID 1404637)
+-- TOC entry 4194 (class 2606 OID 1404637)
 -- Name: brief_facts_accused fk_bf_accused_crime; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6678,7 +5118,7 @@ ALTER TABLE ONLY public.brief_facts_accused
 
 
 --
--- TOC entry 4199 (class 2606 OID 1422355)
+-- TOC entry 4204 (class 2606 OID 1422355)
 -- Name: chargesheet_accused fk_chargesheet_accused_chargesheet; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6687,7 +5127,7 @@ ALTER TABLE ONLY public.chargesheet_accused
 
 
 --
--- TOC entry 4201 (class 2606 OID 1422374)
+-- TOC entry 4206 (class 2606 OID 1422374)
 -- Name: chargesheet_acts fk_chargesheet_acts_chargesheet; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6696,7 +5136,7 @@ ALTER TABLE ONLY public.chargesheet_acts
 
 
 --
--- TOC entry 4197 (class 2606 OID 1422335)
+-- TOC entry 4202 (class 2606 OID 1422335)
 -- Name: chargesheet_files fk_chargesheet_files_chargesheet; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6705,7 +5145,7 @@ ALTER TABLE ONLY public.chargesheet_files
 
 
 --
--- TOC entry 4189 (class 2606 OID 1413505)
+-- TOC entry 4195 (class 2606 OID 1413505)
 -- Name: old_interragation_report fk_crime; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6714,7 +5154,7 @@ ALTER TABLE ONLY public.old_interragation_report
 
 
 --
--- TOC entry 4187 (class 2606 OID 1404615)
+-- TOC entry 4193 (class 2606 OID 1404615)
 -- Name: brief_facts_crime_summaries fk_summaries_crime; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6723,7 +5163,7 @@ ALTER TABLE ONLY public.brief_facts_crime_summaries
 
 
 --
--- TOC entry 4203 (class 2606 OID 1639527)
+-- TOC entry 4208 (class 2606 OID 1639527)
 -- Name: fsl_case_property fsl_case_property_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6732,7 +5172,7 @@ ALTER TABLE ONLY public.fsl_case_property
 
 
 --
--- TOC entry 4204 (class 2606 OID 1639539)
+-- TOC entry 4209 (class 2606 OID 1639539)
 -- Name: fsl_case_property_media fsl_case_property_media_case_property_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6741,7 +5181,7 @@ ALTER TABLE ONLY public.fsl_case_property_media
 
 
 --
--- TOC entry 4171 (class 2606 OID 1397648)
+-- TOC entry 4177 (class 2606 OID 1397648)
 -- Name: interrogation_reports interrogation_reports_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6750,7 +5190,7 @@ ALTER TABLE ONLY public.interrogation_reports
 
 
 --
--- TOC entry 4182 (class 2606 OID 1397805)
+-- TOC entry 4188 (class 2606 OID 1397805)
 -- Name: ir_associate_details ir_associate_details_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6759,7 +5199,7 @@ ALTER TABLE ONLY public.ir_associate_details
 
 
 --
--- TOC entry 4178 (class 2606 OID 1397749)
+-- TOC entry 4184 (class 2606 OID 1397749)
 -- Name: ir_consumer_details ir_consumer_details_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6768,7 +5208,7 @@ ALTER TABLE ONLY public.ir_consumer_details
 
 
 --
--- TOC entry 4181 (class 2606 OID 1397791)
+-- TOC entry 4187 (class 2606 OID 1397791)
 -- Name: ir_defence_counsel ir_defence_counsel_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6777,7 +5217,7 @@ ALTER TABLE ONLY public.ir_defence_counsel
 
 
 --
--- TOC entry 4186 (class 2606 OID 1397865)
+-- TOC entry 4192 (class 2606 OID 1397865)
 -- Name: ir_dopams_links ir_dopams_links_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6786,7 +5226,7 @@ ALTER TABLE ONLY public.ir_dopams_links
 
 
 --
--- TOC entry 4172 (class 2606 OID 1397665)
+-- TOC entry 4178 (class 2606 OID 1397665)
 -- Name: ir_family_history ir_family_history_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6795,7 +5235,7 @@ ALTER TABLE ONLY public.ir_family_history
 
 
 --
--- TOC entry 4177 (class 2606 OID 1397735)
+-- TOC entry 4183 (class 2606 OID 1397735)
 -- Name: ir_financial_history ir_financial_history_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6804,7 +5244,7 @@ ALTER TABLE ONLY public.ir_financial_history
 
 
 --
--- TOC entry 4185 (class 2606 OID 1397851)
+-- TOC entry 4191 (class 2606 OID 1397851)
 -- Name: ir_interrogation_report_refs ir_interrogation_report_refs_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6813,7 +5253,7 @@ ALTER TABLE ONLY public.ir_interrogation_report_refs
 
 
 --
--- TOC entry 4173 (class 2606 OID 1397679)
+-- TOC entry 4179 (class 2606 OID 1397679)
 -- Name: ir_local_contacts ir_local_contacts_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6822,7 +5262,7 @@ ALTER TABLE ONLY public.ir_local_contacts
 
 
 --
--- TOC entry 4184 (class 2606 OID 1397835)
+-- TOC entry 4190 (class 2606 OID 1397835)
 -- Name: ir_media ir_media_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6831,7 +5271,7 @@ ALTER TABLE ONLY public.ir_media
 
 
 --
--- TOC entry 4179 (class 2606 OID 1397763)
+-- TOC entry 4185 (class 2606 OID 1397763)
 -- Name: ir_modus_operandi ir_modus_operandi_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6840,7 +5280,7 @@ ALTER TABLE ONLY public.ir_modus_operandi
 
 
 --
--- TOC entry 4180 (class 2606 OID 1397777)
+-- TOC entry 4186 (class 2606 OID 1397777)
 -- Name: ir_previous_offences_confessed ir_previous_offences_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6849,7 +5289,7 @@ ALTER TABLE ONLY public.ir_previous_offences_confessed
 
 
 --
--- TOC entry 4174 (class 2606 OID 1397693)
+-- TOC entry 4180 (class 2606 OID 1397693)
 -- Name: ir_regular_habits ir_regular_habits_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6858,7 +5298,7 @@ ALTER TABLE ONLY public.ir_regular_habits
 
 
 --
--- TOC entry 4183 (class 2606 OID 1397819)
+-- TOC entry 4189 (class 2606 OID 1397819)
 -- Name: ir_shelter ir_shelter_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6867,7 +5307,7 @@ ALTER TABLE ONLY public.ir_shelter
 
 
 --
--- TOC entry 4176 (class 2606 OID 1397721)
+-- TOC entry 4182 (class 2606 OID 1397721)
 -- Name: ir_sim_details ir_sim_details_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6876,7 +5316,7 @@ ALTER TABLE ONLY public.ir_sim_details
 
 
 --
--- TOC entry 4175 (class 2606 OID 1397707)
+-- TOC entry 4181 (class 2606 OID 1397707)
 -- Name: ir_types_of_drugs ir_types_of_drugs_ir_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6885,7 +5325,7 @@ ALTER TABLE ONLY public.ir_types_of_drugs
 
 
 --
--- TOC entry 4194 (class 2606 OID 1420940)
+-- TOC entry 4199 (class 2606 OID 1420940)
 -- Name: mo_seizures mo_seizures_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6894,7 +5334,7 @@ ALTER TABLE ONLY public.mo_seizures
 
 
 --
--- TOC entry 4170 (class 2606 OID 1397629)
+-- TOC entry 4176 (class 2606 OID 1397629)
 -- Name: properties properties_crime_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -6903,7 +5343,7 @@ ALTER TABLE ONLY public.properties
 
 
 --
--- TOC entry 4365 (class 0 OID 0)
+-- TOC entry 4372 (class 0 OID 0)
 -- Dependencies: 8
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
 --
@@ -6912,7 +5352,7 @@ GRANT ALL ON SCHEMA public TO dev_dopamas;
 
 
 --
--- TOC entry 4375 (class 0 OID 0)
+-- TOC entry 4382 (class 0 OID 0)
 -- Dependencies: 263
 -- Name: TABLE brief_facts_accused; Type: ACL; Schema: public; Owner: dev_dopamas
 --
@@ -6922,39 +5362,12 @@ GRANT SELECT ON TABLE public.brief_facts_accused TO dopamas_chat_ur;
 
 
 --
--- TOC entry 4397 (class 0 OID 0)
--- Dependencies: 278
+-- TOC entry 4404 (class 0 OID 0)
+-- Dependencies: 276
 -- Name: TABLE _persons; Type: ACL; Schema: public; Owner: dopamasprd_ur
 --
 
 GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE public._persons TO dev_dopamas;
-
-
---
--- TOC entry 4398 (class 0 OID 0)
--- Dependencies: 283
--- Name: TABLE advanced_search_accuseds; Type: ACL; Schema: public; Owner: dopamasprd_ur
---
-
-GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE public.advanced_search_accuseds TO dev_dopamas;
-
-
---
--- TOC entry 4399 (class 0 OID 0)
--- Dependencies: 277
--- Name: TABLE advanced_search_firs; Type: ACL; Schema: public; Owner: dopamasprd_ur
---
-
-GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE public.advanced_search_firs TO dev_dopamas;
-
-
---
--- TOC entry 4427 (class 0 OID 0)
--- Dependencies: 296
--- Name: TABLE criminal_profiles_mv; Type: ACL; Schema: public; Owner: dopamasprd_ur
---
-
-GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE public.criminal_profiles_mv TO dev_dopamas;
 
 
 --
@@ -6973,11 +5386,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT ALL ON SE
 ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLES TO dev_dopamas;
 
 
--- Completed on 2026-02-26 16:12:09
+-- Completed on 2026-02-27 01:44:30
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict flOYeFdlYrld34oiQ78FbqAG5py2jG50fg0fAXDOo1pbCMa8dPchHNsAUKbg7pi
+\unrestrict xYDNRhfxPaMXKV5i8HhzaINuY9I3ILtbB6JFzuj0bmF2dvMsMXJ2gb32Agotjft
 

@@ -19,6 +19,21 @@ def get_db_connection():
         print(f"Error connecting to database: {e}")
         raise
 
+def fetch_drug_categories(conn):
+    """
+    Fetches the knowledge base of drug categories, mapping raw_name -> standard_name.
+    """
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Assumes the table is called `drug_categories` and has columns `raw_name` and `standard_name` 
+            # as per user instructions.
+            query = "SELECT raw_name, standard_name FROM public.drug_categories"
+            cur.execute(query)
+            return cur.fetchall()
+    except Exception as e:
+        print(f"Warning: Could not fetch drug_categories: {e}")
+        return []
+
 def fetch_crimes_by_ids(conn, crime_ids):
     """
     Fetches specific crimes based on a list of IDs.
@@ -53,30 +68,31 @@ def insert_drug_facts(conn, crime_id, drug_data):
     with conn.cursor() as cur:
         query = sql.SQL("""
             INSERT INTO {table} 
-            (crime_id, drug_name, quantity_numeric, quantity_unit, drug_form, packaging_details, confidence_score, 
-             standardized_weight_kg, standardized_volume_ml, standardized_count, primary_unit_type, 
-             is_commercial, seizure_worth, extraction_metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (crime_id, accused_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form,
+             weight_g, weight_kg, volume_ml, volume_l, count_total,
+             confidence_score, extraction_metadata, is_commercial, seizure_worth)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
         
         import json
         
         cur.execute(query, (
             crime_id,
-            drug_data.get('drug_name'),
-            drug_data.get('quantity_numeric'),
-            drug_data.get('quantity_unit'),
+            drug_data.get('accused_id'),
+            drug_data.get('raw_drug_name'),
+            drug_data.get('raw_quantity'),
+            drug_data.get('raw_unit'),
+            drug_data.get('primary_drug_name'),
             drug_data.get('drug_form'),
-            drug_data.get('packaging_details'),
+            drug_data.get('weight_g'),
+            drug_data.get('weight_kg'),
+            drug_data.get('volume_ml'),
+            drug_data.get('volume_l'),
+            drug_data.get('count_total'),
             drug_data.get('confidence_score'),
-            # New Fields
-            drug_data.get('standardized_weight_kg'),
-            drug_data.get('standardized_volume_ml'),
-            drug_data.get('standardized_count'),
-            drug_data.get('primary_unit_type'),
+            json.dumps(drug_data.get('extraction_metadata', {})),
             drug_data.get('is_commercial', False),
-            drug_data.get('seizure_worth', 0.0),
-            json.dumps(drug_data)
+            drug_data.get('seizure_worth', 0.0)
         ))
     conn.commit()
 

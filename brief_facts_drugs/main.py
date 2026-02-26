@@ -1,7 +1,7 @@
 
 import sys
 import logging
-from db import get_db_connection, fetch_crimes_by_ids, insert_drug_facts, fetch_unprocessed_crimes
+from db import get_db_connection, fetch_crimes_by_ids, insert_drug_facts, fetch_unprocessed_crimes, fetch_drug_categories
 from extractor import extract_drug_info
 
 # Configure logging
@@ -17,6 +17,11 @@ def main():
     try:
         conn = get_db_connection()
         logging.info("Database connection established.")
+        
+        # 1.5 Fetch Knowledge Base
+        drug_categories = fetch_drug_categories(conn)
+        logging.info(f"Loaded {len(drug_categories)} drug categories from knowledge base.")
+        
     except Exception as e:
         logging.error(f"Failed to connect to DB: {e}")
         sys.exit(1)
@@ -38,7 +43,7 @@ def main():
             # Manual Mode: Process specific IDs from file
             logging.info(f"Read {len(crime_ids)} IDs from {input_file}. Fetching from DB...")
             crimes = fetch_crimes_by_ids(conn, crime_ids)
-            process_crimes(conn, crimes)
+            process_crimes(conn, crimes, drug_categories)
         else:
             # Dynamic Mode: Process ALL unprocessed crimes in batches
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
@@ -52,7 +57,7 @@ def main():
                     break
                     
                 logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                process_crimes(conn, crimes)
+                process_crimes(conn, crimes, drug_categories)
                 total_processed += len(crimes)
                 logging.info(f"Batch complete. Total processed so far: {total_processed}")
                 
@@ -64,7 +69,10 @@ def main():
         conn.close()
         logging.info("Database connection closed.")
 
-def process_crimes(conn, crimes):
+def process_crimes(conn, crimes, drug_categories=None):
+    if drug_categories is None:
+        drug_categories = []
+        
     for crime in crimes:
         crime_id = crime['crime_id']
         facts_text = crime['brief_facts']
@@ -73,7 +81,7 @@ def process_crimes(conn, crimes):
         
         # 3. Extract Info
         try:
-            extractions = extract_drug_info(facts_text)
+            extractions = extract_drug_info(facts_text, drug_categories)
         except Exception as e:
             logging.error(f"Extraction failed for Crime {crime_id}: {e}")
             continue
@@ -92,8 +100,8 @@ def process_crimes(conn, crimes):
         count = 0
         for drug in extractions:
             # Guard: reject vague/placeholder drug names
-            if drug.drug_name.strip().lower() in INVALID_DRUG_NAMES:
-                logging.info(f"Skipping invalid drug name '{drug.drug_name}' for Crime {crime_id}.")
+            if drug.primary_drug_name.strip().lower() in INVALID_DRUG_NAMES:
+                logging.info(f"Skipping invalid drug name '{drug.primary_drug_name}' for Crime {crime_id}.")
                 continue
 
             # User Requirement: Confidence score check (90+)
@@ -101,7 +109,7 @@ def process_crimes(conn, crimes):
                 insert_drug_facts(conn, crime_id, drug.model_dump())
                 count += 1
             else:
-                logging.info(f"Skipping low confidence extraction ({drug.confidence_score}%): {drug.drug_name}")
+                logging.info(f"Skipping low confidence extraction ({drug.confidence_score}%): {drug.primary_drug_name}")
         
         # CRITICAL: If no drugs were inserted (either none found, or all low confidence),
         # we MUST insert a placeholder to mark this crime as "processed".
@@ -109,15 +117,21 @@ def process_crimes(conn, crimes):
         if count == 0:
             logging.info(f"Marking Crime {crime_id} as processed (NO_DRUGS_DETECTED).")
             placeholder = {
-                "drug_name": "NO_DRUGS_DETECTED",
-                "quantity_numeric": 0,
-                "quantity_unit": "None",
-                "standardized_quantity_kg": 0,
-                "standardized_unit": "Count",
+                "raw_drug_name": "NO_DRUGS_DETECTED",
+                "raw_quantity": 0,
+                "raw_unit": "None",
+                "primary_drug_name": "NO_DRUGS_DETECTED",
                 "drug_form": "None",
-                "packaging_details": "None",
+                "accused_id": None,
+                "weight_g": 0,
+                "weight_kg": 0,
+                "volume_ml": 0,
+                "volume_l": 0,
+                "count_total": 0,
                 "confidence_score": 100,
-                "extraction_metadata": {}
+                "extraction_metadata": {"source_sentence": "Placeholder for zero detections"},
+                "is_commercial": False,
+                "seizure_worth": 0.0
             }
             insert_drug_facts(conn, crime_id, placeholder)
 
