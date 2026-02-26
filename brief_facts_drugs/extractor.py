@@ -13,11 +13,30 @@ import config
 
 # --- Data Models ---
 # --- Data Models ---
+# Controlled vocabulary for drug physical state/form.
+# This drives unit validation — the form MUST be consistent with the unit used.
+# solid/powder/dry/resin/paste  → kg/grams only
+# liquid/syrup/oil/solution     → litres/ml only
+# tablet/pill/capsule/paper/seed/count → count (nos/pieces/tablets) only
+DRUG_FORM_SOLID   = {'solid', 'dry', 'powder', 'paste', 'resin', 'chunk', 'crystal', 'granule', 'leaf', 'dried', 'compressed'}
+DRUG_FORM_LIQUID  = {'liquid', 'syrup', 'oil', 'solution', 'tincture', 'extract', 'concentrate', 'fluid', 'injection'}
+DRUG_FORM_COUNT   = {'tablet', 'pill', 'capsule', 'paper', 'blot', 'seed', 'strip', 'sachet', 'ampule', 'vial', 'bottle'}
+
 class DrugExtraction(BaseModel):
     drug_name: str
     quantity_numeric: Optional[float] = 0.0
     quantity_unit: Optional[str] = Field(default="Unknown") # Handle None input
-    drug_form: Optional[str] = Field(default="Unknown")
+    drug_form: Optional[str] = Field(
+        default="Unknown",
+        description=(
+            "Physical state/form of the drug. Must be one of: "
+            "solid, dry, powder, paste, resin, chunk, crystal, leaf, compressed, "
+            "liquid, syrup, oil, solution, tincture, extract, concentrate, "
+            "tablet, pill, capsule, paper, blot, seed, strip, sachet, bottle. "
+            "This MUST match the unit: solid forms use kg/grams, liquids use litres/ml, "
+            "tablet/pill/count forms use pieces/nos/tablets."
+        )
+    )
     packaging_details: Optional[str] = Field(default="")
     confidence_score: Optional[int] = 80
     
@@ -50,7 +69,17 @@ You are an expert forensic data analyst. Your task is to extract structured drug
 6. **Written Numbers**: Convert "one" -> 1.0, "two" -> 2.0.
 7. **Lists**: If the text lists multiple items (1. X, 2. Y, 3. Z), extract **EVERY SINGLE ITEM** in the list.
 8. **Unknown Drug Names**: If you cannot identify the specific drug name from the text, **DO NOT** return a record for it. Never use "Unknown", "Unidentified", "Unknown Drug", "Unknown Substance", or similar vague placeholders as `drug_name`. If the drug is unidentifiable, skip it entirely.
-9. **Seizure Worth**: Extract `seizure_worth` (monetary value) if mentioned in the text. Look for phrases like:
+9. **Drug Form (Physical State) — MANDATORY**: Always extract `drug_form` as the physical state of the drug itself. Use ONLY these values:
+   - **Solid forms** → `dry`, `powder`, `paste`, `resin`, `chunk`, `crystal`, `compressed`, `leaf`, `solid`
+   - **Liquid forms** → `liquid`, `syrup`, `oil`, `solution`, `tincture`, `extract`, `concentrate`
+   - **Count forms** → `tablet`, `pill`, `capsule`, `paper`, `blot`, `seed`, `strip`, `sachet`
+   - If unknown, use `solid` as default for plant-based drugs (Ganja, Heroin, Cocaine, Hashish).
+10. **Form-Unit Consistency — STRICT RULE**: The `drug_form` MUST match the unit you use:
+    - `dry / powder / paste / resin / leaf / solid / compressed` → unit MUST be `grams` or `kg`. NEVER litres/ml.
+    - `liquid / syrup / oil / solution / tincture / extract` → unit MUST be `ml` or `litres`.
+    - `tablet / pill / capsule / paper / blot / strip / sachet` → unit MUST be `nos`, `pieces`, or `tablets`.
+    - **If text gives a container volume for a solid drug** (e.g. "1 litre tin of ganja"), extract the weight if stated; if only volume is given, set `drug_form=dry`, use the weight unit and set quantity to 0 with `confidence_score` lowered to 70.
+11. **Seizure Worth**: Extract `seizure_worth` (monetary value) if mentioned in the text. Look for phrases like:
    - "worth Rs.X" or "worth Rs.X/-" or "worth Rs.X,XX,XXX"
    - "Rs.X" mentioned near the drug seizure
    - "value Rs.X" or "estimated value Rs.X"
@@ -83,12 +112,30 @@ Example:
       "seizure_worth": 500000.0
     }},
     {{
+      "drug_name": "Codeine Syrup",
+      "quantity_numeric": 250.0,
+      "quantity_unit": "ml",
+      "drug_form": "syrup",
+      "packaging_details": "bottle",
+      "confidence_score": 96,
+      "seizure_worth": 0.0
+    }},
+    {{
       "drug_name": "LSD Paper",
       "quantity_numeric": 2.0,
       "quantity_unit": "pieces",
       "drug_form": "paper",
       "packaging_details": "foil",
       "confidence_score": 95,
+      "seizure_worth": 0.0
+    }},
+    {{
+      "drug_name": "Alprazolam",
+      "quantity_numeric": 120.0,
+      "quantity_unit": "tablets",
+      "drug_form": "tablet",
+      "packaging_details": "strip packing",
+      "confidence_score": 97,
       "seizure_worth": 0.0
     }}
   ]
@@ -163,11 +210,36 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                      drug.standardized_count = qty
                      drug.primary_unit_type = 'count'
 
+            # --- Form-to-Unit Cross-Validation ---
+            # If the LLM returns an inconsistent form+unit pair, auto-correct it.
+            # e.g. drug_form="dry" but unit was "litres" → clear the volume, flag as error.
+            form_lower = drug.drug_form.lower().strip() if drug.drug_form else 'unknown'
+            if form_lower in DRUG_FORM_SOLID and drug.primary_unit_type == 'volume':
+                # Solid drug incorrectly given a volume unit — clear the volume
+                print(f"Form-unit mismatch: {drug.drug_name} has form='{drug.drug_form}' but unit was volume. Clearing volume.")
+                drug.standardized_volume_ml = None
+                drug.primary_unit_type = None  # will be set correctly if weight exists, else stays None
+            elif form_lower in DRUG_FORM_LIQUID and drug.primary_unit_type == 'weight':
+                # Liquid drug incorrectly given a weight unit — flag but keep (weight may still be valid for resin/paste edge cases)
+                print(f"Form-unit mismatch: {drug.drug_name} has form='{drug.drug_form}' but unit was weight — verify manually.")
+            elif form_lower in DRUG_FORM_COUNT and drug.primary_unit_type in ('weight', 'volume'):
+                # Count-form drug given weight/volume — clear and move to count
+                print(f"Form-unit mismatch: {drug.drug_name} has form='{drug.drug_form}' but unit was {drug.primary_unit_type}. Moving to count.")
+                count_val = drug.standardized_weight_kg or drug.standardized_volume_ml or drug.quantity_numeric or 0
+                drug.standardized_weight_kg = None
+                drug.standardized_volume_ml = None
+                drug.standardized_count = count_val
+                drug.primary_unit_type = 'count'
+
             # --- Name Standardization ---
             name = drug.drug_name.lower().strip()
-            if any(x in name for x in ['kush', 'og', 'weed', 'cannabis', 'ganja', 'marijuana']):
-                if 'oil' not in name: 
-                    drug.drug_name = "Ganja"
+            # Ganja/Cannabis variants: only rename to "Ganja" when it is a solid (weight/count).
+            # Never rename to "Ganja" if it is a LIQUID form — those are distinct substances
+            # (Cannabis Oil, Cannabis Extract, Cannabis Resin, etc.) and must keep their own name.
+            is_cannabis_variant = any(x in name for x in ['kush', 'og', 'weed', 'cannabis', 'ganja', 'marijuana'])
+            is_liquid_form = form_lower in DRUG_FORM_LIQUID or drug.primary_unit_type == 'volume'
+            if is_cannabis_variant and not is_liquid_form:
+                drug.drug_name = "Ganja"
             
             # --- Seizure Worth Conversion: Rupees to Crores ---
             # Convert seizure_worth from rupees to crores (1 crore = 10,000,000 rupees)
