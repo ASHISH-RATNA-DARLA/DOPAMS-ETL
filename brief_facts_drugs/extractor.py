@@ -86,6 +86,7 @@ You are an expert forensic data analyst. Your task is to extract structured drug
    - Convert Indian number format: "Rs.55,50,000/-" -> 5550000.0, "Rs.10,000" -> 10000.0
    - If worth is mentioned for total seizure, divide proportionally if multiple drugs are listed
    - If not mentioned, set to 0.0
+12. **Decimal Values**: Be extremely careful with fractional digits. If the text says "1.650 kgs" or "1.5 kgs", you MUST preserve the decimal exactness (e.g., `quantity_numeric`: 1.65, `quantity_unit`: "kgs"). DO NOT remove the decimal point (i.e. DO NOT output 1650 kgs). If the text has commas like "1,650 kgs", treat it as 1650.0.
 
 ### Output Format
 Return valid JSON only.
