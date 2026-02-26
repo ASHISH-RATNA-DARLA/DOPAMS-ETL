@@ -83,8 +83,19 @@ def process_crimes(conn, crimes):
             logging.info(f"No drugs found for Crime {crime_id}.")
             # Fallthrough to placeholder insertion logic below
             
+        # Drug names that must be rejected before any insert
+        INVALID_DRUG_NAMES = {
+            'unknown', 'unidentified', 'unknown drug', 'unknown substance',
+            'unknown tablet', 'unknown powder', 'unknown liquid', 'n/a', 'none', ''
+        }
+
         count = 0
         for drug in extractions:
+            # Guard: reject vague/placeholder drug names
+            if drug.drug_name.strip().lower() in INVALID_DRUG_NAMES:
+                logging.info(f"Skipping invalid drug name '{drug.drug_name}' for Crime {crime_id}.")
+                continue
+
             # User Requirement: Confidence score check (90+)
             if drug.confidence_score >= 90:
                 insert_drug_facts(conn, crime_id, drug.model_dump())

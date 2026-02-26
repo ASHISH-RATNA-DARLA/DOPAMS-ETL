@@ -49,7 +49,8 @@ You are an expert forensic data analyst. Your task is to extract structured drug
 5. **Exact Raw Values**: Extract `quantity_numeric` and `quantity_unit` EXACTLY as written (or calculated total). Do NOT convert units yet.
 6. **Written Numbers**: Convert "one" -> 1.0, "two" -> 2.0.
 7. **Lists**: If the text lists multiple items (1. X, 2. Y, 3. Z), extract **EVERY SINGLE ITEM** in the list.
-8. **Seizure Worth**: Extract `seizure_worth` (monetary value) if mentioned in the text. Look for phrases like:
+8. **Unknown Drug Names**: If you cannot identify the specific drug name from the text, **DO NOT** return a record for it. Never use "Unknown", "Unidentified", "Unknown Drug", "Unknown Substance", or similar vague placeholders as `drug_name`. If the drug is unidentifiable, skip it entirely.
+9. **Seizure Worth**: Extract `seizure_worth` (monetary value) if mentioned in the text. Look for phrases like:
    - "worth Rs.X" or "worth Rs.X/-" or "worth Rs.X,XX,XXX"
    - "Rs.X" mentioned near the drug seizure
    - "value Rs.X" or "estimated value Rs.X"
