@@ -112,7 +112,7 @@ def run_standardization():
     conn = get_db_connection()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
 
-    stats = {"processed": 0, "matched": 0, "ignored": 0, "fallback": 0, "errors": 0}
+    stats = {"processed": 0, "cleaned": 0, "perfect_match": 0, "ignored": 0, "errors": 0}
 
     try:
         logger.info("=" * 70)
@@ -139,10 +139,10 @@ def run_standardization():
 
                 if standard is None:
                     stats["ignored"] += 1
-                elif standard == row["drug_name"]:
-                    stats["fallback"] += 1
+                elif standard.lower() == row["drug_name"].lower():
+                    stats["perfect_match"] += 1  # e.g. Ganja -> Ganja
                 else:
-                    stats["matched"] += 1
+                    stats["cleaned"] += 1         # e.g. Heroinn -> Heroin
 
                 cur.execute(
                     """
@@ -161,11 +161,12 @@ def run_standardization():
 
         logger.info("=" * 70)
         logger.info("DRUG STANDARDIZATION ETL -- COMPLETE")
-        logger.info(f"  Processed : {stats['processed']}")
-        logger.info(f"  Matched   : {stats['matched']}   (fuzzy -> standard_name)")
-        logger.info(f"  Ignored   : {stats['ignored']}   (blocked by drug_ignore_list -> NULL)")
-        logger.info(f"  Fallback  : {stats['fallback']}   (no close match, kept raw for review)")
-        logger.info(f"  Errors    : {stats['errors']}")
+        logger.info(f"  Processed     : {stats['processed']}")
+        logger.info(f"  Cleaned       : {stats['cleaned']}        (typo/variant -> standard_name)")
+        logger.info(f"  Perfect match : {stats['perfect_match']}  (raw already == standard_name)")
+        logger.info(f"  Ignored       : {stats['ignored']}        (blocked by drug_ignore_list -> NULL)")
+        logger.info(f"  Errors        : {stats['errors']}")
+        logger.info(f"  Total correct : {stats['cleaned'] + stats['perfect_match']}  (Cleaned + Perfect match)")
         logger.info("=" * 70)
 
     except Exception as e:
