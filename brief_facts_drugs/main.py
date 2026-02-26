@@ -104,8 +104,8 @@ def process_crimes(conn, crimes, drug_categories=None):
                 logging.info(f"Skipping invalid drug name '{drug.primary_drug_name}' for Crime {crime_id}.")
                 continue
 
-            # User Requirement: Confidence score check (90+)
-            if drug.confidence_score >= 90:
+            # User Requirement: Confidence score check (0.90+)
+            if drug.confidence_score >= 0.90:
                 insert_drug_facts(conn, crime_id, drug.model_dump())
                 count += 1
             else:
@@ -128,7 +128,7 @@ def process_crimes(conn, crimes, drug_categories=None):
                 "volume_ml": 0,
                 "volume_l": 0,
                 "count_total": 0,
-                "confidence_score": 100,
+                "confidence_score": 1.00,
                 "extraction_metadata": {"source_sentence": "Placeholder for zero detections"},
                 "is_commercial": False,
                 "seizure_worth": 0.0

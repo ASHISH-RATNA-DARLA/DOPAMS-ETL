@@ -164,3 +164,11 @@ __pycache__/
 
 # Logs
 *.log
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+auth_venv/
+pyenv/

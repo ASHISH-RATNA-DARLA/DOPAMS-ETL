@@ -32,7 +32,7 @@ class DrugExtraction(BaseModel):
         description="solid, liquid, or count forms."
     )
     accused_id: Optional[str] = Field(default=None)
-    confidence_score: Optional[int] = 80
+    confidence_score: Optional[float] = Field(default=0.80, description="Confidence out of 1.0 (e.g. 0.95)")
     seizure_worth: Optional[float] = 0.0
     extraction_metadata: dict = Field(default_factory=dict)
     
@@ -146,6 +146,11 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             else:
                 if qty > 0 and not drug.weight_g and not drug.volume_ml:
                      drug.count_total = qty
+
+            # --- Confidence Score Conversion ---
+            # Convert confidence_score from percentage (e.g., 95) to ratio (e.g., 0.95) if it's >= 1.0
+            if drug.confidence_score is not None and drug.confidence_score >= 1.0:
+                drug.confidence_score = round(drug.confidence_score / 100, 2)
 
             # --- Name Standardization ---
             name = drug.raw_drug_name.lower().strip()
