@@ -26,7 +26,7 @@ class DrugExtraction(BaseModel):
     raw_drug_name: Optional[str] = Field(default="Unknown")
     raw_quantity: Optional[float] = 0.0
     raw_unit: Optional[str] = Field(default="Unknown")
-    primary_drug_name: str = Field(default="Unknown")
+    primary_drug_name: Optional[str] = Field(default="Unknown")
     drug_form: Optional[str] = Field(
         default="Unknown",
         description="solid, liquid, or count forms."

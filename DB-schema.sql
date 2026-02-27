@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict XYMN479EbUHRDSIQtBQZQlXdHbTQrGk2jSNe0AGi4MPDBCvy32yHpHMITfSkWjn
+\restrict 1JJH6kyefqIIYzHSDOdvppVpV4CFUrYAzXtthALhSzEzh5bd32KT9cLmd5ncdIL
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-1.pgdg24.04+1)
 -- Dumped by pg_dump version 17.6
 
--- Started on 2026-02-27 02:19:32
+-- Started on 2026-02-27 12:52:42
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -5402,11 +5402,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT ALL ON SE
 ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLES TO dev_dopamas;
 
 
--- Completed on 2026-02-27 02:19:39
+-- Completed on 2026-02-27 12:52:43
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict XYMN479EbUHRDSIQtBQZQlXdHbTQrGk2jSNe0AGi4MPDBCvy32yHpHMITfSkWjn
+\unrestrict 1JJH6kyefqIIYzHSDOdvppVpV4CFUrYAzXtthALhSzEzh5bd32KT9cLmd5ncdIL
 

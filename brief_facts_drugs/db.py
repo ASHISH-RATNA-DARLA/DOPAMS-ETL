@@ -78,7 +78,7 @@ def insert_drug_facts(conn, crime_id, drug_data):
         
         cur.execute(query, (
             crime_id,
-            drug_data.get('accused_id'),
+            None, # Overriding LLM accused_id slang extraction (like A-1) to avoid Foreign Key crashes
             drug_data.get('raw_drug_name'),
             drug_data.get('raw_quantity'),
             drug_data.get('raw_unit'),
