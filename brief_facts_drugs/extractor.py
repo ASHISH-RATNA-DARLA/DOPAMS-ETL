@@ -1,4 +1,5 @@
 
+import re
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
@@ -115,30 +116,40 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             drug.drug_form = truncate_string(drug.drug_form, 50)
             
             qty = float(drug.raw_quantity) if drug.raw_quantity else 0.0
-            unit = drug.raw_unit.lower().strip() if drug.raw_unit else "unknown"
-            form = drug.drug_form.lower().strip() if drug.drug_form else "unknown"
-            
+
+            # --- Strict Normalization ---
+            # Step 1: lowercase + strip whitespace
+            # Step 2: remove ALL non-alpha characters (dots, hyphens, spaces, etc.)
+            # e.g. "Gms." -> "gms", "KG " -> "kg", "ml." -> "ml"
+            raw_unit_str = drug.raw_unit if drug.raw_unit else "unknown"
+            unit = re.sub(r'[^a-z]', '', raw_unit_str.lower().strip())
+            form = re.sub(r'[^a-z]', '', drug.drug_form.lower().strip()) if drug.drug_form else "unknown"
+
             # --- Auto-Classification ---
-            
+
             # 1. Base classification on Unit first (most reliable)
-            if unit in ['g', 'gm', 'gms', 'gram', 'grams', 'grm', 'grms', 'gr']:
+            if unit in {'g', 'gm', 'gms', 'gram', 'grams', 'grm', 'grms', 'gr'}:
                 drug.weight_g = qty
                 drug.weight_kg = qty / 1000.0
-            elif unit in ['kg', 'kgs', 'kilograms', 'kilogram', 'kilo']:
+            elif unit in {'kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'}:
                 drug.weight_g = qty * 1000.0
                 drug.weight_kg = qty
-            elif unit in ['mg', 'milligrams', 'milligram']:
+            elif unit in {'mg', 'milligram', 'milligrams'}:
                 drug.weight_g = qty / 1000.0
                 drug.weight_kg = qty / 1_000_000.0
-            elif unit in ['l', 'ltr', 'liter', 'liters', 'litre', 'litres']:
+            elif unit in {'l', 'ltr', 'ltrs', 'liter', 'liters', 'litre', 'litres'}:
                 drug.volume_l = qty
                 drug.volume_ml = qty * 1000.0
-            elif unit in ['ml', 'ml.', 'milliliter', 'milliliters']:
+            elif unit in {'ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres'}:
                 drug.volume_ml = qty
                 drug.volume_l = qty / 1000.0
-            elif unit in ['no', 'nos', 'number', 'numbers', 'piece', 'pieces', 'pcs', 'tablet', 'tablets', 'pill', 'pills', 'strip', 'strips', 'box', 'boxes', 'packet', 'packets', 'sachet', 'sachets', 'blot', 'blots', 'dot', 'dots', 'bottle', 'bottles']:
+            elif unit in {'no', 'nos', 'number', 'numbers', 'piece', 'pieces', 'pcs',
+                          'tablet', 'tablets', 'pill', 'pills', 'strip', 'strips',
+                          'box', 'boxes', 'packet', 'packets', 'sachet', 'sachets',
+                          'blot', 'blots', 'dot', 'dots', 'bottle', 'bottles',
+                          'unit', 'units', 'count', 'counts'}:
                 drug.count_total = qty
-                
+
             # 2. Fallback to Form if unit is unknown but qty > 0
             if qty > 0 and drug.weight_g is None and drug.volume_ml is None and drug.count_total is None:
                 if form in DRUG_FORM_SOLID:

@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict 1JJH6kyefqIIYzHSDOdvppVpV4CFUrYAzXtthALhSzEzh5bd32KT9cLmd5ncdIL
+\restrict stZt5SahZ2TBFfdRGhgzFca1bqeon0sQHjVXDaRg4xGonqT6xLdl0WJmq7nQYY0
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-1.pgdg24.04+1)
 -- Dumped by pg_dump version 17.6
 
--- Started on 2026-02-27 12:52:42
+-- Started on 2026-02-27 15:00:54
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -1090,7 +1090,7 @@ CREATE MATERIALIZED VIEW public.advanced_search_accuseds_mv AS
 ALTER MATERIALIZED VIEW public.advanced_search_accuseds_mv OWNER TO dev_dopamas;
 
 --
--- TOC entry 305 (class 1259 OID 22071829)
+-- TOC entry 304 (class 1259 OID 22071829)
 -- Name: advanced_search_firs; Type: VIEW; Schema: public; Owner: dev_dopamas
 --
 
@@ -1120,7 +1120,7 @@ CREATE VIEW public.advanced_search_firs AS
 ALTER VIEW public.advanced_search_firs OWNER TO dev_dopamas;
 
 --
--- TOC entry 306 (class 1259 OID 22071834)
+-- TOC entry 305 (class 1259 OID 22071834)
 -- Name: advanced_search_firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
 --
 
@@ -1777,19 +1777,27 @@ CREATE VIEW public.files_summary AS
 ALTER VIEW public.files_summary OWNER TO dev_dopamas;
 
 --
--- TOC entry 304 (class 1259 OID 22071820)
+-- TOC entry 306 (class 1259 OID 22413011)
 -- Name: firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
 --
 
 CREATE MATERIALIZED VIEW public.firs_mv AS
  SELECT c.crime_id AS id,
     c.fir_num AS "firNumber",
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity"
-   FROM (public.crimes c
+        CASE
+            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
+            ELSE TRIM(BOTH FROM h.ps_name)
+        END AS ps,
+    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity",
+    COALESCE(crime_documents.docs, '[]'::jsonb) AS documents,
+    fir_copy_file.file_url AS "firCopy"
+   FROM ((((public.crimes c
+     LEFT JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
      LEFT JOIN ( SELECT aggregated.crime_id,
             jsonb_agg(jsonb_build_object('name', aggregated.primary_drug_name, 'quantity', NULLIF(concat_ws(', '::text,
                 CASE
                     WHEN (aggregated.total_kg > (0)::numeric) THEN concat(round(aggregated.total_kg, 2), ' Kg')
+                    WHEN (aggregated.total_raw > (0)::numeric) THEN concat(round(aggregated.total_raw, 2), ' ', aggregated.raw_unit)
                     ELSE NULL::text
                 END,
                 CASE
@@ -1799,15 +1807,29 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
                 CASE
                     WHEN (aggregated.total_count > (0)::numeric) THEN concat(round(aggregated.total_count, 2), ' Units')
                     ELSE NULL::text
-                END), ''::text))) AS types
+                END), ''::text), 'worth', round(aggregated.total_worth, 2))) AS types
            FROM ( SELECT bfd.crime_id,
                     bfd.primary_drug_name,
+                    max(bfd.raw_unit) AS raw_unit,
                     sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_kg,
+                    sum(COALESCE(bfd.raw_quantity, (0)::numeric)) AS total_raw,
                     sum(COALESCE(bfd.volume_ml, (0)::numeric)) AS total_ml,
-                    sum(COALESCE(bfd.count_total, (0)::numeric)) AS total_count
+                    sum(COALESCE(bfd.count_total, (0)::numeric)) AS total_count,
+                    sum(COALESCE(bfd.seizure_worth, (0)::numeric)) AS total_worth
                    FROM public.brief_facts_drug bfd
+                  WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))
                   GROUP BY bfd.crime_id, bfd.primary_drug_name) aggregated
           GROUP BY aggregated.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT f.parent_id AS crime_id,
+            jsonb_agg(jsonb_build_object('name', COALESCE(NULLIF(f.notes, ''::text), (f.source_field)::text), 'link', f.file_url, 'type', f.source_field)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
+           FROM public.files f
+          WHERE ((f.source_type = 'crime'::public.source_type_enum) AND (f.source_field = ANY (ARRAY['MEDIA'::public.source_field_enum, 'FIR_COPY'::public.source_field_enum])))
+          GROUP BY f.parent_id) crime_documents ON (((crime_documents.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT f.parent_id AS crime_id,
+            max((f.file_url)::text) AS file_url
+           FROM public.files f
+          WHERE ((f.source_type = 'crime'::public.source_type_enum) AND (f.source_field = 'FIR_COPY'::public.source_field_enum))
+          GROUP BY f.parent_id) fir_copy_file ON (((fir_copy_file.crime_id)::text = (c.crime_id)::text)))
   WITH NO DATA;
 
 
@@ -3976,7 +3998,7 @@ CREATE INDEX idx_as_accuseds_mv_id ON public.advanced_search_accuseds_mv USING b
 
 
 --
--- TOC entry 4173 (class 1259 OID 22071840)
+-- TOC entry 4172 (class 1259 OID 22071840)
 -- Name: idx_as_firs_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4376,7 +4398,7 @@ CREATE INDEX idx_files_source_type_created ON public.files USING btree (source_t
 
 
 --
--- TOC entry 4172 (class 1259 OID 22071827)
+-- TOC entry 4173 (class 1259 OID 22413018)
 -- Name: idx_firs_mv_unique_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5402,11 +5424,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT ALL ON SE
 ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLES TO dev_dopamas;
 
 
--- Completed on 2026-02-27 12:52:43
+-- Completed on 2026-02-27 15:00:57
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 1JJH6kyefqIIYzHSDOdvppVpV4CFUrYAzXtthALhSzEzh5bd32KT9cLmd5ncdIL
+\unrestrict stZt5SahZ2TBFfdRGhgzFca1bqeon0sQHjVXDaRg4xGonqT6xLdl0WJmq7nQYY0
 
