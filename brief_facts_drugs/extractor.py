@@ -116,6 +116,7 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             
             qty = float(drug.raw_quantity) if drug.raw_quantity else 0.0
             unit = drug.raw_unit.lower().strip() if drug.raw_unit else "unknown"
+            form = drug.drug_form.lower().strip() if drug.drug_form else "unknown"
             
             # --- Auto-Classification ---
             

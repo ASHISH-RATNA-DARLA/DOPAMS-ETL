@@ -84,15 +84,15 @@ def insert_drug_facts(conn, crime_id, drug_data):
             drug_data.get('raw_unit'),
             drug_data.get('primary_drug_name'),
             drug_data.get('drug_form'),
-            drug_data.get('weight_g'),
-            drug_data.get('weight_kg'),
-            drug_data.get('volume_ml'),
-            drug_data.get('volume_l'),
-            drug_data.get('count_total'),
-            drug_data.get('confidence_score'),
+            round(float(drug_data.get('weight_g')), 6) if drug_data.get('weight_g') is not None else None,
+            round(float(drug_data.get('weight_kg')), 6) if drug_data.get('weight_kg') is not None else None,
+            round(float(drug_data.get('volume_ml')), 6) if drug_data.get('volume_ml') is not None else None,
+            round(float(drug_data.get('volume_l')), 6) if drug_data.get('volume_l') is not None else None,
+            round(float(drug_data.get('count_total') or 0.0), 6),
+            round(float(drug_data.get('confidence_score') or 0.0), 2),
             json.dumps(drug_data.get('extraction_metadata', {})),
-            drug_data.get('is_commercial', False),
-            drug_data.get('seizure_worth', 0.0)
+            bool(drug_data.get('is_commercial', False)),
+            round(float(drug_data.get('seizure_worth') or 0.0), 2)
         ))
     conn.commit()
 
