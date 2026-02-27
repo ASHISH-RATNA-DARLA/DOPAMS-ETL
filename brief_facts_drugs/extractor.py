@@ -120,7 +120,7 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             
             # --- Auto-Classification ---
             
-            # WEIGHT UNITS
+            # 1. Base classification on Unit first (most reliable)
             if unit in ['g', 'gm', 'gms', 'gram', 'grams', 'grm', 'grms', 'gr']:
                 drug.weight_g = qty
                 drug.weight_kg = qty / 1000.0
@@ -130,27 +130,32 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             elif unit in ['mg', 'milligrams', 'milligram']:
                 drug.weight_g = qty / 1000.0
                 drug.weight_kg = qty / 1_000_000.0
+            elif unit in ['l', 'ltr', 'liter', 'liters', 'litre', 'litres']:
+                drug.volume_l = qty
+                drug.volume_ml = qty * 1000.0
+            elif unit in ['ml', 'ml.', 'milliliter', 'milliliters']:
+                drug.volume_ml = qty
+                drug.volume_l = qty / 1000.0
+            elif unit in ['no', 'nos', 'number', 'numbers', 'piece', 'pieces', 'pcs', 'tablet', 'tablets', 'pill', 'pills', 'strip', 'strips', 'box', 'boxes', 'packet', 'packets', 'sachet', 'sachets', 'blot', 'blots', 'dot', 'dots', 'bottle', 'bottles']:
+                drug.count_total = qty
                 
-            # Map to specific schema fields based on form
-            # Postgres check_has_measurements requires at least ONE of these to not be null.
-            if form in DRUG_FORM_SOLID:
-                drug.weight_kg = (qty / 1000) if qty > 0 else 0.0
-                drug.weight_g = qty if qty > 0 else 0.0
-            elif form in DRUG_FORM_LIQUID:
-                if unit in {'l', 'liters', 'litre'}: # Use 'unit' not 'unit_lower' as 'unit' is already lowercased
-                    drug.volume_l = qty if qty > 0 else 0.0
-                    drug.volume_ml = (qty * 1000) if qty > 0 else 0.0
+            # 2. Fallback to Form if unit is unknown but qty > 0
+            if qty > 0 and drug.weight_g is None and drug.volume_ml is None and drug.count_total is None:
+                if form in DRUG_FORM_SOLID:
+                    drug.weight_g = qty
+                    drug.weight_kg = qty / 1000.0
+                elif form in DRUG_FORM_LIQUID:
+                    drug.volume_ml = qty
+                    drug.volume_l = qty / 1000.0
+                elif form in DRUG_FORM_COUNT:
+                    drug.count_total = qty
                 else:
-                    drug.volume_ml = qty if qty > 0 else 0.0
-                    drug.volume_l = (qty / 1000) if qty > 0 else 0.0
-            elif form in DRUG_FORM_COUNT:
-                drug.count_total = qty if qty > 0 else 0.0
-            else:
-                 # IF UNKNOWN FORM, DEFAULT TO 0 WEIGHT G TO PASS CONSTRAINT
-                 if qty > 0 and not drug.weight_g and not drug.volume_ml:
-                      drug.count_total = qty
-                 else:
-                      drug.weight_g = 0.0
+                    drug.count_total = qty
+
+            # 3. Ensure constraint check_has_measurements is met for 0 qty extractions
+            if drug.weight_g is None and drug.weight_kg is None and drug.volume_l is None and drug.volume_ml is None and drug.count_total is None:
+                drug.weight_g = 0.0
+                drug.weight_kg = 0.0
 
             # --- Confidence Score Conversion ---
             # Convert confidence_score from percentage (e.g., 95) to ratio (e.g., 0.95) if it's >= 1.0
