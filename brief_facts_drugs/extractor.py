@@ -23,7 +23,7 @@ DRUG_FORM_LIQUID  = {'liquid', 'syrup', 'oil', 'solution', 'tincture', 'extract'
 DRUG_FORM_COUNT   = {'tablet', 'pill', 'capsule', 'paper', 'blot', 'seed', 'strip', 'sachet', 'ampule', 'vial', 'bottle'}
 
 class DrugExtraction(BaseModel):
-    raw_drug_name: str
+    raw_drug_name: Optional[str] = Field(default="Unknown")
     raw_quantity: Optional[float] = 0.0
     raw_unit: Optional[str] = Field(default="Unknown")
     primary_drug_name: str = Field(default="Unknown")
@@ -130,22 +130,26 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 drug.weight_g = qty / 1000.0
                 drug.weight_kg = qty / 1_000_000.0
                 
-            # VOLUME UNITS
-            elif unit in ['ml', 'ml.', 'milliliter', 'milliliters']:
-                drug.volume_ml = qty
-                drug.volume_l = qty / 1000.0
-            elif unit in ['l', 'ltr', 'liter', 'liters', 'litre', 'litres']:
-                drug.volume_ml = qty * 1000.0
-                drug.volume_l = qty
-
-            # COUNT UNITS
-            elif unit in ['no', 'nos', 'number', 'numbers', 'piece', 'pieces', 'pcs', 'tablet', 'tablets', 'pill', 'pills', 'strip', 'strips', 'box', 'boxes', 'packet', 'packets', 'sachet', 'sachets', 'blot', 'blots', 'dot', 'dots', 'bottle', 'bottles']:
-                drug.count_total = qty
-            
-            # UNKNOWN / OTHER
+            # Map to specific schema fields based on form
+            # Postgres check_has_measurements requires at least ONE of these to not be null.
+            if form in DRUG_FORM_SOLID:
+                drug.weight_kg = (qty / 1000) if qty > 0 else 0.0
+                drug.weight_g = qty if qty > 0 else 0.0
+            elif form in DRUG_FORM_LIQUID:
+                if unit in {'l', 'liters', 'litre'}: # Use 'unit' not 'unit_lower' as 'unit' is already lowercased
+                    drug.volume_l = qty if qty > 0 else 0.0
+                    drug.volume_ml = (qty * 1000) if qty > 0 else 0.0
+                else:
+                    drug.volume_ml = qty if qty > 0 else 0.0
+                    drug.volume_l = (qty / 1000) if qty > 0 else 0.0
+            elif form in DRUG_FORM_COUNT:
+                drug.count_total = qty if qty > 0 else 0.0
             else:
-                if qty > 0 and not drug.weight_g and not drug.volume_ml:
-                     drug.count_total = qty
+                 # IF UNKNOWN FORM, DEFAULT TO 0 WEIGHT G TO PASS CONSTRAINT
+                 if qty > 0 and not drug.weight_g and not drug.volume_ml:
+                      drug.count_total = qty
+                 else:
+                      drug.weight_g = 0.0
 
             # --- Confidence Score Conversion ---
             # Convert confidence_score from percentage (e.g., 95) to ratio (e.g., 0.95) if it's >= 1.0
@@ -214,6 +218,7 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
                 if d.get('raw_quantity') is None: d['raw_quantity'] = 0.0
                 if d.get('confidence_score') is None: d['confidence_score'] = 90
                 if d.get('seizure_worth') is None: d['seizure_worth'] = 0.0
+                if not d.get('raw_drug_name'): d['raw_drug_name'] = "Unknown"
                 
                 # Check for "None" string
                 if str(d.get('raw_quantity')).lower() == "none": d['raw_quantity'] = 0.0
