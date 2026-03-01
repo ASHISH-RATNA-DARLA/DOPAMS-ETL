@@ -247,15 +247,16 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
     if drug_categories is None:
         drug_categories = []
         
-    # Format the drug categories base for the prompt
+    # Format the drug categories knowledge base for the prompt
     kb_lines = []
     if drug_categories:
-        kb_lines.append("   | Raw Name | Standard Name |")
-        kb_lines.append("   | --- | --- |")
+        kb_lines.append("   | Raw Name | Standard Name | Category |")
+        kb_lines.append("   | --- | --- | --- |")
         for cat in drug_categories:
             raw = cat.get('raw_name', 'Unknown')
             std = cat.get('standard_name', 'Unknown')
-            kb_lines.append(f"   | {raw} | {std} |")
+            grp = cat.get('category_group', '-')
+            kb_lines.append(f"   | {raw} | {std} | {grp} |")
     else:
         kb_lines.append("   (No knowledge base provided, use standard extraction)")
     

@@ -44,17 +44,21 @@ def ensure_connection(conn):
 
 def fetch_drug_categories(conn):
     """
-    Fetches the knowledge base of drug categories, mapping raw_name -> standard_name.
+    Fetches the verified knowledge base of drug categories.
+    Returns raw_name, standard_name, and category_group for LLM prompt context.
     """
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Assumes the table is called `drug_categories` and has columns `raw_name` and `standard_name` 
-            # as per user instructions.
-            query = "SELECT raw_name, standard_name FROM public.drug_categories"
+            query = """
+                SELECT raw_name, standard_name, category_group
+                FROM public.drug_categories
+                WHERE is_verified = true
+                ORDER BY category_group, standard_name
+            """
             cur.execute(query)
             return cur.fetchall()
     except Exception as e:
-        print(f"Warning: Could not fetch drug_categories: {e}")
+        logger.warning(f"Could not fetch drug_categories: {e}")
         return []
 
 def fetch_crimes_by_ids(conn, crime_ids):
