@@ -1,11 +1,14 @@
 
 import re
+import logging
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 import sys
 import os
+
+logger = logging.getLogger(__name__)
 
 # Ensure core is accessible
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -53,11 +56,17 @@ EXTRACTION_PROMPT = """
 You are an expert forensic data analyst. Your task is to extract structured drug seizure information from police `brief facts`.
 
 ### I. The AI ETL "Golden Rules" (Strict Constraints)
-1. **Zero-Inference Extraction:** Only extract values explicitly stated or clearly implied. If a unit is missing (e.g., "caught with 500 Ganja"), flag it with a lower `confidence_score` (~60) rather than guessing.
-2. **Individual Attribution:** Whenever the text describes multiple seizures (e.g., A1, A2), you must attempt to map the `accused_id` (e.g., 'A1', 'A2', 'Accused 1') to that specific drug record. If it's common or unknown, leave it null.
+1. **Zero-Inference Extraction:** Only extract values explicitly stated or clearly implied. If a unit is missing (e.g., "caught with 500 Ganja"), still extract it but use a lower `confidence_score` (~60).
+2. **Individual Attribution:** Whenever the text describes multiple seizures per accused (e.g., A-1 got 30 grams, A-2 got 10 grams), create a SEPARATE entry for each accused with their specific drug and quantity. Map `accused_id` as 'A-1', 'A-2', 'A1', 'A2', etc. If a total quantity is seized collectively from all accused, extract ONE entry with the total and leave `accused_id` null.
 3. **Knowledge Base Matching:** You must use the provided Target Drug Knowledge Base constraints to map drug names natively. Look at `primary_drug_name` rules.
 4. **Audit Traceability:** Every extraction must include the specific sentence or snippet of text from the source in `extraction_metadata` under the key `source_sentence`.
 5. **High-Precision Preservation:** Extract exact values. Do not round numbers.
+6. **No Duplicates:** Each unique drug seizure must appear EXACTLY ONCE. NEVER repeat the same drug entry multiple times. Do not create separate entries for the same seizure described in different sentences.
+7. **Confidence Scoring (0-100 integer scale):**
+   - **90-100:** Drug name, quantity, AND unit are ALL clearly stated (e.g., "seized 30 grams of Ganja")
+   - **70-89:** Drug mentioned with partial details (e.g., quantity present but unit ambiguous)
+   - **50-69:** Drug mentioned but quantity or unit is missing or unclear
+   - **Below 50:** Speculative — drug only vaguely referenced
 
 ### CRITICAL RULES
 1. **Container vs Content**: "3 packets, 50 grams" -> raw_quantity = 50. "3 packets of 50 grams each" -> raw_quantity = 150.
@@ -197,6 +206,40 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             
     return drugs
 
+
+def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 20) -> List[DrugExtraction]:
+    """
+    Remove duplicate drug extractions and cap at max_per_crime.
+    Deduplicates by (primary_drug_name, raw_quantity, raw_unit, accused_id).
+    Keeps the highest confidence entry for each unique combination.
+    """
+    if not drugs:
+        return drugs
+
+    seen = {}
+    for drug in drugs:
+        key = (
+            (drug.primary_drug_name or '').lower().strip(),
+            round(float(drug.raw_quantity or 0), 2),
+            (drug.raw_unit or '').lower().strip(),
+            (drug.accused_id or '').lower().strip()
+        )
+        existing = seen.get(key)
+        if not existing or (drug.confidence_score or 0) > (existing.confidence_score or 0):
+            seen[key] = drug
+
+    deduped = list(seen.values())
+
+    if len(drugs) > len(deduped):
+        logger.info(f"Deduplicated extractions: {len(drugs)} -> {len(deduped)}")
+
+    if len(deduped) > max_per_crime:
+        logger.warning(f"Capping extractions from {len(deduped)} to {max_per_crime}")
+        deduped = sorted(deduped, key=lambda d: d.confidence_score or 0, reverse=True)[:max_per_crime]
+
+    return deduped
+
+
 def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[DrugExtraction]:
     """
     Extracts a list of drug information objects from the given text.
@@ -256,8 +299,9 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
             except Exception as e:
                 print(f"Skipping invalid: {e}")
         
-        # Post-process (Unit Calc)
-        return standardize_units(valid_drugs)
+        # Post-process (Unit Calc + Dedup)
+        standardized = standardize_units(valid_drugs)
+        return deduplicate_extractions(standardized)
         
     except Exception as e:
         print(f"Error during extraction: {e}")

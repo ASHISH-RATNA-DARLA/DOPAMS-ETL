@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict stZt5SahZ2TBFfdRGhgzFca1bqeon0sQHjVXDaRg4xGonqT6xLdl0WJmq7nQYY0
+\restrict BH6bdl9BoiVv1W3TGH3dsro7TqNsBdhO1vUcF3KbbniPrs1NQnPbItw5wDIDetJ
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-1.pgdg24.04+1)
 -- Dumped by pg_dump version 17.6
 
--- Started on 2026-02-27 15:00:54
+-- Started on 2026-02-27 16:54:49
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -1777,65 +1777,6 @@ CREATE VIEW public.files_summary AS
 ALTER VIEW public.files_summary OWNER TO dev_dopamas;
 
 --
--- TOC entry 306 (class 1259 OID 22413011)
--- Name: firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
---
-
-CREATE MATERIALIZED VIEW public.firs_mv AS
- SELECT c.crime_id AS id,
-    c.fir_num AS "firNumber",
-        CASE
-            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
-            ELSE TRIM(BOTH FROM h.ps_name)
-        END AS ps,
-    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity",
-    COALESCE(crime_documents.docs, '[]'::jsonb) AS documents,
-    fir_copy_file.file_url AS "firCopy"
-   FROM ((((public.crimes c
-     LEFT JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN ( SELECT aggregated.crime_id,
-            jsonb_agg(jsonb_build_object('name', aggregated.primary_drug_name, 'quantity', NULLIF(concat_ws(', '::text,
-                CASE
-                    WHEN (aggregated.total_kg > (0)::numeric) THEN concat(round(aggregated.total_kg, 2), ' Kg')
-                    WHEN (aggregated.total_raw > (0)::numeric) THEN concat(round(aggregated.total_raw, 2), ' ', aggregated.raw_unit)
-                    ELSE NULL::text
-                END,
-                CASE
-                    WHEN (aggregated.total_ml > (0)::numeric) THEN concat(round(aggregated.total_ml, 2), ' Ml')
-                    ELSE NULL::text
-                END,
-                CASE
-                    WHEN (aggregated.total_count > (0)::numeric) THEN concat(round(aggregated.total_count, 2), ' Units')
-                    ELSE NULL::text
-                END), ''::text), 'worth', round(aggregated.total_worth, 2))) AS types
-           FROM ( SELECT bfd.crime_id,
-                    bfd.primary_drug_name,
-                    max(bfd.raw_unit) AS raw_unit,
-                    sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_kg,
-                    sum(COALESCE(bfd.raw_quantity, (0)::numeric)) AS total_raw,
-                    sum(COALESCE(bfd.volume_ml, (0)::numeric)) AS total_ml,
-                    sum(COALESCE(bfd.count_total, (0)::numeric)) AS total_count,
-                    sum(COALESCE(bfd.seizure_worth, (0)::numeric)) AS total_worth
-                   FROM public.brief_facts_drug bfd
-                  WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))
-                  GROUP BY bfd.crime_id, bfd.primary_drug_name) aggregated
-          GROUP BY aggregated.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT f.parent_id AS crime_id,
-            jsonb_agg(jsonb_build_object('name', COALESCE(NULLIF(f.notes, ''::text), (f.source_field)::text), 'link', f.file_url, 'type', f.source_field)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
-           FROM public.files f
-          WHERE ((f.source_type = 'crime'::public.source_type_enum) AND (f.source_field = ANY (ARRAY['MEDIA'::public.source_field_enum, 'FIR_COPY'::public.source_field_enum])))
-          GROUP BY f.parent_id) crime_documents ON (((crime_documents.crime_id)::text = (c.crime_id)::text)))
-     LEFT JOIN ( SELECT f.parent_id AS crime_id,
-            max((f.file_url)::text) AS file_url
-           FROM public.files f
-          WHERE ((f.source_type = 'crime'::public.source_type_enum) AND (f.source_field = 'FIR_COPY'::public.source_field_enum))
-          GROUP BY f.parent_id) fir_copy_file ON (((fir_copy_file.crime_id)::text = (c.crime_id)::text)))
-  WITH NO DATA;
-
-
-ALTER MATERIALIZED VIEW public.firs_mv OWNER TO dev_dopamas;
-
---
 -- TOC entry 283 (class 1259 OID 1639518)
 -- Name: fsl_case_property; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
@@ -1973,29 +1914,6 @@ COMMENT ON COLUMN public.fsl_case_property.property_received_back IS 'Whether pr
 
 
 --
--- TOC entry 284 (class 1259 OID 1639532)
--- Name: fsl_case_property_media; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.fsl_case_property_media (
-    media_id uuid NOT NULL,
-    case_property_id character varying(255) NOT NULL,
-    file_id character varying(255)
-);
-
-
-ALTER TABLE public.fsl_case_property_media OWNER TO dev_dopamas;
-
---
--- TOC entry 4434 (class 0 OID 0)
--- Dependencies: 284
--- Name: TABLE fsl_case_property_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.fsl_case_property_media IS 'Media files associated with case properties';
-
-
---
 -- TOC entry 231 (class 1259 OID 1397634)
 -- Name: interrogation_reports; Type: TABLE; Schema: public; Owner: dev_dopamas
 --
@@ -2065,792 +1983,12 @@ CREATE TABLE public.interrogation_reports (
 ALTER TABLE public.interrogation_reports OWNER TO dev_dopamas;
 
 --
--- TOC entry 4435 (class 0 OID 0)
+-- TOC entry 4434 (class 0 OID 0)
 -- Dependencies: 231
 -- Name: TABLE interrogation_reports; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
 
 COMMENT ON TABLE public.interrogation_reports IS 'Main table storing Interrogation Report (IR) data. All common fields are stored as columns for easy querying.';
-
-
---
--- TOC entry 253 (class 1259 OID 1397797)
--- Name: ir_associate_details; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_associate_details (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    gang character varying(255),
-    relation text
-);
-
-
-ALTER TABLE public.ir_associate_details OWNER TO dev_dopamas;
-
---
--- TOC entry 4436 (class 0 OID 0)
--- Dependencies: 253
--- Name: TABLE ir_associate_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_associate_details IS 'Associate information for each IR record. One record per associate.';
-
-
---
--- TOC entry 252 (class 1259 OID 1397796)
--- Name: ir_associate_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_associate_details_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_associate_details_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4437 (class 0 OID 0)
--- Dependencies: 252
--- Name: ir_associate_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_associate_details_id_seq OWNED BY public.ir_associate_details.id;
-
-
---
--- TOC entry 245 (class 1259 OID 1397741)
--- Name: ir_consumer_details; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_consumer_details (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    consumer_person_id character varying(50),
-    place_of_consumption text,
-    other_sources text,
-    other_sources_phone_no character varying(20),
-    aadhar_card_number character varying(20),
-    aadhar_card_number_phone_no character varying(20)
-);
-
-
-ALTER TABLE public.ir_consumer_details OWNER TO dev_dopamas;
-
---
--- TOC entry 4438 (class 0 OID 0)
--- Dependencies: 245
--- Name: TABLE ir_consumer_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_consumer_details IS 'Consumer information for each IR record. One record per consumer.';
-
-
---
--- TOC entry 244 (class 1259 OID 1397740)
--- Name: ir_consumer_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_consumer_details_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_consumer_details_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4439 (class 0 OID 0)
--- Dependencies: 244
--- Name: ir_consumer_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_consumer_details_id_seq OWNED BY public.ir_consumer_details.id;
-
-
---
--- TOC entry 251 (class 1259 OID 1397783)
--- Name: ir_defence_counsel; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_defence_counsel (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    dist_division character varying(255),
-    ps_code text,
-    crime_num text,
-    law_section text,
-    sc_cc_num text,
-    defence_counsel_address text,
-    defence_counsel_phone character varying(20),
-    assistance text,
-    defence_counsel_person_id character varying(50)
-);
-
-
-ALTER TABLE public.ir_defence_counsel OWNER TO dev_dopamas;
-
---
--- TOC entry 4440 (class 0 OID 0)
--- Dependencies: 251
--- Name: TABLE ir_defence_counsel; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_defence_counsel IS 'Defence counsel information for each IR record. One record per counsel.';
-
-
---
--- TOC entry 250 (class 1259 OID 1397782)
--- Name: ir_defence_counsel_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_defence_counsel_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4441 (class 0 OID 0)
--- Dependencies: 250
--- Name: ir_defence_counsel_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNED BY public.ir_defence_counsel.id;
-
-
---
--- TOC entry 261 (class 1259 OID 1397857)
--- Name: ir_dopams_links; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_dopams_links (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    phone_number character varying(20),
-    dopams_data text[]
-);
-
-
-ALTER TABLE public.ir_dopams_links OWNER TO dev_dopamas;
-
---
--- TOC entry 4442 (class 0 OID 0)
--- Dependencies: 261
--- Name: TABLE ir_dopams_links; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_dopams_links IS 'DOPAMS links for each IR record. One record per phone number with DOPAMS data.';
-
-
---
--- TOC entry 260 (class 1259 OID 1397856)
--- Name: ir_dopams_links_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_dopams_links_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_dopams_links_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4443 (class 0 OID 0)
--- Dependencies: 260
--- Name: ir_dopams_links_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_dopams_links_id_seq OWNED BY public.ir_dopams_links.id;
-
-
---
--- TOC entry 233 (class 1259 OID 1397654)
--- Name: ir_family_history; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_family_history (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    relation text,
-    family_member_peculiarity text,
-    criminal_background boolean DEFAULT false,
-    is_alive boolean DEFAULT true,
-    family_stay_together boolean DEFAULT true
-);
-
-
-ALTER TABLE public.ir_family_history OWNER TO dev_dopamas;
-
---
--- TOC entry 4444 (class 0 OID 0)
--- Dependencies: 233
--- Name: TABLE ir_family_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_family_history IS 'Family members associated with each IR record. One record per family member.';
-
-
---
--- TOC entry 232 (class 1259 OID 1397653)
--- Name: ir_family_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_family_history_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_family_history_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4445 (class 0 OID 0)
--- Dependencies: 232
--- Name: ir_family_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_family_history_id_seq OWNED BY public.ir_family_history.id;
-
-
---
--- TOC entry 243 (class 1259 OID 1397727)
--- Name: ir_financial_history; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_financial_history (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    account_holder_person_id character varying(50),
-    pan_no character varying(50),
-    upi_id character varying(255),
-    name_of_bank character varying(255),
-    account_number text,
-    branch_name character varying(255),
-    ifsc_code character varying(50),
-    immovable_property_acquired text,
-    movable_property_acquired text
-);
-
-
-ALTER TABLE public.ir_financial_history OWNER TO dev_dopamas;
-
---
--- TOC entry 4446 (class 0 OID 0)
--- Dependencies: 243
--- Name: TABLE ir_financial_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_financial_history IS 'Financial information for each IR record. One record per financial account/history.';
-
-
---
--- TOC entry 242 (class 1259 OID 1397726)
--- Name: ir_financial_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_financial_history_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_financial_history_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4447 (class 0 OID 0)
--- Dependencies: 242
--- Name: ir_financial_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_financial_history_id_seq OWNED BY public.ir_financial_history.id;
-
-
---
--- TOC entry 259 (class 1259 OID 1397841)
--- Name: ir_interrogation_report_refs; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_interrogation_report_refs (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    report_ref_id text NOT NULL
-);
-
-
-ALTER TABLE public.ir_interrogation_report_refs OWNER TO dev_dopamas;
-
---
--- TOC entry 4448 (class 0 OID 0)
--- Dependencies: 259
--- Name: TABLE ir_interrogation_report_refs; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_interrogation_report_refs IS 'Interrogation report references (UUIDs) for each IR record. One record per reference.';
-
-
---
--- TOC entry 258 (class 1259 OID 1397840)
--- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_interrogation_report_refs_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4449 (class 0 OID 0)
--- Dependencies: 258
--- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNED BY public.ir_interrogation_report_refs.id;
-
-
---
--- TOC entry 235 (class 1259 OID 1397671)
--- Name: ir_local_contacts; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_local_contacts (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    town character varying(255),
-    address text,
-    jurisdiction_ps text
-);
-
-
-ALTER TABLE public.ir_local_contacts OWNER TO dev_dopamas;
-
---
--- TOC entry 4450 (class 0 OID 0)
--- Dependencies: 235
--- Name: TABLE ir_local_contacts; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_local_contacts IS 'Local contacts for each IR record. One record per contact.';
-
-
---
--- TOC entry 234 (class 1259 OID 1397670)
--- Name: ir_local_contacts_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_local_contacts_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_local_contacts_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4451 (class 0 OID 0)
--- Dependencies: 234
--- Name: ir_local_contacts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_local_contacts_id_seq OWNED BY public.ir_local_contacts.id;
-
-
---
--- TOC entry 257 (class 1259 OID 1397825)
--- Name: ir_media; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_media (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    media_id text NOT NULL
-);
-
-
-ALTER TABLE public.ir_media OWNER TO dev_dopamas;
-
---
--- TOC entry 4452 (class 0 OID 0)
--- Dependencies: 257
--- Name: TABLE ir_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_media IS 'Media references (UUIDs) for each IR record. One record per media reference.';
-
-
---
--- TOC entry 256 (class 1259 OID 1397824)
--- Name: ir_media_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_media_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_media_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4453 (class 0 OID 0)
--- Dependencies: 256
--- Name: ir_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_media_id_seq OWNED BY public.ir_media.id;
-
-
---
--- TOC entry 247 (class 1259 OID 1397755)
--- Name: ir_modus_operandi; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_modus_operandi (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    crime_head character varying(255),
-    crime_sub_head character varying(255),
-    modus_operandi text
-);
-
-
-ALTER TABLE public.ir_modus_operandi OWNER TO dev_dopamas;
-
---
--- TOC entry 4454 (class 0 OID 0)
--- Dependencies: 247
--- Name: TABLE ir_modus_operandi; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_modus_operandi IS 'Modus operandi information for each IR record. One record per MO entry.';
-
-
---
--- TOC entry 246 (class 1259 OID 1397754)
--- Name: ir_modus_operandi_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_modus_operandi_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4455 (class 0 OID 0)
--- Dependencies: 246
--- Name: ir_modus_operandi_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNED BY public.ir_modus_operandi.id;
-
-
---
--- TOC entry 249 (class 1259 OID 1397769)
--- Name: ir_previous_offences_confessed; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_previous_offences_confessed (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    arrest_date date,
-    arrested_by character varying(255),
-    arrest_place text,
-    crime_num text,
-    dist_unit_division character varying(255),
-    gang_member character varying(255),
-    interrogated_by character varying(255),
-    law_section character varying(255),
-    others_identify text,
-    property_recovered text,
-    property_stolen text,
-    ps_code text,
-    remarks text
-);
-
-
-ALTER TABLE public.ir_previous_offences_confessed OWNER TO dev_dopamas;
-
---
--- TOC entry 4456 (class 0 OID 0)
--- Dependencies: 249
--- Name: TABLE ir_previous_offences_confessed; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_previous_offences_confessed IS 'Previous offences confessed for each IR record. One record per offence.';
-
-
---
--- TOC entry 248 (class 1259 OID 1397768)
--- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_previous_offences_confessed_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4457 (class 0 OID 0)
--- Dependencies: 248
--- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNED BY public.ir_previous_offences_confessed.id;
-
-
---
--- TOC entry 237 (class 1259 OID 1397685)
--- Name: ir_regular_habits; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_regular_habits (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    habit character varying(255) NOT NULL
-);
-
-
-ALTER TABLE public.ir_regular_habits OWNER TO dev_dopamas;
-
---
--- TOC entry 4458 (class 0 OID 0)
--- Dependencies: 237
--- Name: TABLE ir_regular_habits; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_regular_habits IS 'Regular habits for each IR record. One record per habit (junction table for array of strings).';
-
-
---
--- TOC entry 236 (class 1259 OID 1397684)
--- Name: ir_regular_habits_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_regular_habits_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_regular_habits_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4459 (class 0 OID 0)
--- Dependencies: 236
--- Name: ir_regular_habits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_regular_habits_id_seq OWNED BY public.ir_regular_habits.id;
-
-
---
--- TOC entry 255 (class 1259 OID 1397811)
--- Name: ir_shelter; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_shelter (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    preparation_of_offence text,
-    after_offence text,
-    regular_residency character varying(255),
-    remarks text,
-    other_regular_residency text
-);
-
-
-ALTER TABLE public.ir_shelter OWNER TO dev_dopamas;
-
---
--- TOC entry 4460 (class 0 OID 0)
--- Dependencies: 255
--- Name: TABLE ir_shelter; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_shelter IS 'Shelter information for each IR record. One record per shelter entry.';
-
-
---
--- TOC entry 254 (class 1259 OID 1397810)
--- Name: ir_shelter_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_shelter_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_shelter_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4461 (class 0 OID 0)
--- Dependencies: 254
--- Name: ir_shelter_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_shelter_id_seq OWNED BY public.ir_shelter.id;
-
-
---
--- TOC entry 241 (class 1259 OID 1397713)
--- Name: ir_sim_details; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_sim_details (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    phone_number character varying(20),
-    sdr text,
-    imei character varying(50),
-    true_caller_name character varying(255),
-    person_id character varying(50)
-);
-
-
-ALTER TABLE public.ir_sim_details OWNER TO dev_dopamas;
-
---
--- TOC entry 4462 (class 0 OID 0)
--- Dependencies: 241
--- Name: TABLE ir_sim_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_sim_details IS 'SIM card details for each IR record. One record per SIM card.';
-
-
---
--- TOC entry 240 (class 1259 OID 1397712)
--- Name: ir_sim_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_sim_details_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_sim_details_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4463 (class 0 OID 0)
--- Dependencies: 240
--- Name: ir_sim_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_sim_details_id_seq OWNED BY public.ir_sim_details.id;
-
-
---
--- TOC entry 239 (class 1259 OID 1397699)
--- Name: ir_types_of_drugs; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.ir_types_of_drugs (
-    id integer NOT NULL,
-    interrogation_report_id character varying(50) NOT NULL,
-    type_of_drug character varying(255),
-    quantity character varying(255),
-    purchase_amount_in_inr text,
-    mode_of_payment text,
-    mode_of_transport text,
-    supplier_person_id character varying(50),
-    receivers_person_id character varying(50)
-);
-
-
-ALTER TABLE public.ir_types_of_drugs OWNER TO dev_dopamas;
-
---
--- TOC entry 4464 (class 0 OID 0)
--- Dependencies: 239
--- Name: TABLE ir_types_of_drugs; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.ir_types_of_drugs IS 'Drug information for each IR record. One record per drug type.';
-
-
---
--- TOC entry 238 (class 1259 OID 1397698)
--- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
---
-
-CREATE SEQUENCE public.ir_types_of_drugs_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNER TO dev_dopamas;
-
---
--- TOC entry 4465 (class 0 OID 0)
--- Dependencies: 238
--- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
---
-
-ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNED BY public.ir_types_of_drugs.id;
 
 
 --
@@ -2888,6 +2026,1045 @@ CREATE TABLE public.mo_seizures (
 
 
 ALTER TABLE public.mo_seizures OWNER TO dev_dopamas;
+
+--
+-- TOC entry 230 (class 1259 OID 1397619)
+-- Name: properties; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.properties (
+    property_id character varying(50) NOT NULL,
+    crime_id character varying(50) NOT NULL,
+    case_property_id character varying(50),
+    property_status character varying(100),
+    recovered_from character varying(255),
+    place_of_recovery text,
+    date_of_seizure timestamp without time zone,
+    nature character varying(255),
+    belongs character varying(100),
+    estimate_value numeric(15,2) DEFAULT 0,
+    recovered_value numeric(15,2) DEFAULT 0,
+    particular_of_property text,
+    category character varying(100),
+    additional_details jsonb,
+    media jsonb DEFAULT '[]'::jsonb,
+    date_created timestamp without time zone,
+    date_modified timestamp without time zone
+);
+
+
+ALTER TABLE public.properties OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4435 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: TABLE properties; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.properties IS 'Seized and recovered property details linked to crimes';
+
+
+--
+-- TOC entry 4436 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: COLUMN properties.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.properties.case_property_id IS 'Reference to related case property (may be null)';
+
+
+--
+-- TOC entry 4437 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: COLUMN properties.additional_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.properties.additional_details IS 'JSONB field containing flexible additional data (drug details, vehicle info, etc.)';
+
+
+--
+-- TOC entry 4438 (class 0 OID 0)
+-- Dependencies: 230
+-- Name: COLUMN properties.media; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON COLUMN public.properties.media IS 'JSONB array of media attachments';
+
+
+--
+-- TOC entry 306 (class 1259 OID 22432148)
+-- Name: firs_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: dev_dopamas
+--
+
+CREATE MATERIALIZED VIEW public.firs_mv AS
+ SELECT c.crime_id AS id,
+        CASE
+            WHEN ((h.dist_name IS NULL) OR (TRIM(BOTH FROM h.dist_name) = ''::text)) THEN 'Unknown'::text
+            ELSE TRIM(BOTH FROM h.dist_name)
+        END AS unit,
+        CASE
+            WHEN ((h.ps_name IS NULL) OR (TRIM(BOTH FROM h.ps_name) = ''::text)) THEN 'Unknown'::text
+            ELSE TRIM(BOTH FROM h.ps_name)
+        END AS ps,
+    (EXTRACT(year FROM c.fir_date))::integer AS year,
+    NULLIF(TRIM(BOTH FROM c.fir_num), ''::text) AS "firNumber",
+    NULLIF(TRIM(BOTH FROM c.fir_reg_num), ''::text) AS "firRegNum",
+    NULLIF(TRIM(BOTH FROM c.acts_sections), ''::text) AS section,
+    NULLIF(TRIM(BOTH FROM c.fir_type), ''::text) AS "firType",
+    NULLIF(TRIM(BOTH FROM c.crime_type), ''::text) AS "crimeType",
+    c.fir_date AS "crimeRegDate",
+    NULLIF(TRIM(BOTH FROM c.major_head), ''::text) AS "majorHead",
+    NULLIF(TRIM(BOTH FROM c.minor_head), ''::text) AS "minorHead",
+    NULLIF(TRIM(BOTH FROM c.io_name), ''::text) AS "ioName",
+    NULLIF(TRIM(BOTH FROM c.io_rank), ''::text) AS "ioRank",
+    NULLIF(TRIM(BOTH FROM c.brief_facts), ''::text) AS "briefFacts",
+        CASE
+            WHEN ((c.class_classification IS NULL) OR (TRIM(BOTH FROM c.class_classification) = ''::text)) THEN 'Unknown'::text
+            ELSE TRIM(BOTH FROM c.class_classification)
+        END AS "caseClassification",
+        CASE
+            WHEN ((c.case_status IS NULL) OR (TRIM(BOTH FROM c.case_status) = ''::text)) THEN 'Unknown'::text
+            ELSE TRIM(BOTH FROM c.case_status)
+        END AS "caseStatus",
+        CASE
+            WHEN (c.fir_date IS NULL) THEN NULL::text
+            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (0)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (30)::double precision)) THEN '0 - 30 Days'::text
+            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (31)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (60)::double precision)) THEN '31 - 60 Days'::text
+            WHEN ((date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) >= (61)::double precision) AND (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) <= (90)::double precision)) THEN '61 - 90 Days'::text
+            WHEN (date_part('day'::text, (now() - (c.fir_date)::timestamp with time zone)) > (90)::double precision) THEN 'More than 90 Days'::text
+            ELSE NULL::text
+        END AS "stipulatedPeriodForCS",
+    COALESCE(accused_count.count, 0) AS "noOfAccusedInvolved",
+    COALESCE(accused_details.details, '[]'::jsonb) AS "accusedDetails",
+    COALESCE(drug_types.types, '{}'::text[]) AS "drugType",
+    COALESCE(drug_quantities.types, '[]'::jsonb) AS "drugWithQuantity",
+    COALESCE(property_details.details, '[]'::jsonb) AS "propertyDetails",
+    COALESCE(mo_seizures_details.details, '[]'::jsonb) AS "moSeizuresDetails",
+    COALESCE(chargesheets_data.chargesheets, '[]'::jsonb) AS chargesheets,
+    '[]'::jsonb AS "chargesheetUpdates",
+    '[]'::jsonb AS "disposalDetails",
+    COALESCE(ir_details_data.details, '[]'::jsonb) AS "irDetails",
+    COALESCE(fsl_case_property_details.details, '[]'::jsonb) AS "casePropertyDetails",
+    COALESCE(crime_documents.docs, '[]'::jsonb) AS documents,
+    fir_copy_file.file_url AS "firCopy",
+    COALESCE(property_documents.docs, '[]'::jsonb) AS "propertyDocuments",
+    COALESCE(ir_documents.docs, '[]'::jsonb) AS "irDocuments"
+   FROM ((((((((((((((public.crimes c
+     LEFT JOIN public.hierarchy h ON (((h.ps_code)::text = (c.ps_code)::text)))
+     LEFT JOIN ( SELECT a.crime_id,
+            (count(a.accused_id))::integer AS count
+           FROM (public.accused a
+             LEFT JOIN public.agent_deduplication_tracker adt_count ON (((a.person_id)::text = ANY (adt_count.all_person_ids))))
+          GROUP BY a.crime_id) accused_count ON (((accused_count.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT a.crime_id,
+            jsonb_agg(jsonb_build_object('id', COALESCE(adt.canonical_person_id, a.person_id), 'accusedId', a.accused_id, 'accusedCode', NULLIF(TRIM(BOTH FROM a.accused_code), ''::text), 'seqNum', NULLIF(TRIM(BOTH FROM a.seq_num), ''::text), 'isCCL', a.is_ccl, 'beard', NULLIF(TRIM(BOTH FROM a.beard), ''::text), 'build', NULLIF(TRIM(BOTH FROM a.build), ''::text), 'color', NULLIF(TRIM(BOTH FROM a.color), ''::text), 'ear', NULLIF(TRIM(BOTH FROM a.ear), ''::text), 'eyes', NULLIF(TRIM(BOTH FROM a.eyes), ''::text), 'face', NULLIF(TRIM(BOTH FROM a.face), ''::text), 'hair', NULLIF(TRIM(BOTH FROM a.hair), ''::text), 'height', NULLIF(TRIM(BOTH FROM a.height), ''::text), 'leucoderma', NULLIF(TRIM(BOTH FROM a.leucoderma), ''::text), 'mole', NULLIF(TRIM(BOTH FROM a.mole), ''::text), 'mustache', NULLIF(TRIM(BOTH FROM a.mustache), ''::text), 'nose', NULLIF(TRIM(BOTH FROM a.nose), ''::text), 'teeth', NULLIF(TRIM(BOTH FROM a.teeth), ''::text), 'name', NULLIF(TRIM(BOTH FROM (p.name)::text), ''::text), 'surname', NULLIF(TRIM(BOTH FROM (p.surname)::text), ''::text), 'alias', NULLIF(TRIM(BOTH FROM (p.alias)::text), ''::text), 'fullName', NULLIF(TRIM(BOTH FROM (p.full_name)::text), ''::text), 'relativeName', NULLIF(TRIM(BOTH FROM (p.relative_name)::text), ''::text), 'emailId', NULLIF(TRIM(BOTH FROM (p.email_id)::text), ''::text), 'status',
+                CASE
+                    WHEN (ar.arrested_date IS NOT NULL) THEN 'Arrested'::text
+                    WHEN (ar.is_arrested IS TRUE) THEN 'Arrested'::text
+                    WHEN (ar.is_apprehended IS TRUE) THEN 'Arrested'::text
+                    WHEN (ar.is_absconding IS TRUE) THEN 'Absconding'::text
+                    WHEN (ar.is_died IS TRUE) THEN 'Died'::text
+                    WHEN ((bfa.status IS NULL) OR (TRIM(BOTH FROM bfa.status) = ''::text)) THEN 'Unknown'::text
+                    ELSE initcap(TRIM(BOTH FROM bfa.status))
+                END, 'type', NULLIF(TRIM(BOTH FROM (bfa.accused_type)::text), ''::text), 'value', concat_ws(' '::text,
+                CASE
+                    WHEN (NULLIF(TRIM(BOTH FROM a.accused_code), ''::text) IS NOT NULL) THEN (TRIM(BOTH FROM a.accused_code) || ':'::text)
+                    ELSE NULL::text
+                END, NULLIF(TRIM(BOTH FROM COALESCE(p.full_name, p.name)), ''::text),
+                CASE
+                    WHEN (ar.is_arrested IS TRUE) THEN '(Arrested)'::text
+                    WHEN (ar.is_apprehended IS TRUE) THEN '(Apprehended)'::text
+                    WHEN (ar.is_absconding IS TRUE) THEN '(Absconding)'::text
+                    WHEN (ar.is_died IS TRUE) THEN '(Died)'::text
+                    WHEN (NULLIF(TRIM(BOTH FROM bfa.status), ''::text) IS NOT NULL) THEN (('('::text || initcap(TRIM(BOTH FROM bfa.status))) || ')'::text)
+                    ELSE NULL::text
+                END), 'houseNo', NULLIF(TRIM(BOTH FROM p.permanent_house_no), ''::text), 'streetRoadNo', NULLIF(TRIM(BOTH FROM p.permanent_street_road_no), ''::text), 'wardColony', NULLIF(TRIM(BOTH FROM p.permanent_ward_colony), ''::text), 'landmarkMilestone', NULLIF(TRIM(BOTH FROM p.permanent_landmark_milestone), ''::text), 'localityVillage', NULLIF(TRIM(BOTH FROM p.permanent_locality_village), ''::text), 'areaMandal', NULLIF(TRIM(BOTH FROM p.permanent_area_mandal), ''::text), 'district', NULLIF(TRIM(BOTH FROM p.permanent_district), ''::text), 'stateUT', NULLIF(TRIM(BOTH FROM p.permanent_state_ut), ''::text), 'country', NULLIF(TRIM(BOTH FROM p.permanent_country), ''::text), 'residencyType', NULLIF(TRIM(BOTH FROM p.permanent_residency_type), ''::text), 'pinCode', NULLIF(TRIM(BOTH FROM p.permanent_pin_code), ''::text), 'jurisdictionPS', NULLIF(TRIM(BOTH FROM p.permanent_jurisdiction_ps), ''::text))) AS details
+           FROM ((((public.accused a
+             LEFT JOIN public.agent_deduplication_tracker adt ON (((a.person_id)::text = ANY (adt.all_person_ids))))
+             LEFT JOIN public.persons p ON (((p.person_id)::text = (a.person_id)::text)))
+             LEFT JOIN public.arrests ar ON ((((ar.crime_id)::text = (a.crime_id)::text) AND (ar.accused_seq_no = (a.seq_num)::text))))
+             LEFT JOIN public.brief_facts_accused bfa ON (((bfa.accused_id)::text = (a.accused_id)::text)))
+          GROUP BY a.crime_id) accused_details ON (((accused_details.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT p.crime_id,
+            jsonb_agg(jsonb_build_object('id', p.property_id, 'propertyStatus', NULLIF(TRIM(BOTH FROM (p.property_status)::text), ''::text), 'recoveredFrom', NULLIF(TRIM(BOTH FROM (p.recovered_from)::text), ''::text), 'placeOfRecovery', NULLIF(TRIM(BOTH FROM p.place_of_recovery), ''::text), 'dateOfSeizure', NULLIF(TRIM(BOTH FROM (p.date_of_seizure)::text), ''::text), 'nature', NULLIF(TRIM(BOTH FROM (p.nature)::text), ''::text), 'belongs', NULLIF(TRIM(BOTH FROM (p.belongs)::text), ''::text), 'estimatedValue', NULLIF(TRIM(BOTH FROM (p.estimate_value)::text), ''::text), 'recoveredValue', NULLIF(TRIM(BOTH FROM (p.recovered_value)::text), ''::text), 'particularOfProperty', NULLIF(TRIM(BOTH FROM p.particular_of_property), ''::text), 'category', NULLIF(TRIM(BOTH FROM (p.category)::text), ''::text))) AS details
+           FROM public.properties p
+          WHERE (TRIM(BOTH FROM p.property_status) <> 'Seized'::text)
+          GROUP BY p.crime_id) property_details ON (((property_details.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT bfd.crime_id,
+            array_agg(DISTINCT NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text)) AS types
+           FROM public.brief_facts_drug bfd
+          WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))
+          GROUP BY bfd.crime_id) drug_types ON (((drug_types.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT aggregated.crime_id,
+            jsonb_agg(jsonb_build_object('name', aggregated.primary_drug_name, 'quantity', NULLIF(concat_ws(', '::text,
+                CASE
+                    WHEN (aggregated.total_kg > (0)::numeric) THEN concat(round(aggregated.total_kg, 2), ' Kg')
+                    WHEN (aggregated.total_raw > (0)::numeric) THEN concat(round(aggregated.total_raw, 2), ' ', aggregated.raw_unit)
+                    ELSE NULL::text
+                END,
+                CASE
+                    WHEN (aggregated.total_ml > (0)::numeric) THEN concat(round(aggregated.total_ml, 2), ' Ml')
+                    ELSE NULL::text
+                END,
+                CASE
+                    WHEN (aggregated.total_count > (0)::numeric) THEN concat(round(aggregated.total_count, 2), ' Units')
+                    ELSE NULL::text
+                END), ''::text), 'worth', round(aggregated.total_worth, 2))) AS types
+           FROM ( SELECT bfd.crime_id,
+                    bfd.primary_drug_name,
+                    max(bfd.raw_unit) AS raw_unit,
+                    sum(COALESCE(bfd.weight_kg, (0)::numeric)) AS total_kg,
+                    sum(COALESCE(bfd.raw_quantity, (0)::numeric)) AS total_raw,
+                    sum(COALESCE(bfd.volume_ml, (0)::numeric)) AS total_ml,
+                    sum(COALESCE(bfd.count_total, (0)::numeric)) AS total_count,
+                    sum(COALESCE(bfd.seizure_worth, (0)::numeric)) AS total_worth
+                   FROM public.brief_facts_drug bfd
+                  WHERE ((NULLIF(TRIM(BOTH FROM bfd.primary_drug_name), ''::text) IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))
+                  GROUP BY bfd.crime_id, bfd.primary_drug_name) aggregated
+          GROUP BY aggregated.crime_id) drug_quantities ON (((drug_quantities.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT ms.crime_id,
+            jsonb_agg(jsonb_build_object('id', ms.mo_seizure_id, 'seqNo', NULLIF(TRIM(BOTH FROM ms.seq_no), ''::text), 'moId', NULLIF(TRIM(BOTH FROM ms.mo_id), ''::text), 'type', NULLIF(TRIM(BOTH FROM ms.type), ''::text), 'subType', NULLIF(TRIM(BOTH FROM ms.sub_type), ''::text), 'description', NULLIF(TRIM(BOTH FROM ms.description), ''::text))) AS details
+           FROM public.mo_seizures ms
+          GROUP BY ms.crime_id) mo_seizures_details ON (((mo_seizures_details.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT cs.crime_id,
+            jsonb_agg(jsonb_build_object('id', cs.id, 'chargesheetNo', NULLIF(TRIM(BOTH FROM cs.chargesheet_no), ''::text), 'chargesheetDate', NULLIF(TRIM(BOTH FROM (cs.chargesheet_date)::text), ''::text), 'chargesheetType', NULLIF(TRIM(BOTH FROM cs.chargesheet_type), ''::text), 'courtName', NULLIF(TRIM(BOTH FROM cs.court_name), ''::text), 'isCcl', cs.is_ccl, 'isEsigned', cs.is_esigned, 'dateCreated', NULLIF(TRIM(BOTH FROM (cs.date_created)::text), ''::text), 'dateModified', NULLIF(TRIM(BOTH FROM (cs.date_modified)::text), ''::text), 'chargesheetNoIcjs', NULLIF(TRIM(BOTH FROM cs.chargesheet_no_icjs), ''::text), 'acts', '[]'::jsonb, 'accuseds', '[]'::jsonb)) AS chargesheets
+           FROM public.chargesheets cs
+          GROUP BY cs.crime_id) chargesheets_data ON (((chargesheets_data.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT ir.crime_id,
+            jsonb_agg(jsonb_build_object('id', ir.interrogation_report_id, 'interrogationReportNo', ir.interrogation_report_id, 'dateCreated', NULLIF(TRIM(BOTH FROM (ir.date_created)::text), ''::text), 'dateModified', NULLIF(TRIM(BOTH FROM (ir.date_modified)::text), ''::text))) AS details
+           FROM public.interrogation_reports ir
+          GROUP BY ir.crime_id) ir_details_data ON (((ir_details_data.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT fcp.crime_id,
+            jsonb_agg(jsonb_build_object('casePropertyId', fcp.case_property_id, 'caseType', NULLIF(TRIM(BOTH FROM fcp.case_type), ''::text), 'moId', NULLIF(TRIM(BOTH FROM fcp.mo_id), ''::text), 'status', NULLIF(TRIM(BOTH FROM fcp.status), ''::text), 'sendDate', NULLIF(TRIM(BOTH FROM (fcp.send_date)::text), ''::text), 'fslDate', NULLIF(TRIM(BOTH FROM (fcp.fsl_date)::text), ''::text), 'dateCreated', NULLIF(TRIM(BOTH FROM (fcp.date_created)::text), ''::text), 'dateModified', NULLIF(TRIM(BOTH FROM (fcp.date_modified)::text), ''::text), 'reportReceived', fcp.report_received, 'fslNo', NULLIF(TRIM(BOTH FROM fcp.fsl_no), ''::text))) AS details
+           FROM public.fsl_case_property fcp
+          GROUP BY fcp.crime_id) fsl_case_property_details ON (((fsl_case_property_details.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT f.parent_id AS crime_id,
+            jsonb_agg(jsonb_build_object('name', COALESCE(NULLIF(f.notes, ''::text), (f.source_field)::text), 'link', f.file_url, 'type', f.source_field)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
+           FROM public.files f
+          WHERE ((f.source_type = 'crime'::public.source_type_enum) AND (f.source_field = ANY (ARRAY['MEDIA'::public.source_field_enum, 'FIR_COPY'::public.source_field_enum])))
+          GROUP BY f.parent_id) crime_documents ON (((crime_documents.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT f.parent_id AS crime_id,
+            max((f.file_url)::text) AS file_url
+           FROM public.files f
+          WHERE ((f.source_type = 'crime'::public.source_type_enum) AND (f.source_field = 'FIR_COPY'::public.source_field_enum))
+          GROUP BY f.parent_id) fir_copy_file ON (((fir_copy_file.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT f.parent_id AS crime_id,
+            jsonb_agg(jsonb_build_object('type', f.source_field, 'link', f.file_url)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
+           FROM public.files f
+          WHERE (f.source_type = 'property'::public.source_type_enum)
+          GROUP BY f.parent_id) property_documents ON (((property_documents.crime_id)::text = (c.crime_id)::text)))
+     LEFT JOIN ( SELECT f.parent_id AS crime_id,
+            jsonb_agg(jsonb_build_object('type', f.source_field, 'link', f.file_url)) FILTER (WHERE (f.file_url IS NOT NULL)) AS docs
+           FROM public.files f
+          WHERE (f.source_type = 'interrogation'::public.source_type_enum)
+          GROUP BY f.parent_id) ir_documents ON (((ir_documents.crime_id)::text = (c.crime_id)::text)))
+  WITH NO DATA;
+
+
+ALTER MATERIALIZED VIEW public.firs_mv OWNER TO dev_dopamas;
+
+--
+-- TOC entry 284 (class 1259 OID 1639532)
+-- Name: fsl_case_property_media; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.fsl_case_property_media (
+    media_id uuid NOT NULL,
+    case_property_id character varying(255) NOT NULL,
+    file_id character varying(255)
+);
+
+
+ALTER TABLE public.fsl_case_property_media OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4439 (class 0 OID 0)
+-- Dependencies: 284
+-- Name: TABLE fsl_case_property_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.fsl_case_property_media IS 'Media files associated with case properties';
+
+
+--
+-- TOC entry 253 (class 1259 OID 1397797)
+-- Name: ir_associate_details; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_associate_details (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    person_id character varying(50),
+    gang character varying(255),
+    relation text
+);
+
+
+ALTER TABLE public.ir_associate_details OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4440 (class 0 OID 0)
+-- Dependencies: 253
+-- Name: TABLE ir_associate_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_associate_details IS 'Associate information for each IR record. One record per associate.';
+
+
+--
+-- TOC entry 252 (class 1259 OID 1397796)
+-- Name: ir_associate_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_associate_details_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_associate_details_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4441 (class 0 OID 0)
+-- Dependencies: 252
+-- Name: ir_associate_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_associate_details_id_seq OWNED BY public.ir_associate_details.id;
+
+
+--
+-- TOC entry 245 (class 1259 OID 1397741)
+-- Name: ir_consumer_details; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_consumer_details (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    consumer_person_id character varying(50),
+    place_of_consumption text,
+    other_sources text,
+    other_sources_phone_no character varying(20),
+    aadhar_card_number character varying(20),
+    aadhar_card_number_phone_no character varying(20)
+);
+
+
+ALTER TABLE public.ir_consumer_details OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4442 (class 0 OID 0)
+-- Dependencies: 245
+-- Name: TABLE ir_consumer_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_consumer_details IS 'Consumer information for each IR record. One record per consumer.';
+
+
+--
+-- TOC entry 244 (class 1259 OID 1397740)
+-- Name: ir_consumer_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_consumer_details_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_consumer_details_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4443 (class 0 OID 0)
+-- Dependencies: 244
+-- Name: ir_consumer_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_consumer_details_id_seq OWNED BY public.ir_consumer_details.id;
+
+
+--
+-- TOC entry 251 (class 1259 OID 1397783)
+-- Name: ir_defence_counsel; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_defence_counsel (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    dist_division character varying(255),
+    ps_code text,
+    crime_num text,
+    law_section text,
+    sc_cc_num text,
+    defence_counsel_address text,
+    defence_counsel_phone character varying(20),
+    assistance text,
+    defence_counsel_person_id character varying(50)
+);
+
+
+ALTER TABLE public.ir_defence_counsel OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4444 (class 0 OID 0)
+-- Dependencies: 251
+-- Name: TABLE ir_defence_counsel; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_defence_counsel IS 'Defence counsel information for each IR record. One record per counsel.';
+
+
+--
+-- TOC entry 250 (class 1259 OID 1397782)
+-- Name: ir_defence_counsel_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_defence_counsel_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4445 (class 0 OID 0)
+-- Dependencies: 250
+-- Name: ir_defence_counsel_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_defence_counsel_id_seq OWNED BY public.ir_defence_counsel.id;
+
+
+--
+-- TOC entry 261 (class 1259 OID 1397857)
+-- Name: ir_dopams_links; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_dopams_links (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    phone_number character varying(20),
+    dopams_data text[]
+);
+
+
+ALTER TABLE public.ir_dopams_links OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4446 (class 0 OID 0)
+-- Dependencies: 261
+-- Name: TABLE ir_dopams_links; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_dopams_links IS 'DOPAMS links for each IR record. One record per phone number with DOPAMS data.';
+
+
+--
+-- TOC entry 260 (class 1259 OID 1397856)
+-- Name: ir_dopams_links_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_dopams_links_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_dopams_links_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4447 (class 0 OID 0)
+-- Dependencies: 260
+-- Name: ir_dopams_links_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_dopams_links_id_seq OWNED BY public.ir_dopams_links.id;
+
+
+--
+-- TOC entry 233 (class 1259 OID 1397654)
+-- Name: ir_family_history; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_family_history (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    person_id character varying(50),
+    relation text,
+    family_member_peculiarity text,
+    criminal_background boolean DEFAULT false,
+    is_alive boolean DEFAULT true,
+    family_stay_together boolean DEFAULT true
+);
+
+
+ALTER TABLE public.ir_family_history OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4448 (class 0 OID 0)
+-- Dependencies: 233
+-- Name: TABLE ir_family_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_family_history IS 'Family members associated with each IR record. One record per family member.';
+
+
+--
+-- TOC entry 232 (class 1259 OID 1397653)
+-- Name: ir_family_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_family_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_family_history_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4449 (class 0 OID 0)
+-- Dependencies: 232
+-- Name: ir_family_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_family_history_id_seq OWNED BY public.ir_family_history.id;
+
+
+--
+-- TOC entry 243 (class 1259 OID 1397727)
+-- Name: ir_financial_history; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_financial_history (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    account_holder_person_id character varying(50),
+    pan_no character varying(50),
+    upi_id character varying(255),
+    name_of_bank character varying(255),
+    account_number text,
+    branch_name character varying(255),
+    ifsc_code character varying(50),
+    immovable_property_acquired text,
+    movable_property_acquired text
+);
+
+
+ALTER TABLE public.ir_financial_history OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4450 (class 0 OID 0)
+-- Dependencies: 243
+-- Name: TABLE ir_financial_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_financial_history IS 'Financial information for each IR record. One record per financial account/history.';
+
+
+--
+-- TOC entry 242 (class 1259 OID 1397726)
+-- Name: ir_financial_history_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_financial_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_financial_history_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4451 (class 0 OID 0)
+-- Dependencies: 242
+-- Name: ir_financial_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_financial_history_id_seq OWNED BY public.ir_financial_history.id;
+
+
+--
+-- TOC entry 259 (class 1259 OID 1397841)
+-- Name: ir_interrogation_report_refs; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_interrogation_report_refs (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    report_ref_id text NOT NULL
+);
+
+
+ALTER TABLE public.ir_interrogation_report_refs OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4452 (class 0 OID 0)
+-- Dependencies: 259
+-- Name: TABLE ir_interrogation_report_refs; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_interrogation_report_refs IS 'Interrogation report references (UUIDs) for each IR record. One record per reference.';
+
+
+--
+-- TOC entry 258 (class 1259 OID 1397840)
+-- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_interrogation_report_refs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4453 (class 0 OID 0)
+-- Dependencies: 258
+-- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNED BY public.ir_interrogation_report_refs.id;
+
+
+--
+-- TOC entry 235 (class 1259 OID 1397671)
+-- Name: ir_local_contacts; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_local_contacts (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    person_id character varying(50),
+    town character varying(255),
+    address text,
+    jurisdiction_ps text
+);
+
+
+ALTER TABLE public.ir_local_contacts OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4454 (class 0 OID 0)
+-- Dependencies: 235
+-- Name: TABLE ir_local_contacts; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_local_contacts IS 'Local contacts for each IR record. One record per contact.';
+
+
+--
+-- TOC entry 234 (class 1259 OID 1397670)
+-- Name: ir_local_contacts_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_local_contacts_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_local_contacts_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4455 (class 0 OID 0)
+-- Dependencies: 234
+-- Name: ir_local_contacts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_local_contacts_id_seq OWNED BY public.ir_local_contacts.id;
+
+
+--
+-- TOC entry 257 (class 1259 OID 1397825)
+-- Name: ir_media; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_media (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    media_id text NOT NULL
+);
+
+
+ALTER TABLE public.ir_media OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4456 (class 0 OID 0)
+-- Dependencies: 257
+-- Name: TABLE ir_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_media IS 'Media references (UUIDs) for each IR record. One record per media reference.';
+
+
+--
+-- TOC entry 256 (class 1259 OID 1397824)
+-- Name: ir_media_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_media_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_media_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4457 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: ir_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_media_id_seq OWNED BY public.ir_media.id;
+
+
+--
+-- TOC entry 247 (class 1259 OID 1397755)
+-- Name: ir_modus_operandi; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_modus_operandi (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    crime_head character varying(255),
+    crime_sub_head character varying(255),
+    modus_operandi text
+);
+
+
+ALTER TABLE public.ir_modus_operandi OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4458 (class 0 OID 0)
+-- Dependencies: 247
+-- Name: TABLE ir_modus_operandi; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_modus_operandi IS 'Modus operandi information for each IR record. One record per MO entry.';
+
+
+--
+-- TOC entry 246 (class 1259 OID 1397754)
+-- Name: ir_modus_operandi_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_modus_operandi_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4459 (class 0 OID 0)
+-- Dependencies: 246
+-- Name: ir_modus_operandi_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_modus_operandi_id_seq OWNED BY public.ir_modus_operandi.id;
+
+
+--
+-- TOC entry 249 (class 1259 OID 1397769)
+-- Name: ir_previous_offences_confessed; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_previous_offences_confessed (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    arrest_date date,
+    arrested_by character varying(255),
+    arrest_place text,
+    crime_num text,
+    dist_unit_division character varying(255),
+    gang_member character varying(255),
+    interrogated_by character varying(255),
+    law_section character varying(255),
+    others_identify text,
+    property_recovered text,
+    property_stolen text,
+    ps_code text,
+    remarks text
+);
+
+
+ALTER TABLE public.ir_previous_offences_confessed OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4460 (class 0 OID 0)
+-- Dependencies: 249
+-- Name: TABLE ir_previous_offences_confessed; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_previous_offences_confessed IS 'Previous offences confessed for each IR record. One record per offence.';
+
+
+--
+-- TOC entry 248 (class 1259 OID 1397768)
+-- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_previous_offences_confessed_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4461 (class 0 OID 0)
+-- Dependencies: 248
+-- Name: ir_previous_offences_confessed_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_previous_offences_confessed_id_seq OWNED BY public.ir_previous_offences_confessed.id;
+
+
+--
+-- TOC entry 237 (class 1259 OID 1397685)
+-- Name: ir_regular_habits; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_regular_habits (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    habit character varying(255) NOT NULL
+);
+
+
+ALTER TABLE public.ir_regular_habits OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4462 (class 0 OID 0)
+-- Dependencies: 237
+-- Name: TABLE ir_regular_habits; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_regular_habits IS 'Regular habits for each IR record. One record per habit (junction table for array of strings).';
+
+
+--
+-- TOC entry 236 (class 1259 OID 1397684)
+-- Name: ir_regular_habits_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_regular_habits_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_regular_habits_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4463 (class 0 OID 0)
+-- Dependencies: 236
+-- Name: ir_regular_habits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_regular_habits_id_seq OWNED BY public.ir_regular_habits.id;
+
+
+--
+-- TOC entry 255 (class 1259 OID 1397811)
+-- Name: ir_shelter; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_shelter (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    preparation_of_offence text,
+    after_offence text,
+    regular_residency character varying(255),
+    remarks text,
+    other_regular_residency text
+);
+
+
+ALTER TABLE public.ir_shelter OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4464 (class 0 OID 0)
+-- Dependencies: 255
+-- Name: TABLE ir_shelter; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_shelter IS 'Shelter information for each IR record. One record per shelter entry.';
+
+
+--
+-- TOC entry 254 (class 1259 OID 1397810)
+-- Name: ir_shelter_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_shelter_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_shelter_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4465 (class 0 OID 0)
+-- Dependencies: 254
+-- Name: ir_shelter_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_shelter_id_seq OWNED BY public.ir_shelter.id;
+
+
+--
+-- TOC entry 241 (class 1259 OID 1397713)
+-- Name: ir_sim_details; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_sim_details (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    phone_number character varying(20),
+    sdr text,
+    imei character varying(50),
+    true_caller_name character varying(255),
+    person_id character varying(50)
+);
+
+
+ALTER TABLE public.ir_sim_details OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4466 (class 0 OID 0)
+-- Dependencies: 241
+-- Name: TABLE ir_sim_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_sim_details IS 'SIM card details for each IR record. One record per SIM card.';
+
+
+--
+-- TOC entry 240 (class 1259 OID 1397712)
+-- Name: ir_sim_details_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_sim_details_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_sim_details_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4467 (class 0 OID 0)
+-- Dependencies: 240
+-- Name: ir_sim_details_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_sim_details_id_seq OWNED BY public.ir_sim_details.id;
+
+
+--
+-- TOC entry 239 (class 1259 OID 1397699)
+-- Name: ir_types_of_drugs; Type: TABLE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE TABLE public.ir_types_of_drugs (
+    id integer NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL,
+    type_of_drug character varying(255),
+    quantity character varying(255),
+    purchase_amount_in_inr text,
+    mode_of_payment text,
+    mode_of_transport text,
+    supplier_person_id character varying(50),
+    receivers_person_id character varying(50)
+);
+
+
+ALTER TABLE public.ir_types_of_drugs OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4468 (class 0 OID 0)
+-- Dependencies: 239
+-- Name: TABLE ir_types_of_drugs; Type: COMMENT; Schema: public; Owner: dev_dopamas
+--
+
+COMMENT ON TABLE public.ir_types_of_drugs IS 'Drug information for each IR record. One record per drug type.';
+
+
+--
+-- TOC entry 238 (class 1259 OID 1397698)
+-- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE; Schema: public; Owner: dev_dopamas
+--
+
+CREATE SEQUENCE public.ir_types_of_drugs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNER TO dev_dopamas;
+
+--
+-- TOC entry 4469 (class 0 OID 0)
+-- Dependencies: 238
+-- Name: ir_types_of_drugs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
+--
+
+ALTER SEQUENCE public.ir_types_of_drugs_id_seq OWNED BY public.ir_types_of_drugs.id;
+
 
 --
 -- TOC entry 267 (class 1259 OID 1413497)
@@ -2962,7 +3139,7 @@ CREATE TABLE public.old_interragation_report (
 ALTER TABLE public.old_interragation_report OWNER TO dev_dopamas;
 
 --
--- TOC entry 4466 (class 0 OID 0)
+-- TOC entry 4470 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: TABLE old_interragation_report; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2971,7 +3148,7 @@ COMMENT ON TABLE public.old_interragation_report IS 'Interrogation report with f
 
 
 --
--- TOC entry 4467 (class 0 OID 0)
+-- TOC entry 4471 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN old_interragation_report.crime_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3018,7 +3195,7 @@ CREATE TABLE public.person_deduplication_tracker (
 ALTER TABLE public.person_deduplication_tracker OWNER TO dev_dopamas;
 
 --
--- TOC entry 4468 (class 0 OID 0)
+-- TOC entry 4472 (class 0 OID 0)
 -- Dependencies: 269
 -- Name: TABLE person_deduplication_tracker; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3027,7 +3204,7 @@ COMMENT ON TABLE public.person_deduplication_tracker IS 'Tracks unique persons a
 
 
 --
--- TOC entry 4469 (class 0 OID 0)
+-- TOC entry 4473 (class 0 OID 0)
 -- Dependencies: 269
 -- Name: COLUMN person_deduplication_tracker.person_fingerprint; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3036,7 +3213,7 @@ COMMENT ON COLUMN public.person_deduplication_tracker.person_fingerprint IS 'MD5
 
 
 --
--- TOC entry 4470 (class 0 OID 0)
+-- TOC entry 4474 (class 0 OID 0)
 -- Dependencies: 269
 -- Name: COLUMN person_deduplication_tracker.matching_tier; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3101,76 +3278,12 @@ CREATE SEQUENCE public.person_deduplication_tracker_id_seq
 ALTER SEQUENCE public.person_deduplication_tracker_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4471 (class 0 OID 0)
+-- TOC entry 4475 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: person_deduplication_tracker_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
 
 ALTER SEQUENCE public.person_deduplication_tracker_id_seq OWNED BY public.person_deduplication_tracker.id;
-
-
---
--- TOC entry 230 (class 1259 OID 1397619)
--- Name: properties; Type: TABLE; Schema: public; Owner: dev_dopamas
---
-
-CREATE TABLE public.properties (
-    property_id character varying(50) NOT NULL,
-    crime_id character varying(50) NOT NULL,
-    case_property_id character varying(50),
-    property_status character varying(100),
-    recovered_from character varying(255),
-    place_of_recovery text,
-    date_of_seizure timestamp without time zone,
-    nature character varying(255),
-    belongs character varying(100),
-    estimate_value numeric(15,2) DEFAULT 0,
-    recovered_value numeric(15,2) DEFAULT 0,
-    particular_of_property text,
-    category character varying(100),
-    additional_details jsonb,
-    media jsonb DEFAULT '[]'::jsonb,
-    date_created timestamp without time zone,
-    date_modified timestamp without time zone
-);
-
-
-ALTER TABLE public.properties OWNER TO dev_dopamas;
-
---
--- TOC entry 4472 (class 0 OID 0)
--- Dependencies: 230
--- Name: TABLE properties; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON TABLE public.properties IS 'Seized and recovered property details linked to crimes';
-
-
---
--- TOC entry 4473 (class 0 OID 0)
--- Dependencies: 230
--- Name: COLUMN properties.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.properties.case_property_id IS 'Reference to related case property (may be null)';
-
-
---
--- TOC entry 4474 (class 0 OID 0)
--- Dependencies: 230
--- Name: COLUMN properties.additional_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.properties.additional_details IS 'JSONB field containing flexible additional data (drug details, vehicle info, etc.)';
-
-
---
--- TOC entry 4475 (class 0 OID 0)
--- Dependencies: 230
--- Name: COLUMN properties.media; Type: COMMENT; Schema: public; Owner: dev_dopamas
---
-
-COMMENT ON COLUMN public.properties.media IS 'JSONB array of media attachments';
 
 
 --
@@ -4398,11 +4511,11 @@ CREATE INDEX idx_files_source_type_created ON public.files USING btree (source_t
 
 
 --
--- TOC entry 4173 (class 1259 OID 22413018)
--- Name: idx_firs_mv_unique_id; Type: INDEX; Schema: public; Owner: dev_dopamas
+-- TOC entry 4173 (class 1259 OID 22432155)
+-- Name: idx_firs_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
-CREATE UNIQUE INDEX idx_firs_mv_unique_id ON public.firs_mv USING btree (id);
+CREATE UNIQUE INDEX idx_firs_mv_id ON public.firs_mv USING btree (id);
 
 
 --
@@ -5424,11 +5537,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT ALL ON SE
 ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLES TO dev_dopamas;
 
 
--- Completed on 2026-02-27 15:00:57
+-- Completed on 2026-02-27 16:54:50
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict stZt5SahZ2TBFfdRGhgzFca1bqeon0sQHjVXDaRg4xGonqT6xLdl0WJmq7nQYY0
+\unrestrict BH6bdl9BoiVv1W3TGH3dsro7TqNsBdhO1vUcF3KbbniPrs1NQnPbItw5wDIDetJ
 

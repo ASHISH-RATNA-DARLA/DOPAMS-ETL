@@ -1,7 +1,7 @@
 
 import sys
 import logging
-from db import get_db_connection, fetch_crimes_by_ids, insert_drug_facts, fetch_unprocessed_crimes, fetch_drug_categories
+from db import get_db_connection, fetch_crimes_by_ids, insert_drug_facts, fetch_unprocessed_crimes, fetch_drug_categories, ensure_connection
 from extractor import extract_drug_info
 
 # Configure logging
@@ -51,15 +51,25 @@ def main():
             total_processed = 0
             
             while True:
-                crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
-                if not crimes:
-                    logging.info("No more unprocessed crimes found in DB. Exiting.")
-                    break
+                try:
+                    conn = ensure_connection(conn)
+                    crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
+                    if not crimes:
+                        logging.info("No more unprocessed crimes found in DB. Exiting.")
+                        break
                     
-                logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                process_crimes(conn, crimes, drug_categories)
-                total_processed += len(crimes)
-                logging.info(f"Batch complete. Total processed so far: {total_processed}")
+                    logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
+                    process_crimes(conn, crimes, drug_categories)
+                    total_processed += len(crimes)
+                    logging.info(f"Batch complete. Total processed so far: {total_processed}")
+                except Exception as e:
+                    logging.error(f"Batch processing error: {e}. Attempting reconnection...")
+                    try:
+                        conn = get_db_connection()
+                        logging.info("Reconnected to database. Resuming...")
+                    except Exception as reconnect_err:
+                        logging.error(f"Reconnection failed: {reconnect_err}. Exiting.")
+                        break
                 
     except KeyboardInterrupt:
         logging.info("Process interrupted by user.")
@@ -78,7 +88,21 @@ def process_crimes(conn, crimes, drug_categories=None):
         facts_text = crime['brief_facts']
         
         logging.info(f"Processing Crime ID: {crime_id}")
-        
+
+        # Guard: skip empty or missing brief_facts
+        if not facts_text or not facts_text.strip():
+            logging.info(f"Skipping Crime {crime_id}: empty or missing brief_facts.")
+            placeholder = {
+                "raw_drug_name": "NO_DRUGS_DETECTED", "raw_quantity": 0, "raw_unit": "None",
+                "primary_drug_name": "NO_DRUGS_DETECTED", "drug_form": "None", "accused_id": None,
+                "weight_g": 0, "weight_kg": 0, "volume_ml": 0, "volume_l": 0, "count_total": 0,
+                "confidence_score": 1.00, "extraction_metadata": {"source_sentence": "Empty brief_facts"},
+                "is_commercial": False, "seizure_worth": 0.0
+            }
+            insert_drug_facts(conn, crime_id, placeholder)
+            logging.info(f"Completed processing for Crime {crime_id}. inserted_count=0")
+            continue
+
         # 3. Extract Info
         try:
             extractions = extract_drug_info(facts_text, drug_categories)
@@ -104,12 +128,12 @@ def process_crimes(conn, crimes, drug_categories=None):
                 logging.info(f"Skipping invalid drug name '{drug.primary_drug_name}' for Crime {crime_id}.")
                 continue
 
-            # User Requirement: Confidence score check (0.90+)
-            if drug.confidence_score >= 0.90:
+            # Confidence score check (0.50+ = 50%+)
+            if drug.confidence_score >= 0.50:
                 insert_drug_facts(conn, crime_id, drug.model_dump())
                 count += 1
             else:
-                logging.info(f"Skipping low confidence extraction ({drug.confidence_score}%): {drug.primary_drug_name}")
+                logging.info(f"Skipping low confidence extraction ({drug.confidence_score:.0%}): {drug.primary_drug_name}")
         
         # CRITICAL: If no drugs were inserted (either none found, or all low confidence),
         # we MUST insert a placeholder to mark this crime as "processed".

@@ -3,21 +3,44 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_db_connection():
-    """Establishes a connection to the PostgreSQL database."""
+    """Establishes a connection to the PostgreSQL database with TCP keepalive."""
     try:
         conn = psycopg2.connect(
             dbname=config.DB_NAME,
             user=config.DB_USER,
             password=config.DB_PASSWORD,
             host=config.DB_HOST,
-            port=config.DB_PORT
+            port=config.DB_PORT,
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
         )
         return conn
     except Exception as e:
-        print(f"Error connecting to database: {e}")
+        logger.error(f"Error connecting to database: {e}")
         raise
+
+
+def ensure_connection(conn):
+    """Check if DB connection is alive; reconnect if dropped."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        return conn
+    except Exception:
+        logger.warning("DB connection lost. Reconnecting...")
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return get_db_connection()
 
 def fetch_drug_categories(conn):
     """
