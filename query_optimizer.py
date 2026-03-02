@@ -41,20 +41,30 @@ class ExplainAnalyzer:
         """
         Run EXPLAIN ANALYZE on a query and return parsed results.
         """
-        with self.conn.cursor() as cur:
-            # Build EXPLAIN query
-            explain_query = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}"
-            
-            try:
-                cur.execute(explain_query, params)
-                plan = cur.fetchone()[0]
+        try:
+            with self.conn.cursor() as cur:
+                # Build EXPLAIN query
+                explain_query = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}"
                 
-                # Parse JSON plan
-                return self._parse_plan(plan)
-            
-            except Exception as e:
-                logger.error(f"EXPLAIN failed: {e}")
-                return {'error': str(e)}
+                try:
+                    cur.execute(explain_query, params)
+                    plan = cur.fetchone()[0]
+                    
+                    # Parse JSON plan
+                    return self._parse_plan(plan)
+                
+                except Exception as e:
+                    logger.error(f"EXPLAIN failed: {e}")
+                    # Rollback the failed transaction
+                    self.conn.rollback()
+                    return {'error': str(e)}
+        except Exception as e:
+            logger.error(f"Cursor error: {e}")
+            try:
+                self.conn.rollback()
+            except:
+                pass
+            return {'error': str(e)}
     
     def _parse_plan(self, raw_plan: List) -> Dict[str, Any]:
         """Extract key metrics from JSON plan"""
@@ -94,6 +104,13 @@ class ExplainAnalyzer:
         print(f"\nSQL: {query[:100]}...")
         
         analysis = self.analyze_query(query, params)
+        
+        # Check if there was an error
+        if 'error' in analysis:
+            print(f"\n⚠️  QUERY ANALYSIS ERROR:")
+            print(f"  {analysis['error']}")
+            print("\n  (This may indicate schema differences or type mismatches)")
+            return
         
         print(f"\nExecution Plan:")
         print(f"  Node Type: {analysis.get('node_type', 'N/A')}")
@@ -177,8 +194,14 @@ class DOPAMSQueryOptimizer:
     
     @staticmethod
     def analyze_all_critical_queries(conn):
-        """Run EXPLAIN on all critical DOPAMS queries"""
-        analyzer = ExplainAnalyzer(conn)
+        """Run EXPLAIN on all critical DOPAMS queries
+        
+        Uses fresh connection for each query to avoid transaction abort issues.
+        """
+        import os
+        from dotenv import load_dotenv
+        
+        load_dotenv()
         
         print("\n" + "="*80)
         print("DOPAMS ETL CRITICAL QUERY ANALYSIS")
@@ -186,13 +209,29 @@ class DOPAMSQueryOptimizer:
         
         for query_info in DOPAMSQueryOptimizer.CRITICAL_QUERIES:
             try:
+                # Create fresh connection for this query
+                fresh_conn = psycopg2.connect(
+                    dbname=os.getenv('DB_NAME'),
+                    user=os.getenv('DB_USER'),
+                    password=os.getenv('DB_PASSWORD'),
+                    host=os.getenv('DB_HOST'),
+                    port=os.getenv('DB_PORT', '5432')
+                )
+                
+                analyzer = ExplainAnalyzer(fresh_conn)
                 analyzer.print_report(
                     query_info['query'],
                     query_info['name'],
                     query_info['params']
                 )
+                fresh_conn.close()
+                
             except Exception as e:
                 print(f"Error analyzing {query_info['name']}: {e}")
+                try:
+                    fresh_conn.close()
+                except:
+                    pass
     
     @staticmethod
     def print_index_recommendations():
