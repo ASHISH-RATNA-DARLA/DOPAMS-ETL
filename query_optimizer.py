@@ -183,13 +183,13 @@ class DOPAMSQueryOptimizer:
     ]
     
     INDEX_RECOMMENDATIONS = [
-        ('brief_facts_accused', 'crime_id', 'CREATE INDEX idx_brief_facts_accused_crime_id ON brief_facts_accused(crime_id);'),
-        ('brief_facts_drugs', 'crime_id', 'CREATE INDEX idx_brief_facts_drugs_crime_id ON brief_facts_drugs(crime_id);'),
-        ('accused', 'crime_id', 'CREATE INDEX idx_accused_crime_id ON accused(crime_id);'),
-        ('accused', '(crime_id, person_id)', 'CREATE INDEX idx_accused_crime_person ON accused(crime_id, person_id);'),
-        ('crimes', '(date_created DESC, date_modified DESC)', 'CREATE INDEX idx_crimes_dates ON crimes(date_created DESC, date_modified DESC);'),
-        ('persons', 'full_name', 'CREATE INDEX idx_persons_full_name ON persons(full_name);'),
-        ('persons', 'phone_number', 'CREATE INDEX idx_persons_phone ON persons(phone_number);'),
+        ('brief_facts_accused', 'crime_id', 'CREATE INDEX IF NOT EXISTS idx_brief_facts_accused_crime_id ON brief_facts_accused(crime_id);'),
+        ('brief_facts_drugs', 'crime_id', 'CREATE INDEX IF NOT EXISTS idx_brief_facts_drugs_crime_id ON brief_facts_drugs(crime_id);'),
+        ('accused', 'crime_id', 'CREATE INDEX IF NOT EXISTS idx_accused_crime_id ON accused(crime_id);'),
+        ('accused', '(crime_id, person_id)', 'CREATE INDEX IF NOT EXISTS idx_accused_crime_person ON accused(crime_id, person_id);'),
+        ('crimes', '(date_created DESC, date_modified DESC)', 'CREATE INDEX IF NOT EXISTS idx_crimes_dates ON crimes(date_created DESC, date_modified DESC);'),
+        ('persons', 'full_name', 'CREATE INDEX IF NOT EXISTS idx_persons_full_name ON persons(full_name);'),
+        ('persons', 'phone_number', 'CREATE INDEX IF NOT EXISTS idx_persons_phone ON persons(phone_number);'),
     ]
     
     @staticmethod
