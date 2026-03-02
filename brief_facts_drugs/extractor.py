@@ -277,7 +277,8 @@ EXTRACTION_PROMPT_VERBOSE = """You are an expert forensic data analyst. Your tas
 9. Confidence 0-100: 90-100 all clear, 70-89 partial, 50-69 missing info, <50 speculative.
 10. Accused vs Customers: Only extract persons who POSSESSED/TRANSPORTED drugs at arrest. Skip customers/buyers mentioned in confessions.
 11. Seized Quantity ONLY: Extract ONLY the quantity physically SEIZED at arrest. Do NOT extract purchased amounts, sold amounts, or post-sampling breakdowns (samples S1/S2, remaining property P1).
-12. Plant/Cultivation Seizures: "8 ganja plants" → raw_quantity=8, raw_unit="plants", drug_form="count". Plants ARE valid drug seizures under NDPS Act — ALWAYS extract them.
+12. Collective vs Individual: If seizure is ONE TOTAL from a group with NO per-accused split → 1 entry, accused_id=null. If per-accused amounts given → separate entries.
+13. Plant/Cultivation Seizures: "8 ganja plants" → raw_quantity=8, raw_unit="plants", drug_form="count". Plants ARE valid drug seizures under NDPS Act — ALWAYS extract them.
 Container vs Content: "3 packets, 50g" → 50. "3 packets of 50g each" → 150.
 Skip unknown/unidentified drug names. drug_form ∈ solid/liquid/count. seizure_worth = float rupees.
 Drug Knowledge Base: {drug_knowledge_base}
@@ -301,11 +302,19 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
 
 5. **Accused vs Customers/Buyers:** Only extract entries for persons who POSSESSED or TRANSPORTED drugs at the time of seizure. Do NOT create entries for customers, buyers, or associates merely mentioned in confessions as people the accused sold to. "sold to Sidhu, Karthik, Faraz" → these are NOT accused with seizures; skip them.
 
-6. **Seized Quantity ONLY:** Extract ONLY the quantity physically SEIZED/RECOVERED at the time of arrest. Do NOT extract:
+6. **Collective vs Individual Seizures:**
+   - If the text specifies SEPARATE quantities per accused ("A1 had 180g, A2 had 80g") → create one entry per accused with their individual quantity.
+   - If the text describes ONE TOTAL seizure from a GROUP without per-accused breakdown ("apprehended 6 persons... seized total 520 KGs dry ganja") → create ONLY **1 entry** with `accused_id = null` and the total quantity. Do NOT duplicate the total across each accused.
+   - Example: "A1, A2, A3 caught with 520 KG ganja" → 1 entry: accused_id=null, raw_quantity=520, raw_unit="KGs"
+   - Example: "seized 100g from A1 and 200g from A2" → 2 entries with individual quantities.
+
+7. **Seized Quantity ONLY:** Extract ONLY the quantity physically SEIZED/RECOVERED at the time of arrest. Do NOT extract:
    - **Purchased quantities** — historical amounts bought before arrest ("purchased 100g" ≠ seized)
    - **Sold quantities** — amounts sold before arrest ("sold 25g to customers" ≠ seized)
    - **Post-sampling breakdowns** — forensic samples (S1/S2) and remaining property (P1) are PARTS of the total seizure; do NOT extract them as separate entries.
    - Example: "purchased 20 boxes (100g), sold 5 boxes (25g), seized 15 boxes (75g), drew 2 boxes sample (10g), remaining 13 boxes (65g) as P1" → extract ONLY **75g** (the total seized amount). Do NOT add entries for 100g, 65g, 25g, or 10g.
+
+**REMEMBER Rule 6**: If the FIR lists multiple accused BUT the seizure is described as a SINGLE TOTAL ("seized total 520 KGs"), produce ONLY 1 entry with accused_id=null. Do NOT clone the total for each accused.
 
 ## COMPRESSED RULES
 R5:zero-inference|extract only explicit/implied values|missing unit→confidence~60
@@ -327,7 +336,8 @@ If not in KB → set primary_drug_name to capitalized raw extraction.
 ## Output Schema
 {{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
 
-## Example — 3 accused, same drug, same qty → 3 entries
+## Examples
+### Example 1 — per-accused quantities → separate entries
 Input: "seized 100g Ganja from 1) Anil Kumar, 100g from 2) Jagadish, 100g from 3) Abhya Kumar"
 {{{{"drugs":[
   {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":0.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja"}}}}}}}},
@@ -335,10 +345,16 @@ Input: "seized 100g Ganja from 1) Anil Kumar, 100g from 2) Jagadish, 100g from 3
   {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":0.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja"}}}}}}}}
 ]}}}}
 
+### Example 2 — collective seizure, NO per-accused breakdown → 1 entry, accused_id=null
+Input: "apprehended A1 Sandeep, A2 Vinod, A3 Dhanaraj... Seized total 252 bundles wg 520 KGs dry ganja worth Rs.52,00,000"
+{{{{"drugs":[
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","accused_id":null,"seizure_worth":5200000.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
+]}}}}
+
 ## Input Text
 {text}
 
-EXTRACT EVERY ACCUSED-DRUG COMBINATION. RETURN VALID JSON ONLY. NO MARKDOWN.
+EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. RETURN VALID JSON ONLY. NO MARKDOWN.
 """
 
 def truncate_string(s: str, max_len: int = 50) -> str:
@@ -474,9 +490,73 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
     return drugs
 
 
+def _collapse_collective_seizures(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
+    """
+    Detect and collapse collective seizures: when multiple accused have the
+    EXACT SAME drug, quantity, and unit, it means the LLM duplicated a single
+    collective seizure across each accused.  Collapse to 1 entry with
+    accused_id = None and all accused refs stored in extraction_metadata.
+
+    Trigger: 3+ entries share (primary_drug_name, raw_quantity, raw_unit)
+    with DIFFERENT accused_ids.  This pattern only happens with collective
+    seizures — individual per-accused seizures would have different quantities.
+    """
+    if len(drugs) < 3:
+        return drugs
+
+    from collections import defaultdict
+
+    # Group by (drug, qty, unit) — ignore accused_id
+    groups = defaultdict(list)
+    for drug in drugs:
+        gkey = (
+            (drug.primary_drug_name or '').lower().strip(),
+            round(float(drug.raw_quantity or 0), 2),
+            re.sub(r'[^a-z]', '', (drug.raw_unit or '').lower().strip()),
+        )
+        groups[gkey].append(drug)
+
+    result = []
+    for gkey, group in groups.items():
+        # Collect distinct accused_ids in this group
+        accused_ids = set(
+            d.accused_id.strip() for d in group
+            if d.accused_id and d.accused_id.strip()
+        )
+
+        if len(accused_ids) >= 3 and len(group) == len(accused_ids):
+            # Collective seizure detected — collapse to 1 entry
+            best = max(group, key=lambda d: d.confidence_score or 0)
+            accused_list = sorted(accused_ids)
+            logger.info(
+                f"Collective seizure detected: {len(accused_ids)} accused "
+                f"({', '.join(accused_list)}) × {best.primary_drug_name} "
+                f"{best.raw_quantity} {best.raw_unit} → collapsing to 1 entry "
+                f"with accused_id=null"
+            )
+            best.accused_id = None
+            meta = best.extraction_metadata or {}
+            meta['collective_accused'] = accused_list
+            meta['collapse_reason'] = (
+                f"Same drug/qty/unit across {len(accused_ids)} accused "
+                f"with no per-accused breakdown in source text"
+            )
+            best.extraction_metadata = meta
+            result.append(best)
+        else:
+            # Individual seizures — keep all
+            result.extend(group)
+
+    if len(result) < len(drugs):
+        logger.info(f"Collective collapse: {len(drugs)} → {len(result)} entries")
+
+    return result
+
+
 def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 100) -> List[DrugExtraction]:
     """
     Remove duplicate drug extractions and cap at max_per_crime.
+    Also collapses collective seizures (same drug/qty/unit across 3+ accused).
     Deduplicates by (accused_id, primary_drug_name, raw_drug_name, raw_quantity, raw_unit).
     This preserves:
       - Same drug, different accused  (A1 Ganja 100g + A2 Ganja 100g → 2 entries)
@@ -486,6 +566,9 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
     """
     if not drugs:
         return drugs
+
+    # Step 1: Collapse collective seizures BEFORE dedup
+    drugs = _collapse_collective_seizures(drugs)
 
     seen = {}
     for drug in drugs:
