@@ -247,6 +247,8 @@ EXTRACTION_PROMPT_VERBOSE = """You are an expert forensic data analyst. Your tas
 7. Precision: Exact values, no rounding.
 8. Per-accused entries are NOT duplicates. Duplicate = same accused + same drug + same qty repeated.
 9. Confidence 0-100: 90-100 all clear, 70-89 partial, 50-69 missing info, <50 speculative.
+10. Accused vs Customers: Only extract persons who POSSESSED/TRANSPORTED drugs at arrest. Skip customers/buyers mentioned in confessions.
+11. Seized Quantity ONLY: Extract ONLY the quantity physically SEIZED at arrest. Do NOT extract purchased amounts, sold amounts, or post-sampling breakdowns (samples S1/S2, remaining property P1).
 Container vs Content: "3 packets, 50g" → 50. "3 packets of 50g each" → 150.
 Skip unknown/unidentified drug names. drug_form ∈ solid/liquid/count. seizure_worth = float rupees.
 Drug Knowledge Base: {drug_knowledge_base}
@@ -268,6 +270,14 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
 3. **Ignore Totals:** Only per-accused quantities. "A1 180g + A2 80g, total 260g" → 180g(A1) + 80g(A2). Do NOT add 260g entry.
 4. **Per-accused entries ≠ duplicates.** 3 accused × 100g Ganja = 3 valid entries. A duplicate is ONLY same accused + same drug + same qty repeated in different sentences.
 
+5. **Accused vs Customers/Buyers:** Only extract entries for persons who POSSESSED or TRANSPORTED drugs at the time of seizure. Do NOT create entries for customers, buyers, or associates merely mentioned in confessions as people the accused sold to. "sold to Sidhu, Karthik, Faraz" → these are NOT accused with seizures; skip them.
+
+6. **Seized Quantity ONLY:** Extract ONLY the quantity physically SEIZED/RECOVERED at the time of arrest. Do NOT extract:
+   - **Purchased quantities** — historical amounts bought before arrest ("purchased 100g" ≠ seized)
+   - **Sold quantities** — amounts sold before arrest ("sold 25g to customers" ≠ seized)
+   - **Post-sampling breakdowns** — forensic samples (S1/S2) and remaining property (P1) are PARTS of the total seizure; do NOT extract them as separate entries.
+   - Example: "purchased 20 boxes (100g), sold 5 boxes (25g), seized 15 boxes (75g), drew 2 boxes sample (10g), remaining 13 boxes (65g) as P1" → extract ONLY **75g** (the total seized amount). Do NOT add entries for 100g, 65g, 25g, or 10g.
+
 ## COMPRESSED RULES
 R5:zero-inference|extract only explicit/implied values|missing unit→confidence~60
 R6:KB-match|text matches KB raw/standard name→primary_drug_name=Standard Name|not in KB→capitalize raw
@@ -276,7 +286,7 @@ R8:precision|exact values,no rounding
 R9:confidence(int 0-100)|90-100:name+qty+unit clear|70-89:partial|50-69:qty/unit missing|<50:speculative
 R10:container-vs-content|"3 packets,50g"→50|"3×50g each"→150
 R11:skip "unknown"/"unidentified" drug names
-R12:drug_form∈{{solid,liquid,count}}
+R12:drug_form∈{{solid,liquid,count}}|liquid drugs(oil,syrup,solution)→raw_unit MUST be ml/litres even if source says grams
 R13:seizure_worth=float rupees|individual over collective
 
 ## Drug Knowledge Base
@@ -328,6 +338,7 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             raw_unit_str = drug.raw_unit if drug.raw_unit else "unknown"
             unit = re.sub(r'[^a-z]', '', raw_unit_str.lower().strip())
             form = re.sub(r'[^a-z]', '', drug.drug_form.lower().strip()) if drug.drug_form else "unknown"
+            name = drug.raw_drug_name.lower().strip() if drug.raw_drug_name else ""
 
             # --- Auto-Classification ---
 
@@ -367,7 +378,37 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 else:
                     drug.count_total = qty
 
-            # 3. Ensure constraint check_has_measurements is met for 0 qty extractions
+            # 3. LIQUID CROSS-CHECK: If drug_form is liquid but values ended up in
+            #    weight fields (because source said "grams"/"kg"), reclassify to volume.
+            #    Assumption: density ≈ 1 g/ml (standard for drug seizure reporting).
+            #    e.g. Hash Oil 65 grams → 65 ml, 0.065 L
+            if form in DRUG_FORM_LIQUID or form == 'liquid':
+                if drug.weight_g is not None and drug.weight_g > 0 and (drug.volume_ml is None or drug.volume_ml == 0):
+                    logger.debug(
+                        f"Liquid cross-check: {drug.raw_drug_name} — moving "
+                        f"{drug.weight_g}g → {drug.weight_g}ml (density≈1)"
+                    )
+                    drug.volume_ml = drug.weight_g    # g → ml (1:1)
+                    drug.volume_l = drug.weight_kg     # kg → L (1:1)
+                    drug.weight_g = None
+                    drug.weight_kg = None
+
+            # 4. AUTO-DETECT LIQUID FORM from drug name if form was not set correctly.
+            #    Some drugs are inherently liquid (oils, syrups, solutions) but LLM
+            #    may still say "solid" or "Unknown".
+            _LIQUID_DRUG_NAMES = {'hash oil', 'hashish oil', 'weed oil', 'cannabis oil',
+                                 'opium solution', 'poppy husk solution', 'codeine syrup',
+                                 'cough syrup', 'phensedyl', 'corex'}
+            if name in _LIQUID_DRUG_NAMES or 'oil' in name or 'syrup' in name or 'solution' in name:
+                if drug.weight_g is not None and drug.weight_g > 0 and (drug.volume_ml is None or drug.volume_ml == 0):
+                    logger.debug(f"Auto-liquid: {drug.raw_drug_name} detected as liquid by name")
+                    drug.volume_ml = drug.weight_g
+                    drug.volume_l = drug.weight_kg
+                    drug.weight_g = None
+                    drug.weight_kg = None
+                    drug.drug_form = "liquid"
+
+            # 5. Ensure constraint check_has_measurements is met for 0 qty extractions
             if drug.weight_g is None and drug.weight_kg is None and drug.volume_l is None and drug.volume_ml is None and drug.count_total is None:
                 drug.weight_g = 0.0
                 drug.weight_kg = 0.0
@@ -378,7 +419,6 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 drug.confidence_score = round(drug.confidence_score / 100, 2)
 
             # --- Name Standardization ---
-            name = drug.raw_drug_name.lower().strip()
             # If the primary drug name hasn't been set, set it to the raw name.
             if not drug.primary_drug_name or drug.primary_drug_name == "Unknown":
                 drug.primary_drug_name = drug.raw_drug_name
