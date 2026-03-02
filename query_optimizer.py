@@ -163,7 +163,7 @@ class DOPAMSQueryOptimizer:
                     a.type as accused_type, p.age, p.gender
                 FROM accused a
                 JOIN persons p ON a.person_id = p.person_id
-                WHERE a.crime_id = %s
+                WHERE a.crime_id = %s::text
             """,
             'params': (1000,),
             'expected_issue': 'Missing index on accused(crime_id)',
@@ -259,7 +259,7 @@ class ConnectionStats:
         """Show sequential vs index scans per table"""
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT schemaname, tablename, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch
+                SELECT schemaname, relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch
                 FROM pg_stat_user_tables
                 ORDER BY (seq_scan + idx_scan) DESC
                 LIMIT 20
@@ -277,14 +277,14 @@ class ConnectionStats:
                 
                 status = "🟢" if seq_pct < 10 else "🟡" if seq_pct < 50 else "🔴"
                 
-                print(f"{status} {row['tablename']:<28} {row['seq_scan']:>12} {row['idx_scan']:>12} {seq_pct:>7.1f}%")
+                print(f"{status} {row['relname']:<28} {row['seq_scan']:>12} {row['idx_scan']:>12} {seq_pct:>7.1f}%")
     
     @staticmethod
     def get_cache_hit_ratio(conn):
         """Show buffer cache hit ratio (aim for > 99%)"""
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT schemaname, tablename, heap_blks_read, heap_blks_hit
+                SELECT schemaname, relname, heap_blks_read, heap_blks_hit
                 FROM pg_statio_user_tables
                 ORDER BY heap_blks_read DESC
                 LIMIT 20
@@ -302,7 +302,7 @@ class ConnectionStats:
                 
                 status = "🟢" if hit_ratio > 99 else "🟡" if hit_ratio > 95 else "🔴"
                 
-                print(f"{status} {row['tablename']:<28} {hit_ratio:>11.1f}% {row['heap_blks_read']:>12} {row['heap_blks_hit']:>12}")
+                print(f"{status} {row['relname']:<28} {hit_ratio:>11.1f}% {row['heap_blks_read']:>12} {row['heap_blks_hit']:>12}")
     
     @staticmethod
     def get_index_stats(conn):
@@ -315,7 +315,7 @@ class ConnectionStats:
             print("="*80)
             
             cur.execute("""
-                SELECT schemaname, tablename, indexname, idx_scan
+                SELECT schemaname, relname, indexrelname, idx_scan
                 FROM pg_stat_user_indexes
                 WHERE idx_scan = 0
                 ORDER BY pg_relation_size(indexrelid) DESC
@@ -325,7 +325,7 @@ class ConnectionStats:
             if unused:
                 print(f"\n❌ Found {len(unused)} unused indexes:\n")
                 for row in unused:
-                    print(f"   DROP INDEX {row['schemaname']}.{row['indexname']};  -- on {row['tablename']}")
+                    print(f"   DROP INDEX {row['schemaname']}.{row['indexrelname']};  -- on {row['relname']}")
             else:
                 print("\n✅ No unused indexes found")
 
