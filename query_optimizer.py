@@ -76,7 +76,7 @@ class ExplainAnalyzer:
         
         # Identify issues
         if result['node_type'] == 'Seq Scan':
-            result['issues'].append('SEQUENTIAL SCAN - Slow! Consider adding index.'')
+            result['issues'].append('SEQUENTIAL SCAN - Slow! Consider adding index.')
         
         if result['row_filter_ratio'] > 10:
             result['issues'].append(f'POOR FILTER EFFICIENCY - {result["row_filter_ratio"]:.1f}x rows filtered')
