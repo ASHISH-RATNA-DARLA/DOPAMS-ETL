@@ -259,9 +259,13 @@ class ConnectionStats:
         """Show sequential vs index scans per table"""
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT schemaname, relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch
+                SELECT schemaname, relname,
+                    COALESCE(seq_scan, 0) AS seq_scan,
+                    COALESCE(seq_tup_read, 0) AS seq_tup_read,
+                    COALESCE(idx_scan, 0) AS idx_scan,
+                    COALESCE(idx_tup_fetch, 0) AS idx_tup_fetch
                 FROM pg_stat_user_tables
-                ORDER BY (seq_scan + idx_scan) DESC
+                ORDER BY (COALESCE(seq_scan, 0) + COALESCE(idx_scan, 0)) DESC
                 LIMIT 20
             """)
             
@@ -284,9 +288,11 @@ class ConnectionStats:
         """Show buffer cache hit ratio (aim for > 99%)"""
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT schemaname, relname, heap_blks_read, heap_blks_hit
+                SELECT schemaname, relname,
+                    COALESCE(heap_blks_read, 0) AS heap_blks_read,
+                    COALESCE(heap_blks_hit, 0) AS heap_blks_hit
                 FROM pg_statio_user_tables
-                ORDER BY heap_blks_read DESC
+                ORDER BY COALESCE(heap_blks_read, 0) DESC
                 LIMIT 20
             """)
             
