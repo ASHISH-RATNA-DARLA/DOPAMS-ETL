@@ -102,10 +102,17 @@ def insert_drug_facts(conn, crime_id, drug_data):
         """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
         
         import json
-        
+
+        # Preserve the LLM-extracted accused_id in extraction_metadata for audit,
+        # even though the DB column is set to NULL to avoid FK constraint issues.
+        metadata = drug_data.get('extraction_metadata', {})
+        llm_accused_id = drug_data.get('accused_id')
+        if llm_accused_id and str(llm_accused_id).strip():
+            metadata['accused_ref'] = str(llm_accused_id).strip()
+
         cur.execute(query, (
             crime_id,
-            None, # Overriding LLM accused_id slang extraction (like A-1) to avoid Foreign Key crashes
+            None, # DB column stays NULL (FK constraint); accused ref stored in extraction_metadata
             drug_data.get('raw_drug_name'),
             drug_data.get('raw_quantity'),
             drug_data.get('raw_unit'),
@@ -117,7 +124,7 @@ def insert_drug_facts(conn, crime_id, drug_data):
             round(float(drug_data.get('volume_l')), 6) if drug_data.get('volume_l') is not None else None,
             round(float(drug_data.get('count_total') or 0.0), 6),
             round(float(drug_data.get('confidence_score') or 0.0), 2),
-            json.dumps(drug_data.get('extraction_metadata', {})),
+            json.dumps(metadata),
             bool(drug_data.get('is_commercial', False)),
             round(float(drug_data.get('seizure_worth') or 0.0), 2)
         ))
