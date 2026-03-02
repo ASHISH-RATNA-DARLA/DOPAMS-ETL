@@ -148,11 +148,10 @@ def get_llm(task_type: str) -> LLMService:
 
 # --- Retry Loop Wrapper for Extraction ---
 
-def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 1) -> dict:
+def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) -> dict:
     """
-    Executes a LangChain extraction chain. If LangChain's JsonOutputParser 
-    throws an error (e.g., truncated JSON, missing brackets), it catches it 
-    and automatically retries the prompt with a strong correction instruction.
+    Executes a LangChain extraction chain with retry on ANY error.
+    Catches both JSON parsing errors and connection/HTTP errors.
     """
     from langchain_core.exceptions import OutputParserException
     
@@ -161,25 +160,30 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 1) 
     
     # Run once normally
     try:
-        return chain.invoke(input_data)
+        result = chain.invoke(input_data)
+        if result:
+            return result
+        logger.warning("LLM returned None/empty on first attempt.")
     except OutputParserException as e:
         logger.warning(f"JSON Parsing failed on first attempt: {e}")
         last_error = e
-        retries += 1
+    except Exception as e:
+        logger.warning(f"LLM invocation failed on first attempt ({type(e).__name__}): {e}")
+        last_error = e
+    
+    retries += 1
         
     # Retry loop
     while retries <= max_retries:
         logger.info(f"Retry {retries}/{max_retries} for JSON Extraction")
         
-        # We assume input_data has a 'text' or similar prompt input.
-        # We append a strong system override to force correct JSON formatting.
+        # Append a strong system override to force correct JSON formatting.
         correction_instruction = (
             "\n\n[SYSTEM OVERRIDE: Your previous response was INVALID JSON. "
             "You MUST fix the JSON formatting to exactly match the requested schema. "
             "Ensure all brackets are closed and keys are properly quoted.]"
         )
         
-        # Try to intelligently inject the correction instruction into the main payload text
         retry_data = input_data.copy()
         for key in retry_data:
             if isinstance(retry_data[key], str):
@@ -187,13 +191,22 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 1) 
                 break
                 
         try:
-            return chain.invoke(retry_data)
+            import time
+            time.sleep(1 * retries)   # Back-off: 1s, 2s, ...
+            result = chain.invoke(retry_data)
+            if result:
+                logger.info(f"Retry {retries} succeeded.")
+                return result
         except OutputParserException as e:
             logger.error(f"JSON Parsing failed on retry {retries}: {e}")
             last_error = e
-            retries += 1
+        except Exception as e:
+            logger.error(f"LLM invocation failed on retry {retries} ({type(e).__name__}): {e}")
+            last_error = e
+        
+        retries += 1
             
     # If we get here, all retries failed
-    logger.error("All JSON extraction retries failed. Returning empty/fallback structure.")
+    logger.error(f"All {max_retries + 1} extraction attempts failed. Last error: {last_error}")
     return {}
 

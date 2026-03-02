@@ -1,6 +1,7 @@
 
 import re
 import logging
+import threading
 from typing import List, Optional, Tuple
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
@@ -14,6 +15,33 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.llm_service import get_llm, invoke_extraction_with_retry
 import config
+
+# =============================================================================
+# Thread-safe LLM instances
+# =============================================================================
+# ChatOllama uses httpx.Client internally, which is NOT thread-safe.
+# When using ThreadPoolExecutor for parallel extraction, each thread MUST
+# have its own ChatOllama instance.  We use threading.local() so each
+# thread creates its instance once and reuses it for the thread's lifetime.
+# =============================================================================
+_thread_local = threading.local()
+
+def _get_thread_safe_llm():
+    """Return a per-thread ChatOllama instance (created lazily, cached per thread)."""
+    if not hasattr(_thread_local, 'llm'):
+        from langchain_ollama import ChatOllama
+        llm_service = get_llm('extraction')
+        base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        if base_url.endswith("/api"):
+            base_url = base_url.replace("/api", "")
+        _thread_local.llm = ChatOllama(
+            base_url=base_url,
+            model=llm_service.model,
+            temperature=llm_service.temperature,
+            num_ctx=llm_service.context_window,
+        )
+        logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name}")
+    return _thread_local.llm
 
 # =============================================================================
 # Multi-FIR Pre-processor
@@ -199,7 +227,7 @@ def preprocess_brief_facts(text: str, relevance_threshold: int = 50) -> Tuple[st
 # tablet/pill/capsule/paper/seed/count → count (nos/pieces/tablets) only
 DRUG_FORM_SOLID   = {'solid', 'dry', 'powder', 'paste', 'resin', 'chunk', 'crystal', 'granule', 'leaf', 'dried', 'compressed'}
 DRUG_FORM_LIQUID  = {'liquid', 'syrup', 'oil', 'solution', 'tincture', 'extract', 'concentrate', 'fluid', 'injection'}
-DRUG_FORM_COUNT   = {'tablet', 'pill', 'capsule', 'paper', 'blot', 'seed', 'strip', 'sachet', 'ampule', 'vial', 'bottle'}
+DRUG_FORM_COUNT   = {'tablet', 'pill', 'capsule', 'paper', 'blot', 'seed', 'strip', 'sachet', 'ampule', 'vial', 'bottle', 'plant', 'tree', 'sapling', 'seedling'}
 
 class DrugExtraction(BaseModel):
     raw_drug_name: Optional[str] = Field(default="Unknown")
@@ -249,6 +277,7 @@ EXTRACTION_PROMPT_VERBOSE = """You are an expert forensic data analyst. Your tas
 9. Confidence 0-100: 90-100 all clear, 70-89 partial, 50-69 missing info, <50 speculative.
 10. Accused vs Customers: Only extract persons who POSSESSED/TRANSPORTED drugs at arrest. Skip customers/buyers mentioned in confessions.
 11. Seized Quantity ONLY: Extract ONLY the quantity physically SEIZED at arrest. Do NOT extract purchased amounts, sold amounts, or post-sampling breakdowns (samples S1/S2, remaining property P1).
+12. Plant/Cultivation Seizures: "8 ganja plants" → raw_quantity=8, raw_unit="plants", drug_form="count". Plants ARE valid drug seizures under NDPS Act — ALWAYS extract them.
 Container vs Content: "3 packets, 50g" → 50. "3 packets of 50g each" → 150.
 Skip unknown/unidentified drug names. drug_form ∈ solid/liquid/count. seizure_worth = float rupees.
 Drug Knowledge Base: {drug_knowledge_base}
@@ -288,6 +317,7 @@ R10:container-vs-content|"3 packets,50g"→50|"3×50g each"→150
 R11:skip "unknown"/"unidentified" drug names
 R12:drug_form∈{{solid,liquid,count}}|liquid drugs(oil,syrup,solution)→raw_unit MUST be ml/litres even if source says grams
 R13:seizure_worth=float rupees|individual over collective
+R14:plant/cultivation seizures|"8 ganja plants"→raw_quantity=8,raw_unit="plants",drug_form="count"|plants ARE valid drug seizures under NDPS Act—ALWAYS extract them
 
 ## Drug Knowledge Base
 {drug_knowledge_base}
@@ -362,7 +392,9 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                           'tablet', 'tablets', 'pill', 'pills', 'strip', 'strips',
                           'box', 'boxes', 'packet', 'packets', 'sachet', 'sachets',
                           'blot', 'blots', 'dot', 'dots', 'bottle', 'bottles',
-                          'unit', 'units', 'count', 'counts'}:
+                          'unit', 'units', 'count', 'counts',
+                          'plant', 'plants', 'tree', 'trees', 'sapling', 'saplings',
+                          'seedling', 'seedlings', 'bush', 'bushes'}:
                 drug.count_total = qty
 
             # 2. Fallback to Form if unit is unknown but qty > 0
@@ -437,7 +469,7 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 drug.drug_form = "Unknown"
                 
         except Exception as e:
-            print(f"Standardization error: {e}")
+            logger.error(f"Standardization error for {drug.raw_drug_name}: {e}", exc_info=True)
             
     return drugs
 
@@ -532,13 +564,24 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
     prompt = ChatPromptTemplate.from_template(EXTRACTION_PROMPT)
     
     try:
-        llm_service = get_llm('extraction')
-        llm = llm_service.get_langchain_model()
+        # Use thread-safe LLM instance (each thread gets its own ChatOllama)
+        llm = _get_thread_safe_llm()
         chain = prompt | llm | parser
         
-        response = invoke_extraction_with_retry(chain, {"text": filtered_text, "drug_knowledge_base": formatted_kb}, max_retries=1)
+        input_data = {"text": filtered_text, "drug_knowledge_base": formatted_kb}
+        response = invoke_extraction_with_retry(chain, input_data, max_retries=1)
         
-        drugs_data = response.get("drugs", []) # Changed from result to response
+        if not response:
+            logger.warning("LLM returned empty response (all retries failed). Returning empty.")
+            return []
+        
+        drugs_data = response.get("drugs", [])
+        if not drugs_data:
+            logger.info(f"LLM returned 0 drugs from response keys: {list(response.keys())}")
+            return []
+        
+        logger.info(f"LLM returned {len(drugs_data)} raw drug entries.")
+        
         valid_drugs = []
         for d in drugs_data:
             try:
@@ -564,14 +607,14 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
                 
                 valid_drugs.append(DrugExtraction(**d))
             except Exception as e:
-                print(f"Skipping invalid: {e}")
+                logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
         
         # Post-process (Unit Calc + Dedup)
         standardized = standardize_units(valid_drugs)
         return deduplicate_extractions(standardized)
         
     except Exception as e:
-        print(f"Error during extraction: {e}")
+        logger.error(f"Drug extraction failed: {e}", exc_info=True)
         return []
 
 if __name__ == "__main__":
