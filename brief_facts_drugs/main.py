@@ -64,7 +64,7 @@ def main():
         else:
             # Dynamic Mode: Process ALL unprocessed crimes in batches
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
-            batch_size = 100
+            batch_size = int(os.getenv("BATCH_SIZE", "5"))
             total_processed = 0
 
             while True:
