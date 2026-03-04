@@ -720,8 +720,9 @@ def main():
 
     args = parser.parse_args()
 
-    global TRGM_SIMILARITY_THRESHOLD
-    TRGM_SIMILARITY_THRESHOLD = args.trgm_threshold
+    # Update module-level threshold from CLI arg
+    _mod = sys.modules[__name__]
+    _mod.TRGM_SIMILARITY_THRESHOLD = args.trgm_threshold
 
     process_records(
         table_name=args.table,
