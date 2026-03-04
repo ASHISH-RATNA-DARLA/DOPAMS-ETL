@@ -1,46 +1,180 @@
-India(country):
-KARNATAKA
-DELHI
-RAJASTHAN
-MANIPUR
-WEST BENGAL
-ANDHRA PRADESH (also listed as "Andhra Pradesh")
-MADHYA PRADESH
-KERALA
-GUJARAT
-TELANGANA (listed twice)
-ANDAMAN AND NICOBAR
-BIHAR
-GOA
-CHANDIGARH
-TRIPURA
-JHARKHAND
-ASSAM
-PUNJAB
-JAMMU AND KASHMIR
-ODISHA (also listed as "odisha")
-MEGHALAYA
-MIZORAM
-MAHARASHTRA
-CHHATTISGARH
-TAMIL NADU
-HARYANA
-UTTARAKHAND
-UTTAR PRADESH
-HIMACHAL PRADESH
+# =============================================================================
+# Foreign Country Reference Data for update-state-country ETL
+# India is NOT listed here — Indian locations are resolved via the
+# geo_reference table using pg_trgm fuzzy matching.
+#
+# Format:  CountryName(country):
+#          STATE_OR_PROVINCE
+#          CityOrVillage (city)
+# =============================================================================
 
+Afghanistan(country):
+Kabul
+Kandahar
+Herat
+Balkh
+Nangarhar
+Helmand
 
-Nigeria(country):
-Nigeria
-Lagos (city in Nigeria)
-Awommama village, Emo state, Nigeria
-Anambra State
-Imo State (also listed as "Emo State" and "EMO" - likely variations/misspellings)
-Lambanyi
+Bangladesh(country):
+Dhaka
+Chittagong
+Rajshahi
+Khulna
+Sylhet
+Rangpur
+Mymensingh
+Comilla
+Barisal
+
+Bhutan(country):
+Thimphu
+Paro
+Punakha
+
+China(country):
+Beijing
+Shanghai
+Guangdong
+Sichuan
+Yunnan
+Tibet
+Xinjiang
+
+Iran(country):
+Tehran
+Isfahan
+Shiraz
+Tabriz
+Mashhad
+
+Iraq(country):
+Baghdad
+Basra
+Erbil
+
+Malaysia(country):
+Kuala Lumpur
+Penang
+Johor
+Sabah
+Sarawak
+
+Maldives(country):
+Male
+
+Myanmar(country):
+Yangon
+Mandalay
+Shan
+Kachin
+Chin
+Sagaing
 
 Nepal(country):
-pokhra (Pokhara - city in Nepal)
-Nepal
+Kathmandu
+Pokhara
+Biratnagar
+Lalitpur
+Bharatpur
+Chitwan
+Morang
+Jhapa
+Rupandehi
+Sunsari
+Kaski
+
+Nigeria(country):
+Lagos (city)
+Abuja
+Anambra
+Imo
+Kano
+Oyo
+Rivers
+Edo
+Enugu
+Awommama
+Lambanyi
+
+Oman(country):
+Muscat
+Salalah
+
+Pakistan(country):
+Punjab
+Sindh
+Balochistan
+Khyber Pakhtunkhwa
+Islamabad
+Karachi
+Lahore
+Peshawar
+Quetta
+Rawalpindi
+
+Qatar(country):
+Doha
+
+Saudi Arabia(country):
+Riyadh
+Jeddah
+Mecca
+Medina
+Dammam
+
+South Africa(country):
+Johannesburg
+Cape Town
+Durban
+Pretoria
+Gauteng
+
+Sri Lanka(country):
+Colombo
+Kandy
+Galle
+Jaffna
+Trincomalee
 
 Tanzania(country):
-PCO Dar Es salaam (Dar es Salaam - city in Tanzania)
+Dar es Salaam
+Dodoma
+Arusha
+
+Thailand(country):
+Bangkok
+Chiang Mai
+Phuket
+Pattaya
+
+Turkey(country):
+Istanbul
+Ankara
+Izmir
+Antalya
+
+UAE(country):
+Dubai
+Abu Dhabi
+Sharjah
+Ajman
+
+United Kingdom(country):
+London
+Manchester
+Birmingham
+Scotland
+Wales
+
+United States(country):
+New York
+California
+Texas
+Florida
+Washington
+
+Uzbekistan(country):
+Tashkent
+Samarkand
+Bukhara
