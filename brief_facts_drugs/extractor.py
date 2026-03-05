@@ -316,6 +316,15 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
 
 **REMEMBER Rule 6**: If the FIR lists multiple accused BUT the seizure is described as a SINGLE TOTAL ("seized total 520 KGs"), produce ONLY 1 entry with accused_id=null. Do NOT clone the total for each accused.
 
+8. **Seizure Worth (MANDATORY):** Extract the monetary value ("worth") of EACH drug as `seizure_worth` in **rupees (float)**.
+   - Look for patterns: "worth Rs.", "valued at Rs.", "worth about Rs.", "worth approximately", "market value", "valued", "costing Rs."
+   - Parse Indian number formats: Rs.52,00,000 = 5200000.0 | Rs.5,00,000 = 500000.0 | Rs.10,000 = 10000.0 | Rs.1,00,00,000 = 10000000.0
+   - **Per-drug mapping:** If worth is mentioned alongside a specific drug, map it to THAT drug only.
+     Example: "seized 500g Ganja worth Rs.5,00,000 and 100g Charas worth Rs.2,00,000" → Ganja gets 500000.0, Charas gets 200000.0
+   - If a single "worth" covers all drugs collectively and cannot be split → assign to each drug proportionally or to the primary drug.
+   - If NO worth/value is mentioned in the text → seizure_worth = 0.0
+   - NEVER default to 0.0 when worth IS mentioned in the text.
+
 ## COMPRESSED RULES
 R5:zero-inference|extract only explicit/implied values|missing unit→confidence~60
 R6:KB-match|text matches KB raw/standard name→primary_drug_name=Standard Name|not in KB→capitalize raw
@@ -325,8 +334,8 @@ R9:confidence(int 0-100)|90-100:name+qty+unit clear|70-89:partial|50-69:qty/unit
 R10:container-vs-content|"3 packets,50g"→50|"3×50g each"→150
 R11:skip "unknown"/"unidentified" drug names
 R12:drug_form∈{{solid,liquid,count}}|liquid drugs(oil,syrup,solution)→raw_unit MUST be ml/litres even if source says grams
-R13:seizure_worth=float rupees|individual over collective
-R14:plant/cultivation seizures|"8 ganja plants"→raw_quantity=8,raw_unit="plants",drug_form="count"|plants ARE valid drug seizures under NDPS Act—ALWAYS extract them
+R13:plant/cultivation seizures|"8 ganja plants"→raw_quantity=8,raw_unit="plants",drug_form="count"|plants ARE valid drug seizures under NDPS Act—ALWAYS extract them
+R14:is_commercial(bool)|if brief facts explicitly says "commercial quantity" or "above commercial quantity"→true|if not mentioned→false|do NOT guess—only set true when TEXT states it
 
 ## Drug Knowledge Base
 {drug_knowledge_base}
@@ -334,27 +343,34 @@ If text matches any raw_name or standard_name → set primary_drug_name to the c
 If not in KB → set primary_drug_name to capitalized raw extraction.
 
 ## Output Schema
-{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
+{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
 
 ## Examples
-### Example 1 — per-accused quantities → separate entries
-Input: "seized 100g Ganja from 1) Anil Kumar, 100g from 2) Jagadish, 100g from 3) Abhya Kumar"
+### Example 1 — per-accused with seizure worth, commercial mentioned in text
+Input: "seized 100g Ganja worth Rs.50,000 from 1) Anil Kumar, 100g worth Rs.50,000 from 2) Jagadish, 100g worth Rs.50,000 from 3) Abhya Kumar. The total seized quantity is above commercial quantity under NDPS Act."
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":0.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja"}}}}}}}},
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":0.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"2) Jagadish 100 grams of Ganja"}}}}}}}},
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":0.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja"}}}}}}}}
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":50000.0,"is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja worth Rs.50,000"}}}}}}}},
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":50000.0,"is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"2) Jagadish 100 grams of Ganja worth Rs.50,000"}}}}}}}},
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":50000.0,"is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja worth Rs.50,000"}}}}}}}}
 ]}}}}
 
-### Example 2 — collective seizure, NO per-accused breakdown → 1 entry, accused_id=null
+### Example 2 — collective seizure with worth → 1 entry, accused_id=null
 Input: "apprehended A1 Sandeep, A2 Vinod, A3 Dhanaraj... Seized total 252 bundles wg 520 KGs dry ganja worth Rs.52,00,000"
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","accused_id":null,"seizure_worth":5200000.0,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","accused_id":null,"seizure_worth":5200000.0,"is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
+]}}}}
+
+### Example 3 — multiple drugs, each with its own worth
+Input: "seized 500g Ganja worth Rs.5,00,000 and 50g Charas worth Rs.2,00,000 from A1"
+{{{{"drugs":[
+  {{{{"raw_drug_name":"Ganja","raw_quantity":500.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":500000.0,"is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 500g Ganja worth Rs.5,00,000"}}}}}}}},
+  {{{{"raw_drug_name":"Charas","raw_quantity":50.0,"raw_unit":"grams","primary_drug_name":"Charas","drug_form":"solid","accused_id":"A1","seizure_worth":200000.0,"is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"50g Charas worth Rs.2,00,000"}}}}}}}}
 ]}}}}
 
 ## Input Text
 {text}
 
-EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. RETURN VALID JSON ONLY. NO MARKDOWN.
+EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. Extract seizure_worth from "worth Rs." / "valued at" mentions — map each worth to its specific drug. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". RETURN VALID JSON ONLY. NO MARKDOWN.
 """
 
 def truncate_string(s: str, max_len: int = 50) -> str:
@@ -474,11 +490,14 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
             if is_cannabis_variant:
                 drug.primary_drug_name = "Ganja"
             
-            # --- Seizure Worth Conversion: Rupees to Crores ---
-            # Convert seizure_worth from rupees to crores (1 crore = 10,000,000 rupees)
-            # Example: 55,50,000 rupees → 0.555 crores, 1,00,00,000 rupees → 1.0 crores
-            if drug.seizure_worth and drug.seizure_worth > 0:
-                drug.seizure_worth = drug.seizure_worth / 10_000_000.0
+            # --- Seizure Worth: Keep as raw rupees ---
+            # seizure_worth is stored as-is in rupees (no conversion)
+            # Example: Rs.52,00,000 → 5200000.0, Rs.80,000 → 80000.0
+
+            # --- is_commercial: keep LLM value as-is here ---
+            # The LLM sets is_commercial only when the brief facts explicitly mention
+            # "commercial quantity". The total-quantity check happens AFTER
+            # standardize_units() in _apply_commercial_quantity_check().
 
             # Default form check
             if not drug.drug_form or drug.drug_form.lower() in ['unknown', 'none', 'null']:
@@ -487,6 +506,122 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
         except Exception as e:
             logger.error(f"Standardization error for {drug.raw_drug_name}: {e}", exc_info=True)
             
+    return drugs
+
+
+# =============================================================================
+# NDPS Commercial Quantity Thresholds (in grams / ml / count)
+# Source: NDPS Act, 1985 — Schedule notification by Government of India.
+# If the TOTAL seized quantity for a drug (sum across all accused in the same
+# crime) meets or exceeds the commercial threshold, ALL entries for that drug
+# in the crime are marked is_commercial = True.
+# =============================================================================
+# weight_kg thresholds (stored after standardize_units converts to kg)
+COMMERCIAL_QUANTITY_KG = {
+    'ganja':        20.0,       # 20 kg
+    'charas':       1.0,        # 1 kg
+    'hashish':      1.0,        # 1 kg
+    'heroin':       0.250,      # 250 g
+    'cocaine':      0.500,      # 500 g
+    'opium':        2.5,        # 2.5 kg
+    'morphine':     0.250,      # 250 g
+    'methamphetamine': 0.050,   # 50 g
+    'amphetamine':  0.050,      # 50 g
+    'mdma':         0.050,      # 50 g  (Ecstasy)
+    'ephedrine':    1.0,        # 1 kg
+    'pseudoephedrine': 1.0,     # 1 kg
+    'ketamine':     0.500,      # 500 g
+    'mephedrone':   0.050,      # 50 g
+    'codeine':      1.0,        # 1 kg
+    'buprenorphine': 0.050,     # 50 g
+    'fentanyl':     0.050,      # 50 g
+    'poppy straw':  50.0,       # 50 kg
+    'poppy husk':   50.0,       # 50 kg
+}
+# volume_l thresholds
+COMMERCIAL_QUANTITY_L = {
+    'hash oil':     1.0,        # 1 litre
+    'hashish oil':  1.0,
+    'cannabis oil': 1.0,
+    'liquid opium': 2.5,        # 2.5 litres
+}
+# count thresholds
+COMMERCIAL_QUANTITY_COUNT = {
+    'lsd':          100.0,      # 100 blots/doses
+    'alprazolam':   1000.0,     # 1000 tablets
+    'tramadol':     1000.0,     # 1000 tablets
+    'diazepam':     1000.0,     # 1000 tablets
+}
+
+
+def _apply_commercial_quantity_check(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
+    """
+    Post-processing: Check if the TOTAL seized quantity per drug (across all
+    accused) meets or exceeds the NDPS commercial quantity threshold.
+    
+    If any entry was already marked is_commercial=True by the LLM (because the
+    brief facts explicitly said "commercial quantity"), we keep it.
+    
+    For the rest, sum up weight_kg / volume_l / count_total per drug and compare
+    against NDPS thresholds. If the total is >= commercial, mark ALL entries
+    for that drug as is_commercial=True.
+    """
+    if not drugs:
+        return drugs
+
+    from collections import defaultdict
+
+    # Group entries by primary_drug_name (lowercased)
+    drug_groups = defaultdict(list)
+    for drug in drugs:
+        key = (drug.primary_drug_name or '').lower().strip()
+        drug_groups[key].append(drug)
+
+    for drug_name, group in drug_groups.items():
+        # If any entry already marked commercial by LLM, propagate to all
+        if any(d.is_commercial for d in group):
+            for d in group:
+                d.is_commercial = True
+            logger.info(f"is_commercial: '{drug_name}' — LLM flagged as commercial, applied to all {len(group)} entries")
+            continue
+
+        # Sum total quantities across all accused for this drug
+        total_kg = sum(float(d.weight_kg or 0) for d in group)
+        total_l = sum(float(d.volume_l or 0) for d in group)
+        total_count = sum(float(d.count_total or 0) for d in group)
+
+        is_comm = False
+        threshold_info = ""
+
+        # Check weight threshold
+        if total_kg > 0 and drug_name in COMMERCIAL_QUANTITY_KG:
+            threshold = COMMERCIAL_QUANTITY_KG[drug_name]
+            if total_kg >= threshold:
+                is_comm = True
+                threshold_info = f"weight {total_kg:.3f}kg >= {threshold}kg"
+
+        # Check volume threshold
+        if not is_comm and total_l > 0 and drug_name in COMMERCIAL_QUANTITY_L:
+            threshold = COMMERCIAL_QUANTITY_L[drug_name]
+            if total_l >= threshold:
+                is_comm = True
+                threshold_info = f"volume {total_l:.3f}L >= {threshold}L"
+
+        # Check count threshold
+        if not is_comm and total_count > 0 and drug_name in COMMERCIAL_QUANTITY_COUNT:
+            threshold = COMMERCIAL_QUANTITY_COUNT[drug_name]
+            if total_count >= threshold:
+                is_comm = True
+                threshold_info = f"count {total_count:.0f} >= {threshold:.0f}"
+
+        if is_comm:
+            logger.info(
+                f"is_commercial: '{drug_name}' — total {threshold_info} "
+                f"(across {len(group)} entries) → marking ALL as commercial"
+            )
+            for d in group:
+                d.is_commercial = True
+
     return drugs
 
 
@@ -673,6 +808,11 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
                 if d.get('seizure_worth') is None: d['seizure_worth'] = 0.0
                 if not d.get('raw_drug_name'): d['raw_drug_name'] = "Unknown"
                 
+                # Ensure is_commercial is a bool
+                if d.get('is_commercial') is None: d['is_commercial'] = False
+                if isinstance(d.get('is_commercial'), str):
+                    d['is_commercial'] = d['is_commercial'].lower() in ('true', '1', 'yes')
+                
                 # Check for "None" string
                 if str(d.get('raw_quantity')).lower() == "none": d['raw_quantity'] = 0.0
                 if str(d.get('seizure_worth')).lower() == "none": d['seizure_worth'] = 0.0
@@ -692,9 +832,10 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
             except Exception as e:
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
         
-        # Post-process (Unit Calc + Dedup)
+        # Post-process (Unit Calc + Commercial Check + Dedup)
         standardized = standardize_units(valid_drugs)
-        return deduplicate_extractions(standardized)
+        commercial_checked = _apply_commercial_quantity_check(standardized)
+        return deduplicate_extractions(commercial_checked)
         
     except Exception as e:
         logger.error(f"Drug extraction failed: {e}", exc_info=True)

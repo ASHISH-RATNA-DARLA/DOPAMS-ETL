@@ -69,7 +69,7 @@ DB_DSN = os.environ.get(
 
 REF_DATA_FILE = os.environ.get("REF_DATA_FILE", "ref.txt")
 DEFAULT_TABLE_NAME = os.environ.get("TABLE_NAME", "persons")
-DEFAULT_ID_COLUMN = os.environ.get("ID_COLUMN", "id")
+DEFAULT_ID_COLUMN = os.environ.get("ID_COLUMN", "person_id")
 
 # pg_trgm similarity threshold (0.0 – 1.0).  Lower = more lenient.
 TRGM_SIMILARITY_THRESHOLD = float(os.environ.get("TRGM_SIMILARITY_THRESHOLD", "0.35"))
