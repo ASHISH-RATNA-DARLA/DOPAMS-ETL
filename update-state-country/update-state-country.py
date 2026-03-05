@@ -244,8 +244,7 @@ def trgm_match_locations(
             # Set the similarity threshold for this session
             with conn.cursor() as cur:
                 cur.execute(
-                    "SET pg_trgm.similarity_threshold = %s;",
-                    (threshold,),
+                    f"SET pg_trgm.similarity_threshold = {threshold};"
                 )
 
                 for loc in extracted_locations:
