@@ -241,6 +241,10 @@ class DrugExtraction(BaseModel):
     accused_id: Optional[str] = Field(default=None)
     confidence_score: Optional[float] = Field(default=0.80, description="Confidence out of 1.0 (e.g. 0.95)")
     seizure_worth: Optional[float] = 0.0
+    worth_scope: Optional[str] = Field(
+        default="individual",
+        description="Scope of seizure_worth: 'individual' (per accused-drug), 'drug_total' (total for this drug type), 'overall_total' (total for all drugs)"
+    )
     extraction_metadata: dict = Field(default_factory=dict)
     
     # New Schema Calculated Fields
@@ -283,7 +287,7 @@ Container vs Content: "3 packets, 50g" → 50. "3 packets of 50g each" → 150.
 Skip unknown/unidentified drug names. drug_form ∈ solid/liquid/count. seizure_worth = float rupees.
 Drug Knowledge Base: {drug_knowledge_base}
 Input: {text}
-Return valid JSON matching: drugs:[{{raw_drug_name,raw_quantity,raw_unit,primary_drug_name,drug_form,accused_id,seizure_worth,confidence_score,extraction_metadata:{{source_sentence}}}}]
+Return valid JSON matching: drugs:[{{raw_drug_name,raw_quantity,raw_unit,primary_drug_name,drug_form,accused_id,seizure_worth,worth_scope,confidence_score,extraction_metadata:{{source_sentence}}}}]
 """
 
 EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting structured drug seizure data from police brief facts.
@@ -317,13 +321,18 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
 **REMEMBER Rule 6**: If the FIR lists multiple accused BUT the seizure is described as a SINGLE TOTAL ("seized total 520 KGs"), produce ONLY 1 entry with accused_id=null. Do NOT clone the total for each accused.
 
 8. **Seizure Worth (MANDATORY):** Extract the monetary value ("worth") of EACH drug as `seizure_worth` in **rupees (float)**.
-   - Look for patterns: "worth Rs.", "valued at Rs.", "worth about Rs.", "worth approximately", "market value", "valued", "costing Rs."
+   - Look for patterns: "worth Rs.", "W/Rs:", "valued at Rs.", "worth about Rs.", "worth approximately", "market value", "valued", "costing Rs.", "worth of Rs."
    - Parse Indian number formats: Rs.52,00,000 = 5200000.0 | Rs.5,00,000 = 500000.0 | Rs.10,000 = 10000.0 | Rs.1,00,00,000 = 10000000.0
    - **Per-drug mapping:** If worth is mentioned alongside a specific drug, map it to THAT drug only.
      Example: "seized 500g Ganja worth Rs.5,00,000 and 100g Charas worth Rs.2,00,000" → Ganja gets 500000.0, Charas gets 200000.0
-   - If a single "worth" covers all drugs collectively and cannot be split → assign to each drug proportionally or to the primary drug.
+   - If a single "worth" covers all drugs collectively → assign the FULL total value to EVERY entry. Post-processing will distribute proportionally.
    - If NO worth/value is mentioned in the text → seizure_worth = 0.0
    - NEVER default to 0.0 when worth IS mentioned in the text.
+   - **worth_scope (MANDATORY):** Indicates the scope of the seizure_worth value:
+     - `"individual"` → worth is explicitly stated FOR THIS specific accused-drug pair (e.g., "A1 had 200g Ganja worth Rs.5,000")
+     - `"drug_total"` → worth is the TOTAL for this drug type across all accused (e.g., "total Ganja 700g worth Rs.20,000" but quantities are per-accused). Assign the FULL total to each entry.
+     - `"overall_total"` → worth is ONE combined total for ALL drugs in the seizure (e.g., "total seizure worth Rs.1,00,000"). Assign the FULL total to each entry.
+     - If no worth is mentioned → worth_scope = "individual" and seizure_worth = 0.0
 
 ## COMPRESSED RULES
 R5:zero-inference|extract only explicit/implied values|missing unit→confidence~60
@@ -343,34 +352,50 @@ If text matches any raw_name or standard_name → set primary_drug_name to the c
 If not in KB → set primary_drug_name to capitalized raw extraction.
 
 ## Output Schema
-{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
+{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
 
 ## Examples
-### Example 1 — per-accused with seizure worth, commercial mentioned in text
+### Example 1 — per-accused with individual worth, commercial mentioned in text
 Input: "seized 100g Ganja worth Rs.50,000 from 1) Anil Kumar, 100g worth Rs.50,000 from 2) Jagadish, 100g worth Rs.50,000 from 3) Abhya Kumar. The total seized quantity is above commercial quantity under NDPS Act."
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":50000.0,"is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja worth Rs.50,000"}}}}}}}},
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":50000.0,"is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"2) Jagadish 100 grams of Ganja worth Rs.50,000"}}}}}}}},
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":50000.0,"is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja worth Rs.50,000"}}}}}}}}
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja worth Rs.50,000"}}}}}}}},
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"2) Jagadish 100 grams of Ganja worth Rs.50,000"}}}}}}}},
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja worth Rs.50,000"}}}}}}}}
 ]}}}}
 
 ### Example 2 — collective seizure with worth → 1 entry, accused_id=null
 Input: "apprehended A1 Sandeep, A2 Vinod, A3 Dhanaraj... Seized total 252 bundles wg 520 KGs dry ganja worth Rs.52,00,000"
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","accused_id":null,"seizure_worth":5200000.0,"is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","accused_id":null,"seizure_worth":5200000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
 ]}}}}
 
 ### Example 3 — multiple drugs, each with its own worth
 Input: "seized 500g Ganja worth Rs.5,00,000 and 50g Charas worth Rs.2,00,000 from A1"
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Ganja","raw_quantity":500.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":500000.0,"is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 500g Ganja worth Rs.5,00,000"}}}}}}}},
-  {{{{"raw_drug_name":"Charas","raw_quantity":50.0,"raw_unit":"grams","primary_drug_name":"Charas","drug_form":"solid","accused_id":"A1","seizure_worth":200000.0,"is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"50g Charas worth Rs.2,00,000"}}}}}}}}
+  {{{{"raw_drug_name":"Ganja","raw_quantity":500.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":500000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 500g Ganja worth Rs.5,00,000"}}}}}}}},
+  {{{{"raw_drug_name":"Charas","raw_quantity":50.0,"raw_unit":"grams","primary_drug_name":"Charas","drug_form":"solid","accused_id":"A1","seizure_worth":200000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"50g Charas worth Rs.2,00,000"}}}}}}}}
+]}}}}
+
+### Example 4 — per-accused quantities with collective total worth (drug_total)
+Input: "found 300 Grms of Ganja from A1, 200 grms from A2 and 200 grms from A3. The seized total Ganja of 700 Grms worth of Rs.20,000/-"
+{{{{"drugs":[
+  {{{{"raw_drug_name":"Ganja","raw_quantity":300.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"found 300 Grms of Ganja from A1"}}}}}}}},
+  {{{{"raw_drug_name":"Ganja","raw_quantity":200.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"200 grms from A2"}}}}}}}},
+  {{{{"raw_drug_name":"Ganja","raw_quantity":200.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"200 grms from A3"}}}}}}}}
+]}}}}
+
+### Example 5 — multiple drugs + accused with one overall total worth
+Input: "seized 20g Heroin from A1, 30g Heroin from A2, 30g Cocaine from A3. Total seizure worth Rs.1,00,000"
+{{{{"drugs":[
+  {{{{"raw_drug_name":"Heroin","raw_quantity":20.0,"raw_unit":"grams","primary_drug_name":"Heroin","drug_form":"solid","accused_id":"A1","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 20g Heroin from A1"}}}}}}}},
+  {{{{"raw_drug_name":"Heroin","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Heroin","drug_form":"solid","accused_id":"A2","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Heroin from A2"}}}}}}}},
+  {{{{"raw_drug_name":"Cocaine","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Cocaine","drug_form":"solid","accused_id":"A3","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Cocaine from A3"}}}}}}}}
 ]}}}}
 
 ## Input Text
 {text}
 
-EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. Extract seizure_worth from "worth Rs." / "valued at" mentions — map each worth to its specific drug. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". RETURN VALID JSON ONLY. NO MARKDOWN.
+EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. Extract seizure_worth from "worth Rs.", "W/Rs:", "valued at", "worth of Rs." mentions — map each worth to its specific drug. Set worth_scope to indicate if the value is individual, drug_total, or overall_total. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". RETURN VALID JSON ONLY. NO MARKDOWN.
 """
 
 def truncate_string(s: str, max_len: int = 50) -> str:
@@ -625,6 +650,123 @@ def _apply_commercial_quantity_check(drugs: List[DrugExtraction]) -> List[DrugEx
     return drugs
 
 
+def _distribute_seizure_worth(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
+    """
+    Post-processing: Distribute seizure_worth proportionally based on worth_scope.
+    
+    Rules (in priority order):
+    1. individual  → keep as-is (worth explicitly for this accused-drug pair)
+    2. drug_total  → split proportionally within the same drug group by quantity
+    3. overall_total → split proportionally across ALL entries by quantity
+    4. No worth (0.0) → keep as 0.0
+    """
+    if not drugs:
+        return drugs
+
+    from collections import defaultdict
+
+    # Separate entries by worth_scope
+    individual_entries = []
+    drug_total_entries = []
+    overall_total_entries = []
+    zero_worth_entries = []
+
+    for drug in drugs:
+        scope = (drug.worth_scope or 'individual').lower().strip()
+        worth = float(drug.seizure_worth or 0)
+
+        if worth == 0.0:
+            zero_worth_entries.append(drug)
+        elif scope == 'individual':
+            individual_entries.append(drug)
+        elif scope == 'drug_total':
+            drug_total_entries.append(drug)
+        elif scope == 'overall_total':
+            overall_total_entries.append(drug)
+        else:
+            # Unknown scope — treat as individual
+            individual_entries.append(drug)
+
+    # --- Rule 1: Individual worth → no change ---
+    # (already separated)
+
+    # --- Rules 2-4: drug_total → split proportionally within each drug group ---
+    if drug_total_entries:
+        drug_groups = defaultdict(list)
+        for d in drug_total_entries:
+            key = (d.primary_drug_name or '').lower().strip()
+            drug_groups[key].append(d)
+
+        for drug_name, group in drug_groups.items():
+            # The total worth is the same on all entries (LLM copies it to each)
+            # Take the max to be safe
+            total_worth = max(float(d.seizure_worth or 0) for d in group)
+
+            # Get standardized quantity for each entry
+            quantities = []
+            for d in group:
+                qty = float(d.weight_g or 0) or float(d.volume_ml or 0) or float(d.count_total or 0)
+                quantities.append(qty)
+
+            total_qty = sum(quantities)
+
+            if total_qty > 0 and total_worth > 0:
+                for d, qty in zip(group, quantities):
+                    d.seizure_worth = round((qty / total_qty) * total_worth, 2)
+                    logger.info(
+                        f"Worth distribution (drug_total): {drug_name} — "
+                        f"{d.accused_id or 'null'}: {qty}g/{total_qty}g × "
+                        f"₹{total_worth} = ₹{d.seizure_worth}"
+                    )
+            elif total_qty == 0 and total_worth > 0:
+                # No quantities — split equally
+                equal_share = round(total_worth / len(group), 2)
+                for d in group:
+                    d.seizure_worth = equal_share
+                    logger.info(
+                        f"Worth distribution (drug_total, equal): {drug_name} — "
+                        f"{d.accused_id or 'null'}: ₹{equal_share} (1/{len(group)} of ₹{total_worth})"
+                    )
+
+    # --- Rules 5-6: overall_total → split proportionally across ALL entries ---
+    if overall_total_entries:
+        # The total worth is the same on all entries — take the max
+        total_worth = max(float(d.seizure_worth or 0) for d in overall_total_entries)
+
+        quantities = []
+        for d in overall_total_entries:
+            qty = float(d.weight_g or 0) or float(d.volume_ml or 0) or float(d.count_total or 0)
+            quantities.append(qty)
+
+        total_qty = sum(quantities)
+
+        if total_qty > 0 and total_worth > 0:
+            for d, qty in zip(overall_total_entries, quantities):
+                d.seizure_worth = round((qty / total_qty) * total_worth, 2)
+                logger.info(
+                    f"Worth distribution (overall_total): "
+                    f"{d.primary_drug_name} {d.accused_id or 'null'}: "
+                    f"{qty}/{total_qty} × ₹{total_worth} = ₹{d.seizure_worth}"
+                )
+        elif total_qty == 0 and total_worth > 0:
+            # Rule 7: No quantities — assign same total to each
+            for d in overall_total_entries:
+                d.seizure_worth = total_worth
+                logger.info(
+                    f"Worth distribution (overall_total, no qty): "
+                    f"{d.primary_drug_name} — keeping ₹{total_worth} (no quantities to split)"
+                )
+
+    # --- Rule 8: No worth → stays 0.0 ---
+    # (zero_worth_entries already have 0.0)
+
+    # Recombine all entries (preserve original order)
+    all_processed = set(id(d) for d in individual_entries + drug_total_entries + overall_total_entries + zero_worth_entries)
+    result = [d for d in drugs if id(d) in all_processed]
+
+    return result
+
+
 def _collapse_collective_seizures(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
     """
     Detect and collapse collective seizures: when multiple accused have the
@@ -828,13 +970,22 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
                 elif d.get('seizure_worth') is None:
                     d['seizure_worth'] = 0.0
                 
+                # Validate worth_scope
+                valid_scopes = {'individual', 'drug_total', 'overall_total'}
+                ws = str(d.get('worth_scope', 'individual')).lower().strip()
+                if ws not in valid_scopes:
+                    d['worth_scope'] = 'individual'
+                else:
+                    d['worth_scope'] = ws
+                
                 valid_drugs.append(DrugExtraction(**d))
             except Exception as e:
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
         
-        # Post-process (Unit Calc + Commercial Check + Dedup)
+        # Post-process (Unit Calc + Worth Distribution + Commercial Check + Dedup)
         standardized = standardize_units(valid_drugs)
-        commercial_checked = _apply_commercial_quantity_check(standardized)
+        worth_distributed = _distribute_seizure_worth(standardized)
+        commercial_checked = _apply_commercial_quantity_check(worth_distributed)
         return deduplicate_extractions(commercial_checked)
         
     except Exception as e:
