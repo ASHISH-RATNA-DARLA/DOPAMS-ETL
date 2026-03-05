@@ -62,13 +62,16 @@ REF_DATA_FILE = os.environ.get("REF_DATA_FILE", "ref.txt")
 DEFAULT_TABLE_NAME = os.environ.get("TABLE_NAME", "persons")
 DEFAULT_ID_COLUMN = os.environ.get("ID_COLUMN", "person_id")
 
-# pg_trgm similarity threshold (0.0 – 1.0).  Lower = more lenient.
-TRGM_SIMILARITY_THRESHOLD = float(os.environ.get("TRGM_SIMILARITY_THRESHOLD", "0.35"))
+# pg_trgm similarity thresholds (tiered by field trust level)
+TRGM_THRESHOLD_STATE    = float(os.environ.get("TRGM_THRESHOLD_STATE",    "0.90"))  # States are a small finite list
+TRGM_THRESHOLD_DISTRICT = float(os.environ.get("TRGM_THRESHOLD_DISTRICT", "0.90"))  # Districts are finite, high confidence needed
+TRGM_THRESHOLD_MANDAL   = float(os.environ.get("TRGM_THRESHOLD_MANDAL",   "0.70"))  # Mandals have spelling variations
+TRGM_THRESHOLD_VILLAGE  = float(os.environ.get("TRGM_THRESHOLD_VILLAGE",  "0.65"))  # Villages have high noise, acceptable if district/mandal anchor
 
 logger.info(f"Database: {os.environ.get('DB_NAME', 'dopamas')}@{os.environ.get('DB_HOST', 'localhost')}")
 logger.info(f"Default Table: {DEFAULT_TABLE_NAME}, ID Column: {DEFAULT_ID_COLUMN}")
 logger.info(f"Reference Data File (foreign): {REF_DATA_FILE}")
-logger.info(f"pg_trgm similarity threshold: {TRGM_SIMILARITY_THRESHOLD}")
+logger.info(f"pg_trgm thresholds: state={TRGM_THRESHOLD_STATE}, district={TRGM_THRESHOLD_DISTRICT}, mandal={TRGM_THRESHOLD_MANDAL}, village={TRGM_THRESHOLD_VILLAGE}")
 
 
 # ===================================================================
@@ -142,78 +145,188 @@ class GeoMatch:
 
 # ===================================================================
 #  STEP 1 — pg_trgm MATCHING against geo_reference
+#
+#  Hierarchy (highest trust first):
+#    1a. State exists, country missing → match state_name → get country.
+#    1b. District known → match district_name → get state.
+#    1c. Village/mandal known → match (scoped to district if known).
+#
+#  Tiered thresholds: state/district >= 90%, mandal >= 70%, village >= 65%.
 # ===================================================================
 
-def trgm_match_locations(
-    extracted_locations: List[str],
-    threshold: float = TRGM_SIMILARITY_THRESHOLD,
+def trgm_match_state(
+    state: str,
+    threshold: float = TRGM_THRESHOLD_STATE,
 ) -> Optional[GeoMatch]:
     """
-    Try each extracted location against geo_reference using pg_trgm.
-    Search order: village → sub_district → district.
-    Returns the best match (highest similarity) or None.
+    Match a known state value directly against state_name in geo_reference.
+    Returns the best match or None. Used to confirm Indian state → set country.
     """
-    if not extracted_locations:
+    query = """
+        SELECT DISTINCT state_name,
+               similarity(state_name, %(loc)s) AS sim
+        FROM geo_reference
+        WHERE state_name %% %(loc)s
+        ORDER BY sim DESC
+        LIMIT 1;
+    """
+    try:
+        with psycopg.connect(DB_DSN) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
+                cur.execute(query, {"loc": state.strip()})
+                row = cur.fetchone()
+                if row and float(row[1]) >= threshold:
+                    match = GeoMatch(
+                        state=row[0], similarity=float(row[1]),
+                    )
+                    logger.info(
+                        f"  pg_trgm state match: state={match.state}, "
+                        f"sim={match.similarity:.3f}"
+                    )
+                    return match
+    except Exception as e:
+        logger.error(f"pg_trgm state lookup failed: {e}", exc_info=True)
+    return None
+
+
+def trgm_match_district(
+    district: str,
+    threshold: float = TRGM_THRESHOLD_DISTRICT,
+) -> Optional[GeoMatch]:
+    """
+    Match a known district value directly against district_name in geo_reference.
+    Returns the best match or None.
+    """
+    query = """
+        SELECT DISTINCT district_name, state_name,
+               similarity(district_name, %(loc)s) AS sim
+        FROM geo_reference
+        WHERE district_name %% %(loc)s
+        ORDER BY sim DESC
+        LIMIT 1;
+    """
+    try:
+        with psycopg.connect(DB_DSN) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
+                cur.execute(query, {"loc": district.strip()})
+                row = cur.fetchone()
+                if row and float(row[2]) >= threshold:
+                    match = GeoMatch(
+                        district=row[0], state=row[1], similarity=float(row[2]),
+                    )
+                    logger.info(
+                        f"  pg_trgm district match: district={match.district}, "
+                        f"state={match.state}, sim={match.similarity:.3f}"
+                    )
+                    return match
+                elif row:
+                    logger.info(
+                        f"  pg_trgm district match rejected (sim={float(row[2]):.3f} < {threshold})"
+                    )
+    except Exception as e:
+        logger.error(f"pg_trgm district lookup failed: {e}", exc_info=True)
+    return None
+
+
+def trgm_match_village_mandal(
+    candidates: List[str],
+    within_district: Optional[str] = None,
+    mandal_threshold: float = TRGM_THRESHOLD_MANDAL,
+    village_threshold: float = TRGM_THRESHOLD_VILLAGE,
+) -> Optional[GeoMatch]:
+    """
+    Match village/mandal names against geo_reference.
+    Uses mandal_threshold (0.70) for sub_district matches and
+    village_threshold (0.65) for village matches.
+    If within_district is provided, results are scoped to that district only
+    (prevents cross-state jumps like Kotapalle/Mancherial → Chittoor).
+    """
+    if not candidates:
         return None
 
     best: Optional[GeoMatch] = None
 
-    # Build a UNION query that checks all columns in one round-trip per location
-    query = """
-        WITH candidates AS (
-            SELECT
-                village_name_english,
-                sub_district_name,
-                district_name,
-                state_name,
-                GREATEST(
-                    similarity(village_name_english, %(loc)s),
-                    similarity(sub_district_name,   %(loc)s),
-                    similarity(district_name,        %(loc)s)
-                ) AS sim
+    # Use the lower threshold (village) for the pg_trgm operator so candidates
+    # are not filtered out prematurely. We apply the tiered check in Python.
+    pg_threshold = min(mandal_threshold, village_threshold)
+
+    if within_district:
+        # Scoped: only match within the known district
+        query = """
+            SELECT village_name_english, sub_district_name, district_name,
+                   state_name,
+                   similarity(sub_district_name,   %(loc)s) AS sim_mandal,
+                   similarity(village_name_english, %(loc)s) AS sim_village
             FROM geo_reference
-            WHERE village_name_english  %% %(loc)s
-               OR sub_district_name     %% %(loc)s
-               OR district_name         %% %(loc)s
-        )
-        SELECT village_name_english, sub_district_name, district_name,
-               state_name, sim
-        FROM candidates
-        ORDER BY sim DESC
-        LIMIT 1;
-    """
+            WHERE district_name %% %(dist)s
+              AND (village_name_english %% %(loc)s OR sub_district_name %% %(loc)s)
+            ORDER BY GREATEST(sim_mandal, sim_village) DESC
+            LIMIT 1;
+        """
+    else:
+        # Unscoped: search all districts
+        query = """
+            SELECT village_name_english, sub_district_name, district_name,
+                   state_name,
+                   similarity(sub_district_name,   %(loc)s) AS sim_mandal,
+                   similarity(village_name_english, %(loc)s) AS sim_village
+            FROM geo_reference
+            WHERE village_name_english %% %(loc)s
+               OR sub_district_name   %% %(loc)s
+            ORDER BY GREATEST(sim_mandal, sim_village) DESC
+            LIMIT 1;
+        """
 
     try:
         with psycopg.connect(DB_DSN) as conn:
-            # Set the similarity threshold for this session
             with conn.cursor() as cur:
-                cur.execute(
-                    f"SET pg_trgm.similarity_threshold = {threshold};"
-                )
+                cur.execute(f"SET pg_trgm.similarity_threshold = {pg_threshold};")
 
-                for loc in extracted_locations:
+                for loc in candidates:
                     loc_clean = loc.strip()
                     if not loc_clean:
                         continue
-                    cur.execute(query, {"loc": loc_clean})
+                    params = {"loc": loc_clean}
+                    if within_district:
+                        params["dist"] = within_district
+                    cur.execute(query, params)
                     row = cur.fetchone()
                     if row:
+                        sim_mandal = float(row[4])
+                        sim_village = float(row[5])
+
+                        # Apply tiered threshold: mandal needs >= 0.70, village needs >= 0.65
+                        if sim_mandal >= mandal_threshold:
+                            best_sim = sim_mandal
+                            matched_via = "mandal"
+                        elif sim_village >= village_threshold:
+                            best_sim = sim_village
+                            matched_via = "village"
+                        else:
+                            logger.info(
+                                f"    Rejected '{loc_clean}': mandal_sim={sim_mandal:.3f} < {mandal_threshold}, "
+                                f"village_sim={sim_village:.3f} < {village_threshold}"
+                            )
+                            continue
+
                         match = GeoMatch(
-                            village=row[0],
-                            sub_district=row[1],
-                            district=row[2],
-                            state=row[3],
-                            similarity=float(row[4]),
+                            village=row[0], sub_district=row[1],
+                            district=row[2], state=row[3],
+                            similarity=best_sim,
                         )
                         if best is None or match.similarity > best.similarity:
                             best = match
+                            logger.info(f"    Accepted '{loc_clean}' via {matched_via}: sim={best_sim:.3f}")
     except Exception as e:
-        logger.error(f"pg_trgm lookup failed: {e}", exc_info=True)
+        logger.error(f"pg_trgm village/mandal lookup failed: {e}", exc_info=True)
 
     if best:
         logger.info(
-            f"  pg_trgm best match: state={best.state}, district={best.district}, "
-            f"sim={best.similarity:.3f}"
+            f"  pg_trgm village/mandal best: district={best.district}, "
+            f"state={best.state}, sim={best.similarity:.3f}"
+            f"{' (scoped to ' + within_district + ')' if within_district else ''}"
         )
     return best
 
@@ -461,32 +574,68 @@ def process_records(
                 stats["null"] += 1
 
             else:
-                # Build candidates from available structured DB columns
-                candidates = [
-                    rec.permanent_locality_village,
-                    rec.permanent_area_mandal,
-                    rec.permanent_district,
-                ]
-                all_candidates = list(
-                    dict.fromkeys(  # deduplicate, preserve order
-                        [c.strip() for c in candidates if c and c.strip()]
+                geo: Optional[GeoMatch] = None
+
+                # --- Step 1a: State exists, country missing → match state (top priority) ---
+                if not rec.needs_state() and rec.needs_country():
+                    logger.info(f"  Step 1a: matching state '{rec.permanent_state_ut}' …")
+                    geo = trgm_match_state(rec.permanent_state_ut)
+                    if geo:
+                        state_out = rec.permanent_state_ut
+                        country_out = "India"
+                        source = "geo"
+                        stats["geo"] += 1
+
+                # --- Step 1b: District matching (high trust) ---
+                if not geo and not rec.needs_district():
+                    logger.info(f"  Step 1b: matching district '{rec.permanent_district}' …")
+                    geo = trgm_match_district(rec.permanent_district)
+                    if geo:
+                        district_out = rec.permanent_district
+                        state_out = geo.state
+                        country_out = "India"
+                        source = "geo"
+                        stats["geo"] += 1
+
+                # --- Step 1c: Village/Mandal matching (only if above didn't resolve) ---
+                if not geo:
+                    vm_candidates = [
+                        rec.permanent_locality_village,
+                        rec.permanent_area_mandal,
+                    ]
+                    vm_candidates = list(
+                        dict.fromkeys(
+                            [c.strip() for c in vm_candidates if c and c.strip()]
+                        )
                     )
-                )
-                logger.info(f"  Candidates from DB fields: {all_candidates}")
 
-                # --- Step 1: pg_trgm against geo_reference ---
-                logger.info("  Step 1: pg_trgm matching …")
-                geo = trgm_match_locations(all_candidates, TRGM_SIMILARITY_THRESHOLD)
+                    if vm_candidates:
+                        # If district is known, scope the search to that district
+                        scope_district = rec.permanent_district.strip() if not rec.needs_district() else None
+                        logger.info(f"  Step 1b: matching village/mandal {vm_candidates}"
+                                    f"{' within ' + scope_district if scope_district else ''} …")
+                        geo = trgm_match_village_mandal(
+                            vm_candidates,
+                            within_district=scope_district,
+                        )
+                        if geo and geo.state:
+                            district_out = geo.district
+                            state_out = geo.state
+                            country_out = "India"
+                            source = "geo"
+                            stats["geo"] += 1
 
-                if geo and geo.state:
-                    district_out = geo.district
-                    state_out = geo.state
-                    country_out = "India"
-                    source = "geo"
-                    stats["geo"] += 1
-                    logger.info(f"    Matched via geo_reference: district={geo.district}, state={geo.state}, sim={geo.similarity:.3f}")
-                else:
-                    # --- Step 2: foreign ref.txt ---
+                # --- Step 2: foreign ref.txt fallback ---
+                if source == "none":
+                    all_candidates = list(
+                        dict.fromkeys(
+                            [c.strip() for c in [
+                                rec.permanent_locality_village,
+                                rec.permanent_area_mandal,
+                                rec.permanent_district,
+                            ] if c and c.strip()]
+                        )
+                    )
                     logger.info("  Step 2: foreign ref lookup …")
                     foreign = lookup_foreign(all_candidates, rec.permanent_state_ut, ref_data)
                     if foreign:
@@ -495,8 +644,7 @@ def process_records(
                         stats["ref"] += 1
                         logger.info(f"    Matched via ref.txt: state={state_out}, country={country_out}")
                     else:
-                        # Unresolved — leave as NULL
-                        logger.warning(f"  Unresolved: no geo or ref match for candidates={all_candidates}")
+                        logger.warning(f"  Unresolved: no geo or ref match")
                         stats["unresolved"] += 1
 
             # --- WRITE ---
@@ -558,14 +706,7 @@ def main():
     parser.add_argument("--limit", type=int, default=None,
                         help="Max records (default: all)")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--trgm-threshold", type=float, default=TRGM_SIMILARITY_THRESHOLD,
-                        help=f"pg_trgm similarity threshold (default {TRGM_SIMILARITY_THRESHOLD})")
-
     args = parser.parse_args()
-
-    # Update module-level threshold from CLI arg
-    _mod = sys.modules[__name__]
-    _mod.TRGM_SIMILARITY_THRESHOLD = args.trgm_threshold
 
     process_records(
         table_name=args.table,
