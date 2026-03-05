@@ -21,6 +21,13 @@ from datetime import timezone, timedelta
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
+# ==========================================
+# ETL EXECUTION MODE
+# Set to 1 for Daily Incremental (Standard)
+# Set to 0 for Full Historical Fetch (Reset)
+# ==========================================
+RUN_MODE = 0 
+
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
 
@@ -1578,23 +1585,21 @@ class AccusedETL:
         logger.info("🚀 DOPAMAS ETL Pipeline - Accused API")
         logger.info("=" * 80)
         
-        # Calculate date range
-        # Start date: Always 2022-01-01T00:00:00+05:30
-        # End date: Yesterday at 23:59:59+05:30 (IST)
-        fixed_start_date = '2022-01-01T00:00:00+05:30'
-        calculated_end_date = get_yesterday_end_ist()
-        
-        logger.info(f"Fixed Start Date: {fixed_start_date}")
-        logger.info(f"Calculated End Date: {calculated_end_date}")
-
         if not self.connect_db():
             logger.error("Failed to connect to database. Exiting.")
             return False
         
         try:
-            # Get effective start date (check if table has data)
-            effective_start_date = self.get_effective_start_date()
-            logger.info(f"Effective Start Date: {effective_start_date}")
+            if RUN_MODE == 1:
+                # Standard Incremental Logic
+                effective_start_date = self.get_effective_start_date()
+                calculated_end_date = get_yesterday_end_ist()
+                logger.info(f"🔄 Incremental Mode: Fetching data from {effective_start_date} to {calculated_end_date}")
+            else:
+                # Hardcoded Full Reset Logic
+                effective_start_date = "2022-01-01T00:00:00+05:30"
+                calculated_end_date = get_yesterday_end_ist() 
+                logger.info(f"⚠️ FULL RESET Mode: Fetching historical data from {effective_start_date} to {calculated_end_date}")
             
             # Get table columns for schema evolution
             table_columns = self.get_table_columns(ACCUSED_TABLE)
