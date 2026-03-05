@@ -2,46 +2,37 @@
 """
 Address State & Country Determination Script for DOPAMAS
 
-Pipeline (3 steps):
-  1.  LLM EXTRACTION — Ask the LLM to read the raw permanent_* address
-      fields and extract ONLY the place names (village, town, mandal,
-      district).  The LLM must NOT guess state or country.
-  2.  pg_trgm MATCHING — Fuzzy-match the extracted names against the
-      geo_reference table (villages → sub-districts → districts → states).
-      If a match is found, permanent_state_ut and permanent_country are
-      filled from the geo_reference row (country = "India").
-  3.  FOREIGN FALLBACK — If pg_trgm finds no Indian match, check
-      ref.txt (foreign-only reference) and, as a last resort, ask the
-      LLM to classify state + country.
+Pipeline (2 steps — no LLM required):
+  1.  pg_trgm MATCHING — Use the structured permanent_* columns
+      (locality_village, area_mandal, district) directly as candidates
+      and fuzzy-match against the geo_reference table.
+      If a match is found, any missing fields among permanent_district,
+      permanent_state_ut, and permanent_country are filled from the
+      geo_reference row (country = "India").
+  2.  FOREIGN FALLBACK — If pg_trgm finds no Indian match, check
+      ref.txt (foreign-only reference list).
 
 Rules per record:
-  - Both state & country already set → skip
-  - State set, country missing      → determine country only
-  - State missing                    → full pipeline (extract → match → fill)
-  - All permanent_* fields NULL      → set state & country to NULL
+  - District, state & country all set → skip
+  - Any of district/state/country missing → pg_trgm match → fill gaps
+  - All permanent_* fields NULL → set district, state & country to NULL
 
 Data sources:
-  - READ:  persons.permanent_* columns
+  - READ:  persons.permanent_* columns (already structured/mapped)
   - MATCH: geo_reference table (pg_trgm GIN indexes)
   - REF:   ref.txt  (foreign countries only — India removed)
-  - WRITE: persons.permanent_state_ut, persons.permanent_country
+  - WRITE: persons.permanent_district, permanent_state_ut, permanent_country
 """
 
 import argparse
-import json
 import logging
 import os
 import sys
 import time
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass
+from typing import Optional, Dict, List, Tuple
 
 import psycopg
-
-# Ensure core is accessible
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.llm_service import get_llm
-
 from dotenv import load_dotenv
 
 # --- Logging Configuration ---
@@ -115,6 +106,9 @@ class AddressRecord:
         return ", ".join(pieces) if pieces else ""
 
     # --- convenience flags ---
+    def needs_district(self) -> bool:
+        return not (self.permanent_district and self.permanent_district.strip())
+
     def needs_state(self) -> bool:
         return not (self.permanent_state_ut and self.permanent_state_ut.strip())
 
@@ -122,7 +116,7 @@ class AddressRecord:
         return not (self.permanent_country and self.permanent_country.strip())
 
     def is_complete(self) -> bool:
-        return not self.needs_state() and not self.needs_country()
+        return not self.needs_district() and not self.needs_state() and not self.needs_country()
 
     def has_any_address(self) -> bool:
         return any(
@@ -146,58 +140,8 @@ class GeoMatch:
     similarity: float = 0.0
 
 
-@dataclass
-class LocationResult:
-    state: Optional[str] = None
-    country: Optional[str] = None
-    confidence: str = "low"
-    reasoning: str = ""
-
-
 # ===================================================================
-#  STEP 1 — LLM EXTRACTION  (extract place names, no guessing)
-# ===================================================================
-
-class LocationExtractor:
-    """Ask the LLM to pull raw place names out of address text."""
-
-    def __init__(self):
-        self.llm = get_llm("classification")
-
-    def extract(self, address_text: str) -> List[str]:
-        """Return a list of extracted location names (village, town, mandal, district)."""
-        if not address_text or not address_text.strip():
-            return []
-
-        prompt = (
-            "Read the following raw address text. "
-            "Extract ONLY the names of the village, town, mandal, or district mentioned. "
-            "Do NOT guess the state or country. "
-            "Return a JSON object with a single key:\n"
-            '{"extracted_locations": ["Location1", "Location2", ...]}\n\n'
-            "If no identifiable location name is found, return:\n"
-            '{"extracted_locations": []}\n\n'
-            f"Address text:\n{address_text}\n\n"
-            "Return ONLY the JSON object, no other text."
-        )
-
-        try:
-            raw = self.llm.generate(prompt=prompt)
-            if not raw:
-                return []
-            data = _extract_json(raw)
-            locations = data.get("extracted_locations", [])
-            # Normalise: accept a single string as well as a list
-            if isinstance(locations, str):
-                locations = [locations]
-            return [loc.strip() for loc in locations if loc and loc.strip()]
-        except Exception as e:
-            logger.error(f"LLM extraction failed: {e}")
-            return []
-
-
-# ===================================================================
-#  STEP 2 — pg_trgm MATCHING against geo_reference
+#  STEP 1 — pg_trgm MATCHING against geo_reference
 # ===================================================================
 
 def trgm_match_locations(
@@ -275,7 +219,7 @@ def trgm_match_locations(
 
 
 # ===================================================================
-#  STEP 3 — FOREIGN REFERENCE FALLBACK  (ref.txt + LLM classify)
+#  STEP 2 — FOREIGN REFERENCE FALLBACK  (ref.txt)
 # ===================================================================
 
 def parse_foreign_reference(file_path: str) -> Dict[str, Dict[str, List[str]]]:
@@ -353,67 +297,6 @@ def lookup_foreign(
     return None
 
 
-def llm_classify_state_country(address_text: str, existing_state: Optional[str] = None) -> LocationResult:
-    """
-    Last-resort: ask the LLM to determine state + country when both
-    pg_trgm and ref.txt failed.
-    """
-    llm = get_llm("classification")
-
-    if existing_state and existing_state.strip():
-        prompt = (
-            "You are an expert in world geography.\n"
-            f"The address has State/UT: {existing_state}\n"
-            f"Full address: {address_text}\n\n"
-            "Determine the COUNTRY for this state/address.\n"
-            "Return ONLY a JSON object:\n"
-            '{"state": "' + existing_state + '", "country": "...", '
-            '"confidence": "high/medium/low", "reasoning": "..."}'
-        )
-    else:
-        prompt = (
-            "You are an expert in Indian and international geography.\n"
-            "Determine the STATE/UT and COUNTRY from this address:\n\n"
-            f"{address_text}\n\n"
-            "Return ONLY a JSON object:\n"
-            '{"state": "...", "country": "...", '
-            '"confidence": "high/medium/low", "reasoning": "..."}'
-        )
-
-    try:
-        raw = llm.generate(prompt=prompt)
-        data = _extract_json(raw or "")
-        return LocationResult(
-            state=data.get("state"),
-            country=data.get("country"),
-            confidence=data.get("confidence", "low"),
-            reasoning=data.get("reasoning", ""),
-        )
-    except Exception as e:
-        logger.error(f"LLM classify failed: {e}")
-        return LocationResult(reasoning=f"LLM error: {e}")
-
-
-# ===================================================================
-#  JSON HELPER
-# ===================================================================
-
-def _extract_json(text: str) -> Dict[str, Any]:
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1:
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            pass
-    logger.warning(f"Could not parse JSON from: {text[:200]}")
-    return {}
-
-
 # ===================================================================
 #  DATABASE OPERATIONS
 # ===================================================================
@@ -422,21 +305,14 @@ def fetch_records_needing_update(
     table_name: str,
     id_column: str,
     limit: Optional[int] = None,
-    update_state: bool = True,
-    update_country: bool = True,
 ) -> List[AddressRecord]:
-    """Fetch persons rows where state or country is missing."""
-    conds = []
-    if update_state:
-        conds.append("(permanent_state_ut IS NULL OR permanent_state_ut = '')")
-    if update_country:
-        conds.append("(permanent_country IS NULL OR permanent_country = '')")
-    if not conds:
-        return []
-
+    """Fetch persons rows where district, state, or country is missing."""
     where = (
-        f"({' OR '.join(conds)}) "
-        "AND NOT (permanent_state_ut IS NOT NULL AND permanent_state_ut != '' "
+        "(permanent_district IS NULL OR permanent_district = '' "
+        "OR permanent_state_ut IS NULL OR permanent_state_ut = '' "
+        "OR permanent_country IS NULL OR permanent_country = '') "
+        "AND NOT (permanent_district IS NOT NULL AND permanent_district != '' "
+        "AND permanent_state_ut IS NOT NULL AND permanent_state_ut != '' "
         "AND permanent_country IS NOT NULL AND permanent_country != '')"
     )
 
@@ -487,13 +363,22 @@ def update_location(
     table_name: str,
     id_column: str,
     record_id: int,
-    state: Optional[str],
-    country: Optional[str],
-    update_state_field: bool = True,
-    update_country_field: bool = True,
+    district: Optional[str] = None,
+    state: Optional[str] = None,
+    country: Optional[str] = None,
+    update_district_field: bool = False,
+    update_state_field: bool = False,
+    update_country_field: bool = False,
 ) -> None:
-    """Write permanent_state_ut and/or permanent_country."""
+    """Write permanent_district, permanent_state_ut, and/or permanent_country."""
     updates, params = [], []
+
+    if update_district_field:
+        val = district.strip() if district and district.strip() else None
+        if val is not None:
+            updates.append("permanent_district = %s"); params.append(val)
+        else:
+            updates.append("permanent_district = NULL")
 
     if update_state_field:
         val = state.strip() if state and state.strip() else None
@@ -519,7 +404,7 @@ def update_location(
         with conn.cursor() as cur:
             cur.execute(sql, params)
         conn.commit()
-    logger.info(f"Updated {table_name}.{id_column}={record_id}: state={state}, country={country}")
+    logger.info(f"Updated {table_name}.{id_column}={record_id}: district={district}, state={state}, country={country}")
 
 
 # ===================================================================
@@ -531,148 +416,109 @@ def process_records(
     id_column: str,
     limit: Optional[int] = None,
     dry_run: bool = False,
-    update_state: bool = True,
-    update_country: bool = True,
 ) -> None:
     logger.info("=" * 80)
-    logger.info("Address State & Country Pipeline  (pg_trgm + LLM)")
+    logger.info("Address District/State/Country Pipeline  (pg_trgm + ref.txt)")
     logger.info("=" * 80)
     logger.info(f"Table: {table_name}  |  ID: {id_column}  |  Limit: {limit or 'ALL'}")
-    logger.info(f"Dry run: {dry_run}  |  Update state: {update_state}  |  Update country: {update_country}")
+    logger.info(f"Dry run: {dry_run}")
     logger.info("=" * 80)
 
     # Load foreign reference
     ref_data = parse_foreign_reference(REF_DATA_FILE)
 
-    # LLM extractor (step 1)
-    extractor = LocationExtractor()
-
     # Fetch records
-    records = fetch_records_needing_update(
-        table_name, id_column, limit, update_state, update_country
-    )
+    records = fetch_records_needing_update(table_name, id_column, limit)
     if not records:
         logger.info("No records need updates.")
         return
 
     total = len(records)
-    stats = {"ok": 0, "fail": 0, "skip": 0, "geo": 0, "ref": 0, "llm": 0, "null": 0}
+    stats = {"ok": 0, "fail": 0, "skip": 0, "geo": 0, "ref": 0, "unresolved": 0, "null": 0}
 
     for idx, rec in enumerate(records, 1):
         logger.info("-" * 80)
-        logger.info(f"[{idx}/{total}] ID={rec.record_id}  state={rec.permanent_state_ut}  country={rec.permanent_country}")
+        logger.info(f"[{idx}/{total}] ID={rec.record_id}  district={rec.permanent_district}  state={rec.permanent_state_ut}  country={rec.permanent_country}")
         addr_text = rec.get_address_components()
         logger.info(f"  Address: {addr_text or '(empty)'}")
 
         # --- already complete ---
         if rec.is_complete():
-            logger.info("  Skip: both state & country already set")
+            logger.info("  Skip: district, state & country already set")
             stats["skip"] += 1
             continue
 
         try:
+            district_out: Optional[str] = None
             state_out: Optional[str] = None
             country_out: Optional[str] = None
             source = "none"
 
-            # === RULE: all address fields NULL → set both to NULL ===
+            # === RULE: all address fields NULL → set all to NULL ===
             if not rec.has_any_address():
-                logger.info("  No address info → setting state & country to NULL")
-                state_out, country_out, source = None, None, "null"
+                logger.info("  No address info → setting district, state & country to NULL")
+                district_out, state_out, country_out, source = None, None, None, "null"
                 stats["null"] += 1
 
-            # === RULE: state exists, only country missing ===
-            elif not rec.needs_state() and rec.needs_country():
-                logger.info(f"  State exists ({rec.permanent_state_ut}), determining country only")
-
-                # 1) foreign ref check
-                foreign = lookup_foreign([], rec.permanent_state_ut, ref_data)
-                if foreign:
-                    _, country_out = foreign
-                    source = "ref"
-                    stats["ref"] += 1
-                else:
-                    # 2) pg_trgm — see if the state itself matches an Indian state
-                    geo = trgm_match_locations([rec.permanent_state_ut], TRGM_SIMILARITY_THRESHOLD)
-                    if geo and geo.state:
-                        country_out = "India"
-                        source = "geo"
-                        stats["geo"] += 1
-                    else:
-                        # 3) LLM classify
-                        res = llm_classify_state_country(addr_text, rec.permanent_state_ut)
-                        country_out = res.country
-                        source = "llm"
-                        stats["llm"] += 1
-
-                state_out = None  # do NOT touch state
-
-            # === RULE: state missing → full pipeline ===
             else:
-                # --- Step 1: LLM extract location names ---
-                logger.info("  Step 1: LLM extracting location names …")
-                extracted = extractor.extract(addr_text)
-                logger.info(f"    extracted_locations = {extracted}")
-
-                # Also include raw field values as candidates
-                raw_candidates = [
+                # Build candidates from available structured DB columns
+                candidates = [
                     rec.permanent_locality_village,
                     rec.permanent_area_mandal,
                     rec.permanent_district,
                 ]
                 all_candidates = list(
                     dict.fromkeys(  # deduplicate, preserve order
-                        [c.strip() for c in (extracted + [r for r in raw_candidates if r]) if c and c.strip()]
+                        [c.strip() for c in candidates if c and c.strip()]
                     )
                 )
-                logger.info(f"    all_candidates = {all_candidates}")
+                logger.info(f"  Candidates from DB fields: {all_candidates}")
 
-                # --- Step 2: pg_trgm against geo_reference ---
-                logger.info("  Step 2: pg_trgm matching …")
+                # --- Step 1: pg_trgm against geo_reference ---
+                logger.info("  Step 1: pg_trgm matching …")
                 geo = trgm_match_locations(all_candidates, TRGM_SIMILARITY_THRESHOLD)
 
                 if geo and geo.state:
+                    district_out = geo.district
                     state_out = geo.state
                     country_out = "India"
                     source = "geo"
                     stats["geo"] += 1
-                    logger.info(f"    Matched via geo_reference: state={geo.state}, district={geo.district}, sim={geo.similarity:.3f}")
+                    logger.info(f"    Matched via geo_reference: district={geo.district}, state={geo.state}, sim={geo.similarity:.3f}")
                 else:
-                    # --- Step 3a: foreign ref.txt ---
-                    logger.info("  Step 3: foreign ref lookup …")
-                    foreign = lookup_foreign(all_candidates, None, ref_data)
+                    # --- Step 2: foreign ref.txt ---
+                    logger.info("  Step 2: foreign ref lookup …")
+                    foreign = lookup_foreign(all_candidates, rec.permanent_state_ut, ref_data)
                     if foreign:
                         state_out, country_out = foreign
                         source = "ref"
                         stats["ref"] += 1
                         logger.info(f"    Matched via ref.txt: state={state_out}, country={country_out}")
                     else:
-                        # --- Step 3b: LLM classify (last resort) ---
-                        logger.info("  Step 3b: LLM classify (last resort) …")
-                        res = llm_classify_state_country(addr_text)
-                        state_out = res.state
-                        country_out = res.country
-                        source = "llm"
-                        stats["llm"] += 1
-                        logger.info(f"    LLM result: state={state_out}, country={country_out}, conf={res.confidence}")
+                        # Unresolved — leave as NULL
+                        logger.warning(f"  Unresolved: no geo or ref match for candidates={all_candidates}")
+                        stats["unresolved"] += 1
 
             # --- WRITE ---
-            logger.info(f"  Result ({source}): state={state_out}, country={country_out}")
+            logger.info(f"  Result ({source}): district={district_out}, state={state_out}, country={country_out}")
 
             if dry_run:
                 logger.info("  [DRY RUN] — not writing")
                 stats["ok"] += 1
                 continue
 
-            # Determine what to write
+            # Only write fields that are currently missing
+            write_district = rec.needs_district() and (district_out is not None or not rec.has_any_address())
             write_state = rec.needs_state() and (state_out is not None or not rec.has_any_address())
             write_country = rec.needs_country() and (country_out is not None or not rec.has_any_address())
 
-            if write_state or write_country:
+            if write_district or write_state or write_country:
                 update_location(
                     table_name, id_column, rec.record_id,
+                    district=district_out if write_district else None,
                     state=state_out if write_state else None,
                     country=country_out if write_country else None,
+                    update_district_field=write_district,
                     update_state_field=write_state,
                     update_country_field=write_country,
                 )
@@ -694,7 +540,7 @@ def process_records(
     logger.info(f"  Failed:        {stats['fail']}")
     logger.info(f"  via geo_ref:   {stats['geo']}")
     logger.info(f"  via ref.txt:   {stats['ref']}")
-    logger.info(f"  via LLM:       {stats['llm']}")
+    logger.info(f"  unresolved:    {stats['unresolved']}")
     logger.info(f"  set to NULL:   {stats['null']}")
     logger.info("=" * 80)
 
@@ -705,15 +551,13 @@ def process_records(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Determine state/country from address via pg_trgm + LLM"
+        description="Determine district/state/country from address via pg_trgm"
     )
     parser.add_argument("--table", default=DEFAULT_TABLE_NAME)
     parser.add_argument("--id-column", default=DEFAULT_ID_COLUMN)
     parser.add_argument("--limit", type=int, default=None,
                         help="Max records (default: all)")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--skip-state", action="store_true")
-    parser.add_argument("--skip-country", action="store_true")
     parser.add_argument("--trgm-threshold", type=float, default=TRGM_SIMILARITY_THRESHOLD,
                         help=f"pg_trgm similarity threshold (default {TRGM_SIMILARITY_THRESHOLD})")
 
@@ -728,8 +572,6 @@ def main():
         id_column=args.id_column,
         limit=args.limit,
         dry_run=args.dry_run,
-        update_state=not args.skip_state,
-        update_country=not args.skip_country,
     )
 
 
