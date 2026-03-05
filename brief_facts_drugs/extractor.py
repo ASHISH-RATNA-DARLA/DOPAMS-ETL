@@ -345,6 +345,11 @@ R11:skip "unknown"/"unidentified" drug names
 R12:drug_form∈{{solid,liquid,count}}|liquid drugs(oil,syrup,solution)→raw_unit MUST be ml/litres even if source says grams
 R13:plant/cultivation seizures|"8 ganja plants"→raw_quantity=8,raw_unit="plants",drug_form="count"|plants ARE valid drug seizures under NDPS Act—ALWAYS extract them
 R14:is_commercial(bool)|if brief facts explicitly says "commercial quantity" or "above commercial quantity"→true|if not mentioned→false|do NOT guess—only set true when TEXT states it
+R15:decimal-quantity|"1.200 Kg" or "1.500 Kgs"→the dot is a DECIMAL separator→raw_quantity=1.2 or 1.5, NOT 1200 or 1500|Indian FIR quantities under 100 Kg use decimals, not thousands separators|same for grams: "6.585 grams"→6.585
+R16:cash-is-NOT-worth|"seized Rs.500/- from his possession" or "amount of Rs 500/-"→this is CASH/CURRENCY seized, NOT drug seizure worth|do NOT assign cash amounts to seizure_worth|seizure_worth is ONLY the estimated VALUE of the DRUG itself
+R17:purchase-price-is-NOT-worth|"purchased at Rs.10,000/- per KG" or "bought for Rs.5,000/-"→this is PURCHASE PRICE, NOT seizure worth|seizure_worth must come from "worth Rs.", "W/Rs:", "valued at", "worth of Rs.", "worth about Rs." patterns ONLY
+R18:per-kg-rate-is-NOT-worth|"at the rate of Rs.10,000/- per KG"→this is a RATE, not a value for specific seized quantity|do NOT multiply rate × quantity to compute worth—only extract worth when explicitly stated
+R19:W/Rs-pattern|"W/Rs:" "W/Rs." "W/Rs" are abbreviations for "Worth Rupees"→ALWAYS extract the number following this pattern as seizure_worth|common formats: "W/Rs: 10,000/-", "W/Rs. 80,000/-", "W/Rs 2,52,800/-"
 
 ## Drug Knowledge Base
 {drug_knowledge_base}
