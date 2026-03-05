@@ -513,15 +513,15 @@ class PersonsETL:
                     logger.debug(f"Person {person_id} not found (404)")
                     return None
                 elif resp.status_code == 400:
-                    # Specific logic for 400: Wait 60s and retry (up to max_retries)
-                    logger.warning(f"API returned status code 400 for person {person_id}, waiting 60s before retrying...")
-                    if attempt < API_CONFIG['max_retries'] - 1:
-                        time.sleep(60)
+                    # Specific logic for 400: Bad Request (Likely dead/expunged ID) - skip instantly
+                    logger.error(f"API rejected person_id {person_id} (400 Bad Request). Skipping.")
+                    self.stats['failed_api_calls'] += 1
+                    return None
                 else:
                     # Other status codes - retry
-                    logger.warning(f"API returned status code {resp.status_code} for person {person_id}, retrying...")
+                    logger.warning(f"API returned status code {resp.status_code}... waiting 60s before retrying")
                     if attempt < API_CONFIG['max_retries'] - 1:
-                        time.sleep(2 ** attempt)
+                        time.sleep(60)
                     
             except requests.exceptions.Timeout:
                 logger.warning(f"API timeout for person {person_id}, retrying... (Attempt {attempt + 1}/{API_CONFIG['max_retries']})")
