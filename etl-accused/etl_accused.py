@@ -1643,14 +1643,38 @@ class AccusedETL:
             logger.info(f"ℹ️  Expected Total from API Team: 22423 (insert + update records)")
             logger.info("")
             
-            for fd, td in tqdm(ranges, desc="Processing date ranges", unit="range"):
-                # Process the chunk (will check for schema evolution and process data)
-                self.process_date_range(fd, td, table_columns)
-                time.sleep(1)
+            # Chunk-level parallelism is optional; record-level parallelism still applies inside each chunk.
+            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '1'))
+            inter_chunk_sleep = float(os.environ.get('ACCUSED_INTER_CHUNK_SLEEP', '0'))
+
+            if chunk_workers <= 1:
+                for fd, td in tqdm(ranges, desc="Processing date ranges", unit="range"):
+                    self.process_date_range(fd, td, table_columns)
+                    if inter_chunk_sleep > 0:
+                        time.sleep(inter_chunk_sleep)
+            else:
+                logger.info(f"🚀 Starting parallel chunk processing with {chunk_workers} workers")
+                with ThreadPoolExecutor(max_workers=chunk_workers) as executor:
+                    future_to_range = {
+                        executor.submit(self.process_date_range, fd, td, table_columns): (fd, td)
+                        for fd, td in ranges
+                    }
+                    with tqdm(total=len(ranges), desc="Processing date ranges", unit="range") as pbar:
+                        for future in as_completed(future_to_range):
+                            fd, td = future_to_range[future]
+                            try:
+                                future.result()
+                            except Exception as exc:
+                                logger.error(f"Chunk failed {fd} to {td}: {exc}")
+                                with self.stats_lock:
+                                    self.stats['errors'].append(f"Chunk failed {fd} to {td}: {exc}")
+                            pbar.update(1)
 
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {ACCUSED_TABLE}")
-            db_accused_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT COUNT(*) FROM {ACCUSED_TABLE}")
+                db_accused_count = cursor.fetchone()[0]
             
             # Store for summary
             self.stats['db_total_count'] = db_accused_count
