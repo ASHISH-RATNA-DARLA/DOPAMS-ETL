@@ -464,15 +464,20 @@ class PersonsETL:
                 WHERE person_id IS NOT NULL
             """)
         else:
-            # Incremental run - only process person_ids from recently updated accused records
-            logger.info(f"🔄 Incremental run: Processing person_ids from accused records updated after {last_date.isoformat()}")
+            # Incremental run - process person_ids from:
+            #   1. Accused records updated after last_date (incremental)
+            #   2. Stub persons (name IS NULL) — created by accused ETL but never populated,
+            #      regardless of accused.date_created/date_modified (which may be NULL or old)
+            logger.info(f"🔄 Incremental run: Processing person_ids from accused records updated after {last_date.isoformat()} + any unpopulated stubs")
             self.db_cursor.execute(f"""
-                SELECT DISTINCT person_id 
-                FROM {ACCUSED_TABLE} 
-                WHERE person_id IS NOT NULL
+                SELECT DISTINCT a.person_id 
+                FROM {ACCUSED_TABLE} a
+                LEFT JOIN {PERSONS_TABLE} p ON a.person_id = p.person_id
+                WHERE a.person_id IS NOT NULL
                 AND (
-                    date_created >= %s OR 
-                    date_modified >= %s
+                    p.name IS NULL
+                    OR a.date_created >= %s 
+                    OR a.date_modified >= %s
                 )
             """, (last_date, last_date))
         
@@ -482,7 +487,7 @@ class PersonsETL:
         if last_date is None:
             logger.info(f"📊 Found {len(rows)} person_ids to process (first run - all records)")
         else:
-            logger.info(f"📊 Found {len(rows)} person_ids to process (incremental - updated after {last_date.isoformat()})")
+            logger.info(f"📊 Found {len(rows)} person_ids to process (incremental - updated after {last_date.isoformat()} + stubs)")
         
         return rows
 
