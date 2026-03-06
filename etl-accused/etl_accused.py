@@ -31,7 +31,7 @@ from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 # Set to 1 for Daily Incremental (Standard)
 # Set to 0 for Full Historical Fetch (Reset)
 # ==========================================
-RUN_MODE = 0 
+RUN_MODE = int(os.environ.get('ACCUSED_RUN_MODE', '1'))
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
