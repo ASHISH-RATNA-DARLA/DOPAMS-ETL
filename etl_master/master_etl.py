@@ -129,13 +129,18 @@ def execute_process(process):
     # Combine commands into a single shell command string.
     # We join with ' && ' so that if one step fails, the whole block fails immediately.
     full_command = " && ".join(commands)
+
+    # Each process writes its own live output to output.log in the process folder.
+    # `set -o pipefail` keeps failures visible even when piping through tee.
+    logged_command = f"set -o pipefail; ( {full_command} ) 2>&1 | tee output.log"
     
     logger.info(f"Executing: {full_command}")
+    logger.info("Subprocess logs will be written to output.log in the target ETL folder")
     
     try:
         # executable='/bin/bash' is crucial for 'source' to work
         subprocess.run(
-            full_command, 
+            logged_command, 
             shell=True, 
             executable='/bin/bash', 
             check=True,
