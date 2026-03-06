@@ -86,7 +86,8 @@ class PersonsETL:
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            with self.db_pool.get_connection_context() as (conn, cursor):
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
                 cursor.execute("""
                     SELECT column_name 
                     FROM information_schema.columns 
@@ -238,7 +239,8 @@ class PersonsETL:
                 else:
                     column_type = 'VARCHAR(255)'
                 
-                with self.db_pool.get_connection_context() as (conn, cursor):
+                with self.db_pool.get_connection_context() as conn:
+                    cursor = conn.cursor()
                     alter_sql = f"ALTER TABLE {PERSONS_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
                     cursor.execute(alter_sql)
                     conn.commit()
@@ -410,7 +412,8 @@ class PersonsETL:
         Returns max(date_created, date_modified) or None if table is empty.
         """
         try:
-            with self.db_pool.get_connection_context() as (conn, cursor):
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
                 # Check if table has any data
                 cursor.execute(f"SELECT COUNT(*) FROM {PERSONS_TABLE}")
                 count = cursor.fetchone()[0]
@@ -467,7 +470,8 @@ class PersonsETL:
         # Get last processed date from persons table
         last_date = self.get_last_processed_date()
         
-        with self.db_pool.get_connection_context() as (conn, cursor):
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
             if last_date is None:
                 # First run - process all person_ids from accused table
                 logger.info("🔄 First run: Processing all person_ids from accused table")
@@ -879,7 +883,8 @@ class PersonsETL:
                                     self.update_existing_records_with_new_fields(new_fields)
                                 first_record_processed = True
                     
-                    with self.db_pool.get_connection_context() as (conn, cursor):
+                    with self.db_pool.get_connection_context() as conn:
+                        cursor = conn.cursor()
                         self.upsert_person(data, table_columns, conn, cursor)
                 else:
                     with self.stats_lock:
@@ -909,7 +914,8 @@ class PersonsETL:
                                            f"Failed: {self.stats['failed']}")
 
             # Get database counts
-            with self.db_pool.get_connection_context() as (conn, cursor):
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
                 cursor.execute(f"SELECT COUNT(*) FROM {PERSONS_TABLE}")
                 db_persons_count = cursor.fetchone()[0]
             

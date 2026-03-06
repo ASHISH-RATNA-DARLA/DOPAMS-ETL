@@ -51,17 +51,24 @@ class PostgreSQLConnectionPool:
     _lock = threading.Lock()
     _initialized = False
     
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
     
-    def __init__(self, minconn: int = 5, maxconn: int = 20):
+    def __init__(self, minconn: int = 5, maxconn: int = 20, **kwargs):
         """Initialize pool (only once due to singleton pattern)"""
         if PostgreSQLConnectionPool._initialized:
             return
+
+        # Backward-compatible aliases used across ETL scripts.
+        # Supports both minconn/maxconn and min_conn/max_conn.
+        if 'min_conn' in kwargs:
+            minconn = kwargs['min_conn']
+        if 'max_conn' in kwargs:
+            maxconn = kwargs['max_conn']
         
         self.minconn = minconn
         self.maxconn = maxconn
