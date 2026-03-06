@@ -1,180 +1,970 @@
-# =============================================================================
-# Foreign Country Reference Data for update-state-country ETL
-# India is NOT listed here — Indian locations are resolved via the
-# geo_reference table using pg_trgm fuzzy matching.
-#
-# Format:  CountryName(country):
-#          STATE_OR_PROVINCE
-#          CityOrVillage (city)
-# =============================================================================
-
-Afghanistan(country):
+Afghanistan
 Kabul
 Kandahar
 Herat
-Balkh
-Nangarhar
-Helmand
 
-Bangladesh(country):
+Albania
+Tirana
+Durres
+Vlore
+
+Algeria
+Algiers
+Oran
+Constantine
+
+Andorra
+Andorra la Vella
+Escaldes-Engordany
+Encamp
+
+Angola
+Luanda
+Lubango
+Benguela
+
+Antigua and Barbuda
+St. John's
+All Saints
+Liberta
+
+Argentina
+Buenos Aires
+Cordoba
+Rosario
+
+Armenia
+Yerevan
+Gyumri
+Vanadzor
+
+Australia
+Sydney
+Melbourne
+Brisbane
+
+Austria
+Vienna
+Salzburg
+Innsbruck
+
+Azerbaijan
+Baku
+Ganja
+Sumqayit
+
+Bahamas
+Nassau
+Freeport
+West End
+
+Bahrain
+Manama
+Muharraq
+Riffa
+
+Bangladesh
 Dhaka
 Chittagong
-Rajshahi
-Khulna
 Sylhet
-Rangpur
-Mymensingh
-Comilla
-Barisal
 
-Bhutan(country):
+Barbados
+Bridgetown
+Speightstown
+Oistins
+
+Belarus
+Minsk
+Gomel
+Vitebsk
+
+Belgium
+Brussels
+Antwerp
+Ghent
+
+Belize
+Belize City
+Belmopan
+San Ignacio
+
+Benin
+Porto-Novo
+Cotonou
+Parakou
+
+Bhutan
 Thimphu
+Phuentsholing
 Paro
-Punakha
 
-China(country):
+Bolivia
+La Paz
+Santa Cruz
+Sucre
+
+Bosnia and Herzegovina
+Sarajevo
+Banja Luka
+Mostar
+
+Botswana
+Gaborone
+Francistown
+Maun
+
+Brazil
+Sao Paulo
+Rio de Janeiro
+Brasilia
+
+Brunei
+Bandar Seri Begawan
+Kuala Belait
+Seria
+
+Bulgaria
+Sofia
+Plovdiv
+Varna
+
+Burkina Faso
+Ouagadougou
+Bobo-Dioulasso
+Koudougou
+
+Burundi
+Bujumbura
+Gitega
+Ngozi
+
+Cabo Verde
+Praia
+Mindelo
+Santa Maria
+
+Cambodia
+Phnom Penh
+Siem Reap
+Battambang
+
+Cameroon
+Yaounde
+Douala
+Bamenda
+
+Canada
+Toronto
+Vancouver
+Montreal
+
+Central African Republic
+Bangui
+Bimbo
+Berberati
+
+Chad
+N'Djamena
+Moundou
+Sarh
+
+Chile
+Santiago
+Valparaiso
+Concepcion
+
+China
 Beijing
 Shanghai
-Guangdong
-Sichuan
-Yunnan
-Tibet
-Xinjiang
+Guangzhou
 
-Iran(country):
+Colombia
+Bogota
+Medellin
+Cali
+
+Comoros
+Moroni
+Mutsamudu
+Fomboni
+
+Congo (Congo-Brazzaville)
+Brazzaville
+Pointe-Noire
+Dolisie
+
+Costa Rica
+San Jose
+Liberia
+Limon
+
+Croatia
+Zagreb
+Split
+Dubrovnik
+
+Cuba
+Havana
+Santiago de Cuba
+Camaguey
+
+Cyprus
+Nicosia
+Limassol
+Larnaca
+
+Czechia (Czech Republic)
+Prague
+Brno
+Ostrava
+
+Democratic Republic of the Congo
+Kinshasa
+Lubumbashi
+Mbuji-Mayi
+
+Denmark
+Copenhagen
+Aarhus
+Odense
+
+Djibouti
+Djibouti City
+Ali Sabieh
+Tadjoura
+
+Dominica
+Roseau
+Portsmouth
+Marigot
+
+Dominican Republic
+Santo Domingo
+Santiago de los Caballeros
+Punta Cana
+
+Ecuador
+Quito
+Guayaquil
+Cuenca
+
+Egypt
+Cairo
+Alexandria
+Giza
+
+El Salvador
+San Salvador
+Santa Ana
+San Miguel
+
+Equatorial Guinea
+Malabo
+Bata
+Ebebiyin
+
+Eritrea
+Asmara
+Keren
+Massawa
+
+Estonia
+Tallinn
+Tartu
+Narva
+
+Eswatini
+Mbabane
+Manzini
+Lobamba
+
+Ethiopia
+Addis Ababa
+Dire Dawa
+Mekelle
+
+Fiji
+Suva
+Nadi
+Lautoka
+
+Finland
+Helsinki
+Espoo
+Tampere
+
+France
+Paris
+Marseille
+Lyon
+
+Gabon
+Libreville
+Port-Gentil
+Franceville
+
+Gambia
+Banjul
+Serrekunda
+Brikama
+
+Georgia
+Tbilisi
+Batumi
+Kutaisi
+
+Germany
+Berlin
+Munich
+Frankfurt
+
+Ghana
+Accra
+Kumasi
+Tamale
+
+Greece
+Athens
+Thessaloniki
+Patras
+
+Grenada
+St. George's
+Gouyave
+Grenville
+
+Guatemala
+Guatemala City
+Antigua
+Quetzaltenango
+
+Guinea
+Conakry
+Nzerekore
+Kankan
+
+Guinea-Bissau
+Bissau
+Bafata
+Gabu
+
+Guyana
+Georgetown
+Linden
+New Amsterdam
+
+Haiti
+Port-au-Prince
+Cap-Haitien
+Jacmel
+
+Honduras
+Tegucigalpa
+San Pedro Sula
+La Ceiba
+
+Hungary
+Budapest
+Debrecen
+Szeged
+
+Iceland
+Reykjavik
+Akureyri
+Keflavik
+
+India
+New Delhi
+Mumbai
+Bangalore
+
+Indonesia
+Jakarta
+Bali (Denpasar)
+Surabaya
+
+Iran
 Tehran
-Isfahan
-Shiraz
-Tabriz
 Mashhad
+Isfahan
 
-Iraq(country):
+Iraq
 Baghdad
 Basra
 Erbil
 
-Malaysia(country):
+Ireland
+Dublin
+Cork
+Galway
+
+Israel
+Jerusalem
+Tel Aviv
+Haifa
+
+Italy
+Rome
+Milan
+Venice
+
+Ivory Coast
+Abidjan
+Yamoussoukro
+Bouake
+
+Jamaica
+Kingston
+Montego Bay
+Ocho Rios
+
+Japan
+Tokyo
+Kyoto
+Osaka
+
+Jordan
+Amman
+Zarqa
+Irbid
+
+Kazakhstan
+Astana
+Almaty
+Shymkent
+
+Kenya
+Nairobi
+Mombasa
+Kisumu
+
+Kiribati
+Tarawa
+Kiritimati
+Betio
+
+Kuwait
+Kuwait City
+Al Ahmadi
+Hawalli
+
+Kyrgyzstan
+Bishkek
+Osh
+Jalal-Abad
+
+Laos
+Vientiane
+Luang Prabang
+Pakse
+
+Latvia
+Riga
+Daugavpils
+Liepaja
+
+Lebanon
+Beirut
+Tripoli
+Sidon
+
+Lesotho
+Maseru
+Teyateyaneng
+Mafeteng
+
+Liberia
+Monrovia
+Gbarnga
+Buchanan
+
+Libya
+Tripoli
+Benghazi
+Misrata
+
+Liechtenstein
+Vaduz
+Schaan
+Triesen
+
+Lithuania
+Vilnius
+Kaunas
+Klaipeda
+
+Luxembourg
+Luxembourg City
+Esch-sur-Alzette
+Differdange
+
+Madagascar
+Antananarivo
+Toamasina
+Antsirabe
+
+Malawi
+Lilongwe
+Blantyre
+Mzuzu
+
+Malaysia
 Kuala Lumpur
-Penang
-Johor
-Sabah
-Sarawak
+George Town
+Johor Bahru
 
-Maldives(country):
+Maldives
 Male
+Addu City
+Fuvahmulah
 
-Myanmar(country):
+Mali
+Bamako
+Sikasso
+Mopti
+
+Malta
+Valletta
+Birkirkara
+Sliema
+
+Marshall Islands
+Majuro
+Ebey
+Arno
+
+Mauritania
+Nouakchott
+Nouadhibou
+Rosso
+
+Mauritius
+Port Louis
+Beau Bassin-Rose Hill
+Vacoas
+
+Mexico
+Mexico City
+Cancun
+Guadalajara
+
+Micronesia
+Palikir
+Weno
+Kolonia
+
+Moldova
+Chisinau
+Tiraspol
+Balti
+
+Monaco
+Monaco-Ville
+Monte Carlo
+La Condamine
+
+Mongolia
+Ulaanbaatar
+Erdenet
+Darkhan
+
+Montenegro
+Podgorica
+Niksic
+Budva
+
+Morocco
+Casablanca
+Marrakech
+Rabat
+
+Mozambique
+Maputo
+Matola
+Beira
+
+Myanmar (Burma)
 Yangon
 Mandalay
-Shan
-Kachin
-Chin
-Sagaing
+Naypyidaw
 
-Nepal(country):
+Namibia
+Windhoek
+Rundu
+Walvis Bay
+
+Nauru
+Yaren
+Denigomodu
+Meneng
+
+Nepal
 Kathmandu
 Pokhara
-Biratnagar
 Lalitpur
-Bharatpur
-Chitwan
-Morang
-Jhapa
-Rupandehi
-Sunsari
-Kaski
 
-Nigeria(country):
-Lagos (city)
+Netherlands
+Amsterdam
+Rotterdam
+The Hague
+
+New Zealand
+Auckland
+Wellington
+Christchurch
+
+Nicaragua
+Managua
+Leon
+Granada
+
+Niger
+Niamey
+Zinder
+Maradi
+
+Nigeria
+Lagos
 Abuja
-Anambra
-Imo
 Kano
-Oyo
-Rivers
-Edo
-Enugu
-Awommama
-Lambanyi
 
-Oman(country):
+North Korea
+Pyongyang
+Hamhung
+Chongjin
+
+North Macedonia
+Skopje
+Bitola
+Kumanovo
+
+Norway
+Oslo
+Bergen
+Trondheim
+
+Oman
 Muscat
 Salalah
+Sohar
 
-Pakistan(country):
-Punjab
-Sindh
-Balochistan
-Khyber Pakhtunkhwa
-Islamabad
+Pakistan
 Karachi
 Lahore
-Peshawar
-Quetta
-Rawalpindi
+Islamabad
 
-Qatar(country):
+Palau
+Ngerulmud
+Koror
+Airai
+
+Palestine State
+Jerusalem (East)
+Gaza City
+Ramallah
+
+Panama
+Panama City
+San Miguelito
+Tocumen
+
+Papua New Guinea
+Port Moresby
+Lae
+Mount Hagen
+
+Paraguay
+Asuncion
+Ciudad del Este
+San Lorenzo
+
+Peru
+Lima
+Arequipa
+Cusco
+
+Philippines
+Manila
+Cebu City
+Davao City
+
+Poland
+Warsaw
+Krakow
+Gdansk
+
+Portugal
+Lisbon
+Porto
+Faro
+
+Qatar
 Doha
+Al Rayyan
+Al Wakrah
 
-Saudi Arabia(country):
+Romania
+Bucharest
+Cluj-Napoca
+Timisoara
+
+Russia
+Moscow
+Saint Petersburg
+Novosibirsk
+
+Rwanda
+Kigali
+Butare
+Gitarama
+
+Saint Kitts and Nevis
+Basseterre
+Charlestown
+Saint Paul's
+
+Saint Lucia
+Castries
+Bisee
+Vieux Fort
+
+Saint Vincent and the Grenadines
+Kingstown
+Georgetown
+Byera
+
+Samoa
+Apia
+Vaitele
+Faleasiu
+
+San Marino
+San Marino
+Serravalle
+Borgo Maggiore
+
+Sao Tome and Principe
+Sao Tome
+Santo Amaro
+Neves
+
+Saudi Arabia
 Riyadh
 Jeddah
 Mecca
-Medina
-Dammam
 
-South Africa(country):
+Senegal
+Dakar
+Touba
+Thies
+
+Serbia
+Belgrade
+Novi Sad
+Nis
+
+Seychelles
+Victoria
+De Quincey
+Anse Boileau
+
+Sierra Leone
+Freetown
+Bo
+Kenema
+
+Singapore
+Singapore
+
+Slovakia
+Bratislava
+Kosice
+Presov
+
+Slovenia
+Ljubljana
+Maribor
+Celje
+
+Solomon Islands
+Honiara
+Auki
+Gizo
+
+Somalia
+Mogadishu
+Hargeisa
+Kismayo
+
+South Africa
 Johannesburg
 Cape Town
 Durban
-Pretoria
-Gauteng
 
-Sri Lanka(country):
+South Korea
+Seoul
+Busan
+Incheon
+
+South Sudan
+Juba
+Wau
+Malakal
+
+Spain
+Madrid
+Barcelona
+Valencia
+
+Sri Lanka
 Colombo
 Kandy
 Galle
-Jaffna
-Trincomalee
 
-Tanzania(country):
+Sudan
+Khartoum
+Omdurman
+Nyala
+
+Suriname
+Paramaribo
+Lelydorp
+Nieuw Nickerie
+
+Sweden
+Stockholm
+Gothenburg
+Malmo
+
+Switzerland
+Zurich
+Geneva
+Basel
+
+Syria
+Damascus
+Aleppo
+Homs
+
+Tajikistan
+Dushanbe
+Khujand
+Kulob
+
+Tanzania
 Dar es Salaam
 Dodoma
-Arusha
+Zanzibar City
 
-Thailand(country):
+Thailand
 Bangkok
 Chiang Mai
 Phuket
-Pattaya
 
-Turkey(country):
+Timor-Leste
+Dili
+Baucau
+Maliana
+
+Togo
+Lome
+Sokode
+Kara
+
+Tonga
+Nuku'alofa
+Neiafu
+Haveluloto
+
+Trinidad and Tobago
+Port of Spain
+San Fernando
+Chaguanas
+
+Tunisia
+Tunis
+Sfax
+Sousse
+
+Turkey
 Istanbul
 Ankara
 Izmir
-Antalya
 
-UAE(country):
+Turkmenistan
+Ashgabat
+Turkmenabat
+Dasoguz
+
+Tuvalu
+Funafuti
+Asau
+Lolua
+
+Uganda
+Kampala
+Entebbe
+Gulu
+
+Ukraine
+Kyiv
+Kharkiv
+Odesa
+
+United Arab Emirates
 Dubai
 Abu Dhabi
 Sharjah
-Ajman
 
-United Kingdom(country):
+United Kingdom
 London
+Edinburgh
 Manchester
-Birmingham
-Scotland
-Wales
 
-United States(country):
+United States
 New York
-California
-Texas
-Florida
-Washington
+Los Angeles
+Chicago
 
-Uzbekistan(country):
+Uruguay
+Montevideo
+Salto
+Paysandu
+
+Uzbekistan
 Tashkent
 Samarkand
 Bukhara
+
+Vanuatu
+Port Vila
+Luganville
+Norsup
+
+Vatican City
+Vatican City
+
+Venezuela
+Caracas
+Maracaibo
+Valencia
+
+Vietnam
+Ho Chi Minh City
+Hanoi
+Da Nang
+
+Yemen
+Sanaa
+Aden
+Taiz
+
+Zambia
+Lusaka
+Ndola
+Kitwe
+
+Zimbabwe
+Harare
+Bulawayo
+Chitungwiza

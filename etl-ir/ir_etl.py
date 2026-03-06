@@ -16,8 +16,16 @@ from tqdm import tqdm
 import logging
 import colorlog
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Tuple, Any, Set
 from datetime import timezone, timedelta
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from db_pooling import PostgreSQLConnectionPool
+except ImportError:
+    pass
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -122,8 +130,9 @@ class InterrogationReportsETL:
     """ETL Pipeline for Interrogation Reports API"""
     
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self.db_pool = None
+        self.stats_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
         self.stats = {
             'total_api_calls': 0,
             'total_ir_fetched': 0,
@@ -136,33 +145,32 @@ class InterrogationReportsETL:
         }
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database using connection pool"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool()
+            logger.info(f"✅ Connected to connection pool")
             return True
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
+            logger.error(f"❌ Database connection pool failed: {e}")
             return False
     
     def close_db(self):
-        """Close database connection"""
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
+        """Close database connection pool"""
+        if self.db_pool:
+            self.db_pool.close_all()
         logger.info("Database connection closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = %s
+                    """, (table_name,))
+                    return {row[0] for row in cur.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -174,48 +182,50 @@ class InterrogationReportsETL:
         - If table has data: return max(date_created, date_modified) from table
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {IR_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
-                return '2022-01-01T00:00:00+05:30'
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-            min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {IR_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
-            if result and result[0]:
-                max_date = result[0]
-                # Convert to IST timezone if needed
-                if isinstance(max_date, datetime):
-                    if max_date.tzinfo is None:
-                        max_date = max_date.replace(tzinfo=IST_OFFSET)
-                    else:
-                        max_date = max_date.astimezone(IST_OFFSET)
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    # Check if table has any data
+                    cur.execute(f"SELECT COUNT(*) FROM {IR_TABLE}")
+                    count = cur.fetchone()[0]
                     
-                    # Ensure we never go before 2022-01-01
-                    if max_date < min_start_dt:
-                        logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
-                        return MIN_START_DATE
+                    if count == 0:
+                        # New database, start from beginning
+                        logger.info("📊 Table is empty, starting from 2022-01-01")
+                        return '2022-01-01T00:00:00+05:30'
                     
-                    logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
-                    return max_date.isoformat()
-            
-            # Fallback to start date
-            logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-            return '2022-01-01T00:00:00+05:30'
+                    # Table has data, get max of date_created and date_modified
+                    # Only consider dates >= 2022-01-01 to avoid processing very old data
+                    MIN_START_DATE = '2022-01-01T00:00:00+05:30'
+                    min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                    
+                    cur.execute(f"""
+                        SELECT GREATEST(
+                            COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                            COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                        ) as max_date
+                        FROM {IR_TABLE}
+                    """)
+                    result = cur.fetchone()
+                    if result and result[0]:
+                        max_date = result[0]
+                        # Convert to IST timezone if needed
+                        if isinstance(max_date, datetime):
+                            if max_date.tzinfo is None:
+                                max_date = max_date.replace(tzinfo=IST_OFFSET)
+                            else:
+                                max_date = max_date.astimezone(IST_OFFSET)
+                            
+                            # Ensure we never go before 2022-01-01
+                            if max_date < min_start_dt:
+                                logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                                return MIN_START_DATE
+                            
+                            logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
+                            return max_date.isoformat()
+                    
+                    # Fallback to start date
+                    logger.warning("⚠️  Could not determine max date, using 2022-01-01")
+                    return '2022-01-01T00:00:00+05:30'
             
         except Exception as e:
             logger.error(f"❌ Error getting effective start date: {e}")
@@ -249,26 +259,28 @@ class InterrogationReportsETL:
     
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the interrogation_reports table."""
-        try:
-            # Determine column type based on field name
-            if 'date' in column_name.lower():
-                column_type = 'TIMESTAMP'
-            elif 'id' in column_name.lower():
-                column_type = 'VARCHAR(50)'
-            elif column_name in ('other_regular_habits', 'other_indulgence_before_offence', 'time_since_modus_operandi'):
-                column_type = 'TEXT'
-            else:
-                column_type = 'VARCHAR(255)'
-            
-            alter_sql = f"ALTER TABLE {IR_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
-            logger.info(f"✅ Added column {column_name} ({column_type}) to {IR_TABLE}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
-            return False
+        with self.schema_lock:
+            try:
+                # Determine column type based on field name
+                if 'date' in column_name.lower():
+                    column_type = 'TIMESTAMP'
+                elif 'id' in column_name.lower():
+                    column_type = 'VARCHAR(50)'
+                elif column_name in ('other_regular_habits', 'other_indulgence_before_offence', 'time_since_modus_operandi'):
+                    column_type = 'TEXT'
+                else:
+                    column_type = 'VARCHAR(255)'
+                
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cur:
+                        alter_sql = f"ALTER TABLE {IR_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                        cur.execute(alter_sql)
+                        conn.commit()
+                        logger.info(f"✅ Added column {column_name} ({column_type}) to {IR_TABLE}")
+                        return True
+            except Exception as e:
+                logger.error(f"❌ Error adding column {column_name}: {e}")
+                return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
         """
@@ -374,7 +386,8 @@ class InterrogationReportsETL:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    self.stats['total_api_calls'] += 1
+                    with self.stats_lock:
+                        self.stats['total_api_calls'] += 1
                     
                     # Log the actual response for debugging
                     logger.debug(f"API Response URL: {response.url}")
@@ -423,20 +436,21 @@ class InterrogationReportsETL:
             except Exception as e:
                 logger.error(f"API error: {e}")
                 if attempt == API_CONFIG['max_retries'] - 1:
-                    self.stats['failed_api_calls'] += 1
-                    self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
+                    with self.stats_lock:
+                        self.stats['failed_api_calls'] += 1
+                        self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
                 time.sleep(2 ** attempt)
         
         logger.error(f"❌ Failed to fetch IR data for {from_date} to {to_date} after {API_CONFIG['max_retries']} attempts")
         return None
 
-    def get_existing_ir_record(self, ir_id: str) -> Optional[Dict[str, Any]]:
+    def get_existing_ir_record(self, ir_id: str, cursor) -> Optional[Dict[str, Any]]:
         """Get existing IR record from database."""
-        self.db_cursor.execute(
+        cursor.execute(
             f"SELECT interrogation_report_id, date_created, date_modified FROM {IR_TABLE} WHERE interrogation_report_id = %s",
             (ir_id,)
         )
-        result = self.db_cursor.fetchone()
+        result = cursor.fetchone()
         if result:
             return {
                 'interrogation_report_id': result[0],
@@ -467,7 +481,7 @@ class InterrogationReportsETL:
         # Update if new modified date is newer
         return new_date_modified > existing_modified
 
-    def delete_related_records(self, ir_id: str):
+    def delete_related_records(self, ir_id: str, cursor):
         """Delete all related records for an IR before re-inserting."""
         tables = [
             IR_FAMILY_HISTORY_TABLE,
@@ -488,9 +502,9 @@ class InterrogationReportsETL:
         ]
         
         for table in tables:
-            self.db_cursor.execute(f"DELETE FROM {table} WHERE interrogation_report_id = %s", (ir_id,))
+            cursor.execute(f"DELETE FROM {table} WHERE interrogation_report_id = %s", (ir_id,))
 
-    def insert_main_record(self, record: Dict[str, Any], is_update: bool = False):
+    def insert_main_record(self, record: Dict[str, Any], cursor, is_update: bool = False):
         """Insert or update main interrogation_reports record."""
         pf = record.get('PHYSICAL_FEATURES', {})
         sep = record.get('SOCIO_ECONOMIC_PROFILE', {})
@@ -599,7 +613,7 @@ class InterrogationReportsETL:
                     date_created = %s, date_modified = %s
                 WHERE interrogation_report_id = %s
             """
-            self.db_cursor.execute(update_sql, main_values[1:] + (main_values[0],))
+            cursor.execute(update_sql, main_values[1:] + (main_values[0],))
         else:
             # Insert new record
             insert_sql = f"""
@@ -631,9 +645,9 @@ class InterrogationReportsETL:
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
-            self.db_cursor.execute(insert_sql, main_values)
+            cursor.execute(insert_sql, main_values)
     
-    def insert_related_records(self, record: Dict[str, Any]):
+    def insert_related_records(self, record: Dict[str, Any], cursor):
         """Insert all related records for an IR. Person_id is optional - all data is inserted."""
         ir_id = record.get('INTERROGATION_REPORT_ID')
         
@@ -652,7 +666,7 @@ class InterrogationReportsETL:
                 
                 if family_values:
                     execute_values(
-                        self.db_cursor,
+                        cursor,
                         f"""INSERT INTO {IR_FAMILY_HISTORY_TABLE} 
                            (interrogation_report_id, person_id, relation, family_member_peculiarity,
                             criminal_background, is_alive, family_stay_together)
@@ -677,7 +691,7 @@ class InterrogationReportsETL:
                 
                 if contact_values:
                     execute_values(
-                        self.db_cursor,
+                        cursor,
                         f"""INSERT INTO {IR_LOCAL_CONTACTS_TABLE} 
                            (interrogation_report_id, person_id, town, address, jurisdiction_ps)
                            VALUES %s""",
@@ -693,7 +707,7 @@ class InterrogationReportsETL:
             habit_values = [(ir_id, habit) for habit in regular_habits if habit]
             if habit_values:
                 execute_values(
-                    self.db_cursor,
+                    cursor,
                     f"""INSERT INTO {IR_REGULAR_HABITS_TABLE} (interrogation_report_id, habit)
                        VALUES %s ON CONFLICT DO NOTHING""",
                     habit_values
@@ -715,7 +729,7 @@ class InterrogationReportsETL:
                 
                 if drug_values:
                     execute_values(
-                        self.db_cursor,
+                        cursor,
                         f"""INSERT INTO {IR_TYPES_OF_DRUGS_TABLE} 
                            (interrogation_report_id, type_of_drug, quantity, purchase_amount_in_inr,
                             mode_of_payment, mode_of_transport, supplier_person_id, receivers_person_id)
@@ -739,7 +753,7 @@ class InterrogationReportsETL:
             
             if sim_values:
                 execute_values(
-                    self.db_cursor,
+                    cursor,
                     f"""INSERT INTO {IR_SIM_DETAILS_TABLE} 
                        (interrogation_report_id, phone_number, sdr, imei, true_caller_name, person_id)
                        VALUES %s""",
@@ -762,7 +776,7 @@ class InterrogationReportsETL:
                 
                 if financial_values:
                     execute_values(
-                        self.db_cursor,
+                        cursor,
                         f"""INSERT INTO {IR_FINANCIAL_HISTORY_TABLE} 
                            (interrogation_report_id, account_holder_person_id, pan_no, upi_id,
                             name_of_bank, account_number, branch_name, ifsc_code,
@@ -788,7 +802,7 @@ class InterrogationReportsETL:
             
             if consumer_values:
                 execute_values(
-                    self.db_cursor,
+                    cursor,
                     f"""INSERT INTO {IR_CONSUMER_DETAILS_TABLE} 
                        (interrogation_report_id, consumer_person_id, place_of_consumption,
                         other_sources, other_sources_phone_no, aadhar_card_number, aadhar_card_number_phone_no)
@@ -805,7 +819,7 @@ class InterrogationReportsETL:
                 for mo in modus_operandi
             ]
             execute_values(
-                self.db_cursor,
+                cursor,
                 f"""INSERT INTO {IR_MODUS_OPERANDI_TABLE} 
                    (interrogation_report_id, crime_head, crime_sub_head, modus_operandi)
                    VALUES %s""",
@@ -833,7 +847,7 @@ class InterrogationReportsETL:
                     for po in previous_offences
                 ]
                 execute_values(
-                    self.db_cursor,
+                    cursor,
                     f"""INSERT INTO {IR_PREVIOUS_OFFENCES_TABLE} 
                        (interrogation_report_id, arrest_date, arrested_by, arrest_place, crime_num,
                         dist_unit_division, gang_member, interrogated_by, law_section,
@@ -862,7 +876,7 @@ class InterrogationReportsETL:
                 
                 if dc_values:
                     execute_values(
-                        self.db_cursor,
+                        cursor,
                         f"""INSERT INTO {IR_DEFENCE_COUNSEL_TABLE} 
                            (interrogation_report_id, dist_division, ps_code, crime_num, law_section,
                             sc_cc_num, defence_counsel_address, defence_counsel_phone, assistance, defence_counsel_person_id)
@@ -886,7 +900,7 @@ class InterrogationReportsETL:
                 
                 if assoc_values:
                     execute_values(
-                        self.db_cursor,
+                        cursor,
                         f"""INSERT INTO {IR_ASSOCIATE_DETAILS_TABLE} 
                            (interrogation_report_id, person_id, gang, relation)
                            VALUES %s""",
@@ -905,7 +919,7 @@ class InterrogationReportsETL:
                 for sh in shelter
             ]
             execute_values(
-                self.db_cursor,
+                cursor,
                 f"""INSERT INTO {IR_SHELTER_TABLE} 
                    (interrogation_report_id, preparation_of_offence, after_offence,
                     regular_residency, remarks, other_regular_residency)
@@ -919,7 +933,7 @@ class InterrogationReportsETL:
             media_values = [(ir_id, media_id) for media_id in media if media_id]
             if media_values:
                 execute_values(
-                    self.db_cursor,
+                    cursor,
                     f"""INSERT INTO {IR_MEDIA_TABLE} (interrogation_report_id, media_id)
                        VALUES %s ON CONFLICT DO NOTHING""",
                     media_values
@@ -931,7 +945,7 @@ class InterrogationReportsETL:
             ir_ref_values = [(ir_id, ref_id) for ref_id in interrogation_report if ref_id]
             if ir_ref_values:
                 execute_values(
-                    self.db_cursor,
+                    cursor,
                     f"""INSERT INTO {IR_INTERROGATION_REPORT_REFS_TABLE} (interrogation_report_id, report_ref_id)
                        VALUES %s ON CONFLICT DO NOTHING""",
                     ir_ref_values
@@ -946,13 +960,13 @@ class InterrogationReportsETL:
                 for dl in dopams_links
             ]
             execute_values(
-                self.db_cursor,
+                cursor,
                 f"""INSERT INTO {IR_DOPAMS_LINKS_TABLE} (interrogation_report_id, phone_number, dopams_data)
                    VALUES %s""",
                 dopams_values
             )
 
-    def process_ir_record(self, record: Dict[str, Any]) -> bool:
+    def process_ir_record(self, record: Dict[str, Any], conn, cursor) -> bool:
         """
         Process a single IR record (insert or update).
         
@@ -968,48 +982,50 @@ class InterrogationReportsETL:
         
         if not ir_id:
             logger.warning("Record missing INTERROGATION_REPORT_ID, skipping")
-            self.stats['total_ir_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_ir_failed'] += 1
             return False
         
         try:
             # Check if record exists
-            existing = self.get_existing_ir_record(ir_id)
+            existing = self.get_existing_ir_record(ir_id, cursor)
             
             if existing:
                 # Check if update is needed
                 if self.should_update_record(existing, date_modified):
                     logger.debug(f"Updating record: {ir_id}")
                     # Delete related records before re-inserting
-                    self.delete_related_records(ir_id)
+                    self.delete_related_records(ir_id, cursor)
                     # Update main record
                     try:
-                        self.insert_main_record(record, is_update=True)
+                        self.insert_main_record(record, cursor, is_update=True)
                     except psycopg2_errors.ForeignKeyViolation as fk_error:
                         error_str = str(fk_error)
                         if 'crime_id' in error_str.lower():
                             logger.warning(f"Record {ir_id}: crime_id {crime_id} foreign key violation. Crime must exist in crimes table.")
-                            self.stats['total_ir_failed'] += 1
-                            self.stats['errors'].append(f"IR {ir_id}: crime_id {crime_id} not found in crimes table")
+                            with self.stats_lock:
+                                self.stats['total_ir_failed'] += 1
+                                self.stats['errors'].append(f"IR {ir_id}: crime_id {crime_id} not found in crimes table")
                             # Rollback immediately to clear aborted transaction state
                             try:
-                                self.db_conn.rollback()
+                                conn.rollback()
                             except:
                                 pass
                             return False
                         raise
                     # Re-insert related records
                     try:
-                        self.insert_related_records(record)
+                        self.insert_related_records(record, cursor)
                     except Exception as e:
                         logger.warning(f"Failed to insert some related records for {ir_id}: {e}")
                         # Rollback to clear failed transaction state
                         try:
-                            self.db_conn.rollback()
+                            conn.rollback()
                             # Re-apply main record update
-                            self.insert_main_record(record, is_update=True)
+                            self.insert_main_record(record, cursor, is_update=True)
                             # Try to insert related records again, but don't fail if it still fails
                             try:
-                                self.insert_related_records(record)
+                                self.insert_related_records(record, cursor)
                             except Exception as retry_error:
                                 logger.warning(f"Failed to insert related records on retry for {ir_id}: {retry_error}")
                                 # Continue anyway - main record is saved
@@ -1017,46 +1033,49 @@ class InterrogationReportsETL:
                             logger.error(f"Failed to rollback/re-apply for {ir_id}: {rollback_error}")
                             # Rollback to ensure clean state
                             try:
-                                self.db_conn.rollback()
+                                conn.rollback()
                             except:
                                 pass
-                    self.stats['total_ir_updated'] += 1
+                    with self.stats_lock:
+                        self.stats['total_ir_updated'] += 1
                     return True
                 else:
                     logger.debug(f"Record {ir_id} is up-to-date, skipping")
-                    self.stats['total_ir_no_change'] += 1
+                    with self.stats_lock:
+                        self.stats['total_ir_no_change'] += 1
                     return True
             else:
                 # New record
                 logger.debug(f"Inserting new record: {ir_id}")
                 try:
-                    self.insert_main_record(record, is_update=False)
+                    self.insert_main_record(record, cursor, is_update=False)
                 except psycopg2_errors.ForeignKeyViolation as fk_error:
                     error_str = str(fk_error)
                     if 'crime_id' in error_str.lower():
                         logger.warning(f"Record {ir_id}: crime_id {crime_id} foreign key violation. Crime must exist in crimes table.")
-                        self.stats['total_ir_failed'] += 1
-                        self.stats['errors'].append(f"IR {ir_id}: crime_id {crime_id} not found in crimes table")
+                        with self.stats_lock:
+                            self.stats['total_ir_failed'] += 1
+                            self.stats['errors'].append(f"IR {ir_id}: crime_id {crime_id} not found in crimes table")
                         # Rollback immediately to clear aborted transaction state
                         try:
-                            self.db_conn.rollback()
+                            conn.rollback()
                         except:
                             pass
                         return False
                     raise
                 # Insert related records
                 try:
-                    self.insert_related_records(record)
+                    self.insert_related_records(record, cursor)
                 except Exception as e:
                     logger.warning(f"Failed to insert some related records for {ir_id}: {e}")
                     # Rollback to clear failed transaction state
                     try:
-                        self.db_conn.rollback()
+                        conn.rollback()
                         # Re-apply main record insert
-                        self.insert_main_record(record, is_update=False)
+                        self.insert_main_record(record, cursor, is_update=False)
                         # Try to insert related records again, but don't fail if it still fails
                         try:
-                            self.insert_related_records(record)
+                            self.insert_related_records(record, cursor)
                         except Exception as retry_error:
                             logger.warning(f"Failed to insert related records on retry for {ir_id}: {retry_error}")
                             # Continue anyway - main record is saved
@@ -1064,10 +1083,11 @@ class InterrogationReportsETL:
                         logger.error(f"Failed to rollback/re-apply for {ir_id}: {rollback_error}")
                         # Rollback to ensure clean state
                         try:
-                            self.db_conn.rollback()
+                            conn.rollback()
                         except:
                             pass
-                self.stats['total_ir_inserted'] += 1
+                with self.stats_lock:
+                    self.stats['total_ir_inserted'] += 1
                 return True
             
         except psycopg2_errors.ForeignKeyViolation as e:
@@ -1075,26 +1095,29 @@ class InterrogationReportsETL:
             error_str = str(e)
             if 'crime_id' in error_str.lower():
                 logger.warning(f"Record {ir_id}: crime_id {crime_id} foreign key violation. Crime must exist in crimes table.")
-                self.stats['total_ir_failed'] += 1
-                self.stats['errors'].append(f"IR {ir_id}: crime_id {crime_id} not found in crimes table")
+                with self.stats_lock:
+                    self.stats['total_ir_failed'] += 1
+                    self.stats['errors'].append(f"IR {ir_id}: crime_id {crime_id} not found in crimes table")
                 # Rollback immediately to clear aborted transaction state
                 try:
-                    self.db_conn.rollback()
+                    conn.rollback()
                 except:
                     pass
                 return False
             else:
                 logger.error(f"Foreign key violation for record {ir_id}: {e}")
-                self.stats['errors'].append(f"IR {ir_id}: {str(e)}")
+                with self.stats_lock:
+                    self.stats['errors'].append(f"IR {ir_id}: {str(e)}")
                 # Rollback before re-raising
                 try:
-                    self.db_conn.rollback()
+                    conn.rollback()
                 except:
                     pass
                 raise
         except Exception as e:
             logger.error(f"Error processing record {ir_id}: {e}")
-            self.stats['errors'].append(f"IR {ir_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['errors'].append(f"IR {ir_id}: {str(e)}")
             raise
     
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
@@ -1143,43 +1166,31 @@ class InterrogationReportsETL:
                 self.update_existing_records_with_new_fields(new_fields, to_date)
         
         # Process each record
-        self.stats['total_ir_fetched'] += len(records)
-        
-        for record in records:
-            # Check if transaction is in bad state and rollback if needed
-            try:
-                # Try a simple query to check transaction state
-                self.db_cursor.execute("SELECT 1")
-            except psycopg2_errors.InFailedSqlTransaction:
-                # Transaction is aborted, rollback to clear it
-                try:
-                    self.db_conn.rollback()
-                except:
-                    pass
+        with self.stats_lock:
+            self.stats['total_ir_fetched'] += len(records)
             
+        def process_record_worker(record):
             try:
-                result = self.process_ir_record(record)
-                # Commit every 10 records
-                if (self.stats['total_ir_inserted'] + self.stats['total_ir_updated']) % 10 == 0:
-                    self.db_conn.commit()
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cur:
+                        result = self.process_ir_record(record, conn, cur)
+                        if result:
+                            conn.commit()
             except Exception as e:
-                logger.error(f"Error processing IR record: {e}")
-                chunk_stats['failed'] += 1
-                self.stats['total_ir_failed'] += 1
-                try:
-                    self.db_conn.rollback()
-                except:
-                    pass
-                continue
-                
-        # Commit after processing all records in chunk
-        self.db_conn.commit()
+                logger.error(f"Worker thread error: {e}")
+                with self.stats_lock:
+                    self.stats['total_ir_failed'] += 1
         
-        # Calculate chunk statistics
-        chunk_stats['inserted'] = self.stats['total_ir_inserted'] - initial_inserted
-        chunk_stats['updated'] = self.stats['total_ir_updated'] - initial_updated
-        chunk_stats['no_change'] = self.stats['total_ir_no_change'] - initial_no_change
-        chunk_stats['failed'] = self.stats['total_ir_failed'] - initial_failed
+        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(process_record_worker, records))
+        
+        with self.stats_lock:
+            # Calculate chunk statistics
+            chunk_stats['inserted'] = self.stats['total_ir_inserted'] - initial_inserted
+            chunk_stats['updated'] = self.stats['total_ir_updated'] - initial_updated
+            chunk_stats['no_change'] = self.stats['total_ir_no_change'] - initial_no_change
+            chunk_stats['failed'] = self.stats['total_ir_failed'] - initial_failed
         
         # Log chunk statistics
         logger.info(f"✅ Completed: {from_date} to {to_date}")
@@ -1238,8 +1249,10 @@ class InterrogationReportsETL:
                 time.sleep(1)  # Be nice to the API
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {IR_TABLE}")
-            db_ir_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM {IR_TABLE}")
+                    db_ir_count = cur.fetchone()[0]
             
             # Print final statistics
             logger.info("")

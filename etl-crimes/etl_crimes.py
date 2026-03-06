@@ -10,6 +10,15 @@ import requests
 import psycopg2
 from psycopg2.extras import execute_batch
 from datetime import datetime, timedelta, timezone
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+import sys
+
+# Import PostgreSQLConnectionPool
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
+
 from tqdm import tqdm
 import logging
 import colorlog
@@ -141,8 +150,9 @@ class CrimesETL:
     """ETL Pipeline for Crimes API"""
     
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self.db_pool = None
+        self.stats_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
         self.stats = {
             'total_api_calls': 0,
             'total_crimes_fetched': 0,
@@ -243,33 +253,32 @@ class CrimesETL:
             self.ps_code_failures_log.close()
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database pool"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
+            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']}")
             return True
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
+            logger.error(f"❌ Database connection pool initialization failed: {e}")
             return False
     
     def close_db(self):
-        """Close database connection"""
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
-        logger.info("Database connection closed")
+        """Close database pool"""
+        if self.db_pool:
+            self.db_pool.close_all()
+        logger.info("Database connection pool closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s
+                """, (table_name,))
+                return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -281,49 +290,51 @@ class CrimesETL:
         - If table has data: return max(date_created, date_modified) from table
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {CRIMES_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                # Check if table has any data
+                cursor.execute(f"SELECT COUNT(*) FROM {CRIMES_TABLE}")
+                count = cursor.fetchone()[0]
+                
+                if count == 0:
+                    # New database, start from beginning
+                    logger.info("📊 Table is empty, starting from 2022-01-01")
+                    return '2022-01-01T00:00:00+05:30'
+                
+                # Table has data, get max of date_created and date_modified
+                # Only consider dates >= 2022-01-01 to avoid processing very old data
+                MIN_START_DATE = '2022-01-01T00:00:00+05:30'
+                min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                
+                cursor.execute(f"""
+                    SELECT GREATEST(
+                        COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                        COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                    ) as max_date
+                    FROM {CRIMES_TABLE}
+                """)
+                result = cursor.fetchone()
+                if result and result[0]:
+                    max_date = result[0]
+                    # Convert to IST timezone if needed
+                    if isinstance(max_date, datetime):
+                        if max_date.tzinfo is None:
+                            max_date = max_date.replace(tzinfo=IST_OFFSET)
+                        else:
+                            max_date = max_date.astimezone(IST_OFFSET)
+                        
+                        # Ensure we never go before 2022-01-01
+                        if max_date < min_start_dt:
+                            logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                            return MIN_START_DATE
+                        
+                        logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
+                        return max_date.isoformat()
+                
+                # Fallback to start date
+                logger.warning("⚠️  Could not determine max date, using 2022-01-01")
                 return '2022-01-01T00:00:00+05:30'
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-            min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {CRIMES_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
-            if result and result[0]:
-                max_date = result[0]
-                # Convert to IST timezone if needed
-                if isinstance(max_date, datetime):
-                    if max_date.tzinfo is None:
-                        max_date = max_date.replace(tzinfo=IST_OFFSET)
-                    else:
-                        max_date = max_date.astimezone(IST_OFFSET)
-                    
-                    # Ensure we never go before 2022-01-01
-                    if max_date < min_start_dt:
-                        logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
-                        return MIN_START_DATE
-                    
-                    logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
-                    return max_date.isoformat()
-            
-            # Fallback to start date
-            logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-            return '2022-01-01T00:00:00+05:30'
-            
+                
         except Exception as e:
             logger.error(f"❌ Error getting effective start date: {e}")
             logger.warning("⚠️  Using default start date: 2022-01-01")
@@ -363,7 +374,7 @@ class CrimesETL:
         
         return new_fields
     
-    def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
+    def add_column_to_table(self, column_name: str, conn, cursor, column_type: str = 'TEXT'):
         """Add a new column to the crimes table."""
         try:
             # Determine column type based on field name
@@ -377,13 +388,13 @@ class CrimesETL:
                 column_type = 'VARCHAR(255)'
             
             alter_sql = f"ALTER TABLE {CRIMES_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
+            cursor.execute(alter_sql)
+            conn.commit()
             logger.info(f"✅ Added column {column_name} ({column_type}) to {CRIMES_TABLE}")
             return True
         except Exception as e:
             logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
+            conn.rollback()
             return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
@@ -630,15 +641,15 @@ class CrimesETL:
         logger.trace(f"Transformed crime: {json.dumps(transformed, indent=2, default=str)}")
         return transformed
     
-    def crime_exists(self, crime_id: str) -> bool:
+    def crime_exists(self, crime_id: str, cursor) -> bool:
         """Check if crime already exists in database"""
         logger.trace(f"Checking if CRIME_ID exists in database: {crime_id}")
-        self.db_cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
-        exists = self.db_cursor.fetchone() is not None
+        cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
+        exists = cursor.fetchone() is not None
         logger.trace(f"CRIME_ID {crime_id} exists: {exists}")
         return exists
     
-    def get_existing_crime(self, crime_id: str) -> Optional[Dict]:
+    def get_existing_crime(self, crime_id: str, cursor) -> Optional[Dict]:
         """Get existing crime record from database"""
         query = f"""
             SELECT crime_id, ps_code, fir_num, fir_reg_num, fir_type,
@@ -648,8 +659,8 @@ class CrimesETL:
             FROM {CRIMES_TABLE}
             WHERE crime_id = %s
         """
-        self.db_cursor.execute(query, (crime_id,))
-        row = self.db_cursor.fetchone()
+        cursor.execute(query, (crime_id,))
+        row = cursor.fetchone()
         if row:
             return {
                 'crime_id': row[0],
@@ -751,7 +762,7 @@ class CrimesETL:
         
         self.duplicates_log.flush()
     
-    def insert_crime(self, crime: Dict, chunk_date_range: str = "") -> Tuple[bool, str]:
+    def insert_crime(self, crime: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
         Insert or update single crime into database with smart update logic
         Dates are always from API (never use CURRENT_TIMESTAMP)
@@ -778,7 +789,8 @@ class CrimesETL:
             reason = 'missing_crime_id'
             error_details = "Crime record missing CRIME_ID"
             logger.warning(f"⚠️  {error_details}")
-            self.stats['total_crimes_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_crimes_failed'] += 1
             self.log_failed_record(crime, reason, error_details)
             return False, reason
         
@@ -787,26 +799,28 @@ class CrimesETL:
             
             # Check if PS_CODE exists in hierarchy
             if crime.get('ps_code'):
-                self.db_cursor.execute(f"SELECT 1 FROM {HIERARCHY_TABLE} WHERE ps_code = %s", (crime['ps_code'],))
-                if not self.db_cursor.fetchone():
+                cursor.execute(f"SELECT 1 FROM {HIERARCHY_TABLE} WHERE ps_code = %s", (crime['ps_code'],))
+                if not cursor.fetchone():
                     reason = 'ps_code_not_found'
                     error_details = f"PS_CODE {crime['ps_code']} not found in hierarchy table"
                     logger.warning(f"⚠️  {error_details}, skipping crime {crime_id}")
-                    self.stats['total_crimes_failed'] += 1
+                    with self.stats_lock:
+                        self.stats['total_crimes_failed'] += 1
                     self.log_failed_record(crime, reason, error_details)
                     return False, reason
             else:
                 reason = 'missing_ps_code'
                 error_details = "Crime record missing PS_CODE"
                 logger.warning(f"⚠️  {error_details}, skipping crime {crime_id}")
-                self.stats['total_crimes_failed'] += 1
+                with self.stats_lock:
+                    self.stats['total_crimes_failed'] += 1
                 self.log_failed_record(crime, reason, error_details)
                 return False, reason
             
             # Check if crime already exists
-            if self.crime_exists(crime_id):
+            if self.crime_exists(crime_id, cursor):
                 # Get existing record to compare
-                existing = self.get_existing_crime(crime_id)
+                existing = self.get_existing_crime(crime_id, cursor)
                 if not existing:
                     logger.warning(f"⚠️  CRIME_ID {crime_id} exists check returned True but fetch returned None")
                     # Fall back to insert
@@ -894,16 +908,24 @@ class CrimesETL:
                             WHERE crime_id = %s
                         """
                         update_values.append(crime_id)
-                        self.db_cursor.execute(update_query, tuple(update_values))
-                        self.stats['total_crimes_updated'] += 1
+                        cursor.execute("SAVEPOINT smart_upsert")
+                        try:
+                            cursor.execute(update_query, tuple(update_values))
+                            cursor.execute("RELEASE SAVEPOINT smart_upsert")
+                        except Exception as inner_e:
+                            cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert")
+                            raise inner_e
+                        with self.stats_lock:
+                            self.stats['total_crimes_updated'] += 1
                         logger.debug(f"Updated crime: {crime_id} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
-                        self.db_conn.commit()
+                        conn.commit()
                         logger.trace(f"Transaction committed for updated CRIME_ID: {crime_id}")
                         return True, 'updated'
                     else:
                         # No changes needed
-                        self.stats['total_crimes_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_crimes_no_change'] += 1
                         logger.trace(f"No changes needed for CRIME_ID: {crime_id} (all fields match or preserved)")
                         return True, 'no_change'
                 else:
@@ -923,7 +945,9 @@ class CrimesETL:
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
-                self.db_cursor.execute(insert_query, (
+                cursor.execute("SAVEPOINT smart_upsert")
+                try:
+                    cursor.execute(insert_query, (
                     crime['crime_id'],
                     crime['ps_code'],
                     crime['fir_num'],
@@ -942,28 +966,36 @@ class CrimesETL:
                     crime['date_created'],  # From API (or NULL)
                     crime['date_modified']  # From API (or NULL)
                 ))
-                self.stats['total_crimes_inserted'] += 1
+                    cursor.execute("RELEASE SAVEPOINT smart_upsert")
+                except Exception as inner_e:
+                    cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert")
+                    raise inner_e
+                with self.stats_lock:
+                    self.stats['total_crimes_inserted'] += 1
                 logger.debug(f"Inserted crime: {crime_id}")
                 logger.trace(f"Insert query executed for CRIME_ID: {crime_id}")
-                self.db_conn.commit()
+                conn.commit()
                 logger.trace(f"Transaction committed for inserted CRIME_ID: {crime_id}")
                 return True, 'inserted'
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'integrity_error'
             error_details = str(e)
             logger.warning(f"⚠️  Integrity error for crime {crime_id}: {e}")
-            self.stats['total_crimes_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_crimes_failed'] += 1
             self.log_failed_record(crime, reason, error_details)
             return False, reason
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'error'
             error_details = str(e)
             logger.error(f"❌ Error inserting crime {crime_id}: {e}")
-            self.stats['total_crimes_failed'] += 1
-            self.stats['errors'].append(f"Crime {crime_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['total_crimes_failed'] += 1
+            with self.stats_lock:
+                self.stats['errors'].append(f"Crime {crime_id}: {str(e)}")
             self.log_failed_record(crime, reason, error_details)
             return False, reason
     
@@ -985,22 +1017,26 @@ class CrimesETL:
             self.log_db_chunk(from_date, to_date, 0, [], [], [], [], [], error="No crimes in API response")
             return
         
-        # Check for schema evolution if we got data
-        if table_columns is not None and len(crimes_raw) > 0:
-            # Check for new fields in first record
-            new_fields = self.detect_new_fields(crimes_raw[0], table_columns)
-            if new_fields:
-                logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
-                # Add new columns to table
-                for api_field, db_column in new_fields.items():
-                    if self.add_column_to_table(db_column):
-                        # Update table_columns set
-                        table_columns.add(db_column)
-                # Update existing records from start_date to current chunk end_date
-                self.update_existing_records_with_new_fields(new_fields, to_date)
-        
-        # Transform and insert each crime
-        self.stats['total_crimes_fetched'] += len(crimes_raw)
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            # Check for schema evolution if we got data
+            if table_columns is not None and len(crimes_raw) > 0:
+                with self.schema_lock:
+                    # Check for new fields in first record
+                    new_fields = self.detect_new_fields(crimes_raw[0], table_columns)
+                    if new_fields:
+                        logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
+                        # Add new columns to table
+                        for api_field, db_column in new_fields.items():
+                            if self.add_column_to_table(db_column, conn, cursor):
+                                # Update table_columns set
+                                table_columns.add(db_column)
+                        # Update existing records from start_date to current chunk end_date
+                        self.update_existing_records_with_new_fields(new_fields, to_date)
+            
+            # Transform and insert each crime
+            with self.stats_lock:
+                self.stats['total_crimes_fetched'] += len(crimes_raw)
         logger.trace(f"Processing {len(crimes_raw)} crimes for chunk {chunk_range}")
         
         # Track operations for this chunk
@@ -1024,7 +1060,8 @@ class CrimesETL:
             
             if not crime_id:
                 logger.warning(f"⚠️  Crime missing CRIME_ID, skipping")
-                self.stats['total_crimes_failed'] += 1
+                with self.stats_lock:
+                    self.stats['total_crimes_failed'] += 1
                 failed_ids.append(None)
                 reason = 'missing_crime_id'
                 if reason not in failed_reasons:
@@ -1046,7 +1083,8 @@ class CrimesETL:
                     'first_seen_in': seen_crime_ids[crime_id],
                     'duplicate_in': chunk_range
                 })
-                self.stats['total_duplicates'] += 1
+                with self.stats_lock:
+                    self.stats['total_duplicates'] += 1
                 logger.info(f"⚠️  Duplicate CRIME_ID {crime_id} found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
                 logger.trace(f"Duplicate details - First seen: {seen_crime_ids[crime_id]}, Current occurrence: {occurrence_count}")
             else:
@@ -1057,7 +1095,7 @@ class CrimesETL:
             # IMPORTANT: Process ALL records, even duplicates
             # If same crime_id appears multiple times, each occurrence might have updated data
             # The smart update logic will handle whether to actually update or not
-            success, operation = self.insert_crime(crime, chunk_range)
+            success, operation = self.insert_crime(crime, conn, cursor, chunk_range)
             logger.trace(f"Operation result for CRIME_ID {crime_id}: success={success}, operation={operation}")
             if success:
                 if operation == 'inserted':
@@ -1088,6 +1126,8 @@ class CrimesETL:
                         'ps_code': crime.get('ps_code'),
                         'fir_num': crime.get('fir_num')
                     })
+            
+            conn.commit()
         
         # Log duplicates for this chunk (for reporting, but they were all processed)
         if duplicates_in_chunk:
@@ -1279,15 +1319,32 @@ class CrimesETL:
             logger.info(f"ℹ️  ETL Server Timezone: UTC")
             logger.info("")
             
-            # Process each date range with progress bar
-            for from_date, to_date in tqdm(date_ranges, desc="Processing date ranges", unit="range"):
-                # Process the chunk (will check for schema evolution and process data)
-                self.process_date_range(from_date, to_date, table_columns)
-                time.sleep(1)  # Be nice to the API
+            # Process each date range with ThreadPoolExecutor
+            max_workers = ETL_CONFIG.get('max_workers', 5)
+            logger.info(f"🚀 Starting parallel processing with {max_workers} workers")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(self.process_date_range, from_date, to_date, table_columns): (from_date, to_date)
+                    for from_date, to_date in date_ranges
+                }
+                
+                # Setup progress bar
+                with tqdm(total=len(date_ranges), desc="Processing date ranges", unit="range") as pbar:
+                    for future in as_completed(futures):
+                        from_date, to_date = futures[future]
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logger.error(f"❌ Worker error for {from_date} to {to_date}: {e}")
+                        finally:
+                            pbar.update(1)
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {CRIMES_TABLE}")
-            db_crimes_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT COUNT(*) FROM {CRIMES_TABLE}")
+                db_crimes_count = cursor.fetchone()[0]
             
             # Store for summary
             self.stats['db_total_count'] = db_crimes_count

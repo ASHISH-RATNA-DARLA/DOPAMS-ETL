@@ -9,8 +9,8 @@ Pipeline (2 steps — no LLM required):
       If a match is found, any missing fields among permanent_district,
       permanent_state_ut, and permanent_country are filled from the
       geo_reference row (country = "India").
-  2.  FOREIGN FALLBACK — If pg_trgm finds no Indian match, check
-      ref.txt (foreign-only reference list).
+  2.  FOREIGN FALLBACK — If pg_trgm finds no Indian match, fuzzy-match
+      against the geo_countries table (foreign countries/states).
 
 Rules per record:
   - District, state & country all set → skip
@@ -19,8 +19,8 @@ Rules per record:
 
 Data sources:
   - READ:  persons.permanent_* columns (already structured/mapped)
-  - MATCH: geo_reference table (pg_trgm GIN indexes)
-  - REF:   ref.txt  (foreign countries only — India removed)
+  - MATCH: geo_reference table (pg_trgm GIN indexes) for Indian locations
+  - MATCH: geo_countries table (pg_trgm GIN indexes) for foreign locations
   - WRITE: persons.permanent_district, permanent_state_ut, permanent_country
 """
 
@@ -29,11 +29,17 @@ import logging
 import os
 import sys
 import time
+import re
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import psycopg
+import psycopg2
 from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -58,7 +64,6 @@ DB_DSN = os.environ.get(
     ])
 )
 
-REF_DATA_FILE = os.environ.get("REF_DATA_FILE", "ref.txt")
 DEFAULT_TABLE_NAME = os.environ.get("TABLE_NAME", "persons")
 DEFAULT_ID_COLUMN = os.environ.get("ID_COLUMN", "person_id")
 
@@ -67,11 +72,11 @@ TRGM_THRESHOLD_STATE    = float(os.environ.get("TRGM_THRESHOLD_STATE",    "0.90"
 TRGM_THRESHOLD_DISTRICT = float(os.environ.get("TRGM_THRESHOLD_DISTRICT", "0.90"))  # Districts are finite, high confidence needed
 TRGM_THRESHOLD_MANDAL   = float(os.environ.get("TRGM_THRESHOLD_MANDAL",   "0.70"))  # Mandals have spelling variations
 TRGM_THRESHOLD_VILLAGE  = float(os.environ.get("TRGM_THRESHOLD_VILLAGE",  "0.65"))  # Villages have high noise, acceptable if district/mandal anchor
+TRGM_THRESHOLD_FOREIGN  = float(os.environ.get("TRGM_THRESHOLD_FOREIGN",  "0.50"))  # Foreign names need lower threshold for transliteration variations
 
 logger.info(f"Database: {os.environ.get('DB_NAME', 'dopamas')}@{os.environ.get('DB_HOST', 'localhost')}")
 logger.info(f"Default Table: {DEFAULT_TABLE_NAME}, ID Column: {DEFAULT_ID_COLUMN}")
-logger.info(f"Reference Data File (foreign): {REF_DATA_FILE}")
-logger.info(f"pg_trgm thresholds: state={TRGM_THRESHOLD_STATE}, district={TRGM_THRESHOLD_DISTRICT}, mandal={TRGM_THRESHOLD_MANDAL}, village={TRGM_THRESHOLD_VILLAGE}")
+logger.info(f"pg_trgm thresholds: state={TRGM_THRESHOLD_STATE}, district={TRGM_THRESHOLD_DISTRICT}, mandal={TRGM_THRESHOLD_MANDAL}, village={TRGM_THRESHOLD_VILLAGE}, foreign={TRGM_THRESHOLD_FOREIGN}")
 
 
 # ===================================================================
@@ -132,6 +137,36 @@ class AddressRecord:
             ]
         )
 
+    def get_extended_candidates(self) -> List[str]:
+        """Extract potential location tokens from ALL address fields (not just village/mandal)."""
+        all_fields = [
+            self.permanent_ward_colony, self.permanent_landmark_milestone,
+            self.permanent_street_road_no, self.permanent_house_no,
+            self.permanent_locality_village, self.permanent_area_mandal,
+        ]
+        tokens = []
+        for field in all_fields:
+            if field and field.strip():
+                tokens.extend(_extract_location_tokens(field))
+        seen = set()
+        result = []
+        for t in tokens:
+            norm = t.lower()
+            if norm not in seen:
+                seen.add(norm)
+                result.append(t)
+        return result
+
+    def get_full_address_text(self) -> str:
+        """Return all address field values concatenated."""
+        parts = [
+            self.permanent_house_no, self.permanent_street_road_no,
+            self.permanent_ward_colony, self.permanent_landmark_milestone,
+            self.permanent_locality_village, self.permanent_area_mandal,
+            self.permanent_district, self.permanent_state_ut,
+        ]
+        return " ".join(p.strip() for p in parts if p and p.strip())
+
 
 @dataclass
 class GeoMatch:
@@ -171,7 +206,8 @@ def trgm_match_state(
         LIMIT 1;
     """
     try:
-        with psycopg.connect(DB_DSN) as conn:
+        pool = PostgreSQLConnectionPool()
+        with pool.get_connection_context() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
                 cur.execute(query, {"loc": state.strip()})
@@ -207,7 +243,8 @@ def trgm_match_district(
         LIMIT 1;
     """
     try:
-        with psycopg.connect(DB_DSN) as conn:
+        pool = PostgreSQLConnectionPool()
+        with pool.get_connection_context() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
                 cur.execute(query, {"loc": district.strip()})
@@ -280,7 +317,8 @@ def trgm_match_village_mandal(
         """
 
     try:
-        with psycopg.connect(DB_DSN) as conn:
+        pool = PostgreSQLConnectionPool()
+        with pool.get_connection_context() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SET pg_trgm.similarity_threshold = {pg_threshold};")
 
@@ -332,81 +370,251 @@ def trgm_match_village_mandal(
 
 
 # ===================================================================
-#  STEP 2 — FOREIGN REFERENCE FALLBACK  (ref.txt)
+#  STEP 2 — FOREIGN MATCHING against geo_countries (pg_trgm)
 # ===================================================================
-
-def parse_foreign_reference(file_path: str) -> Dict[str, Dict[str, List[str]]]:
-    """Parse ref.txt → { country: { states: [...], cities: [...] } }"""
-    ref: Dict[str, Dict[str, List[str]]] = {}
-    current_country: Optional[str] = None
-
-    if not os.path.exists(file_path):
-        logger.warning(f"Reference file not found: {file_path}")
-        return ref
-
-    try:
-        with open(file_path, "r", encoding="utf-8") as fh:
-            for raw_line in fh:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "(country):" in line:
-                    current_country = line.split("(country):")[0].strip()
-                    ref[current_country] = {"states": [], "cities": []}
-                elif current_country:
-                    entry = line.split("(")[0].strip() if "(" in line else line
-                    is_city = "(city)" in line.lower()
-                    if is_city:
-                        ref[current_country]["cities"].append(entry)
-                    else:
-                        ref[current_country]["states"].append(entry)
-        logger.info(f"Loaded foreign ref data: {len(ref)} countries")
-    except Exception as e:
-        logger.error(f"Failed to parse ref.txt: {e}")
-    return ref
-
 
 def _norm(text: str) -> str:
     return " ".join((text or "").lower().split())
 
 
-def lookup_foreign(
-    extracted_locations: List[str],
-    existing_state: Optional[str],
-    ref_data: Dict[str, Dict[str, List[str]]],
-) -> Optional[Tuple[Optional[str], str]]:
+def _extract_location_tokens(text: str) -> List[str]:
+    """Extract potential location names from a free-text address field."""
+    if not text or not text.strip():
+        return []
+
+    tokens = []
+    text = text.strip()
+
+    # Pattern: "X Dist" or "X District"
+    for m in re.finditer(r'([\w][\w\s]*?)\s+Dist(?:rict|\.?)(?:\s|$|,)', text, re.IGNORECASE):
+        name = m.group(1).strip()
+        if name and len(name) >= 3:
+            tokens.append(name)
+
+    # Pattern: "X (V)" → village, "X (M)" → mandal
+    for m in re.finditer(r'([\w][\w\s]*?)\s*\([VMvm]\)', text):
+        name = m.group(1).strip()
+        if name and len(name) >= 3:
+            tokens.append(name)
+
+    # Split by comma and try each part
+    for part in re.split(r'[,;]', text):
+        part = part.strip()
+        if not part:
+            continue
+        # Skip obvious non-location patterns
+        if re.match(
+            r'^(H\.?\s*NO|House\s*No|Street|Road\s*no\.?\s*\d|Plot|Flat|Door\s*No'
+            r'|S/?O|D/?O|W/?O|C/?O|Near|Opp|Behind|Adjacent)',
+            part, re.IGNORECASE,
+        ):
+            continue
+        if re.match(r'^[\d\.\-/\s]+$', part):  # Pure numbers
+            continue
+        if len(part) < 3:
+            continue
+        # Clean up markers
+        part = re.sub(r'\s*\([VMvm]\)\s*', ' ', part).strip()
+        part = re.sub(r'\s+Dist(?:rict|\.?)$', '', part, flags=re.IGNORECASE).strip()
+        if part and len(part) >= 3:
+            tokens.append(part)
+
+    # Deduplicate preserving order
+    seen = set()
+    result = []
+    for t in tokens:
+        t_clean = t.strip()
+        t_norm = t_clean.lower()
+        if t_norm not in seen and len(t_clean) >= 3:
+            seen.add(t_norm)
+            result.append(t_clean)
+    return result
+
+
+@dataclass
+class ForeignMatch:
+    """Result of a geo_countries pg_trgm lookup."""
+    country: Optional[str] = None
+    state: Optional[str] = None
+    similarity: float = 0.0
+
+
+def trgm_match_foreign_country(
+    candidates: List[str],
+    threshold: float = TRGM_THRESHOLD_FOREIGN,
+) -> Optional[ForeignMatch]:
     """
-    Try to match locations or existing_state against foreign ref data.
-    Returns (state_or_None, country) or None.
+    Fuzzy-match candidate strings against geo_countries.country_name.
+    Returns the best match (country + associated state if the candidate
+    also matches a state_name row for that country).
     """
-    if not ref_data:
+    if not candidates:
         return None
 
-    # Check existing state against foreign refs
-    if existing_state:
-        norm_st = _norm(existing_state)
-        for country, data in ref_data.items():
-            for s in data["states"]:
-                if _norm(s) == norm_st or _norm(s) in norm_st or norm_st in _norm(s):
-                    if len(_norm(s)) > 3 and len(norm_st) > 3:
-                        return (existing_state, country)
-            for c in data["cities"]:
-                if _norm(c) == norm_st:
-                    return (existing_state, country)
+    best: Optional[ForeignMatch] = None
 
-    # Check extracted locations
-    for loc in extracted_locations:
-        norm_loc = _norm(loc)
-        if not norm_loc:
-            continue
-        for country, data in ref_data.items():
-            for s in data["states"]:
-                if _norm(s) == norm_loc or _norm(s) in norm_loc or norm_loc in _norm(s):
-                    if len(_norm(s)) > 3 and len(norm_loc) > 3:
-                        return (s, country)
-            for c in data["cities"]:
-                if _norm(c) == norm_loc:
-                    return (None, country)
+    # Match country_name directly
+    query_country = """
+        SELECT DISTINCT country_name,
+               similarity(country_name, %(loc)s) AS sim
+        FROM geo_countries
+        WHERE country_name %% %(loc)s
+        ORDER BY sim DESC
+        LIMIT 1;
+    """
+
+    try:
+        pool = PostgreSQLConnectionPool()
+        with pool.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
+                for loc in candidates:
+                    loc_clean = loc.strip()
+                    if not loc_clean or len(loc_clean) < 3:
+                        continue
+                    cur.execute(query_country, {"loc": loc_clean})
+                    row = cur.fetchone()
+                    if row and float(row[1]) >= threshold:
+                        match = ForeignMatch(
+                            country=row[0], similarity=float(row[1]),
+                        )
+                        if best is None or match.similarity > best.similarity:
+                            best = match
+                            logger.info(
+                                f"    pg_trgm foreign country match: '{loc_clean}' → "
+                                f"country={match.country}, sim={match.similarity:.3f}"
+                            )
+    except Exception as e:
+        logger.error(f"pg_trgm foreign country lookup failed: {e}", exc_info=True)
+
+    return best
+
+
+def trgm_match_foreign_state(
+    candidates: List[str],
+    within_country: Optional[str] = None,
+    threshold: float = TRGM_THRESHOLD_FOREIGN,
+) -> Optional[ForeignMatch]:
+    """
+    Fuzzy-match candidate strings against geo_countries.state_name.
+    If within_country is provided, scopes to that country.
+    Returns (state, country) or None.
+    """
+    if not candidates:
+        return None
+
+    best: Optional[ForeignMatch] = None
+
+    if within_country:
+        query = """
+            SELECT state_name, country_name,
+                   similarity(state_name, %(loc)s) AS sim
+            FROM geo_countries
+            WHERE country_name = %(country)s
+              AND state_name %% %(loc)s
+            ORDER BY sim DESC
+            LIMIT 1;
+        """
+    else:
+        query = """
+            SELECT state_name, country_name,
+                   similarity(state_name, %(loc)s) AS sim
+            FROM geo_countries
+            WHERE state_name %% %(loc)s
+            ORDER BY sim DESC
+            LIMIT 1;
+        """
+
+    try:
+        pool = PostgreSQLConnectionPool()
+        with pool.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
+                for loc in candidates:
+                    loc_clean = loc.strip()
+                    if not loc_clean or len(loc_clean) < 3:
+                        continue
+                    params = {"loc": loc_clean}
+                    if within_country:
+                        params["country"] = within_country
+                    cur.execute(query, params)
+                    row = cur.fetchone()
+                    if row and float(row[2]) >= threshold:
+                        match = ForeignMatch(
+                            state=row[0], country=row[1],
+                            similarity=float(row[2]),
+                        )
+                        if best is None or match.similarity > best.similarity:
+                            best = match
+                            logger.info(
+                                f"    pg_trgm foreign state match: '{loc_clean}' → "
+                                f"state={match.state}, country={match.country}, "
+                                f"sim={match.similarity:.3f}"
+                            )
+    except Exception as e:
+        logger.error(f"pg_trgm foreign state lookup failed: {e}", exc_info=True)
+
+    return best
+
+
+def trgm_match_foreign_full(
+    candidates: List[str],
+    full_address_text: str,
+    existing_state: Optional[str] = None,
+    threshold: float = TRGM_THRESHOLD_FOREIGN,
+) -> Optional[Tuple[Optional[str], str]]:
+    """
+    Combined foreign lookup: try country name first (both from candidates and
+    full address text), then state/city matching. Returns (state, country) or None.
+    """
+    # 1. Try matching existing state against geo_countries.state_name
+    if existing_state and existing_state.strip():
+        fm = trgm_match_foreign_state([existing_state], threshold=threshold)
+        if fm:
+            return (existing_state, fm.country)
+
+    # 2. Direct country name match from candidates
+    fm_country = trgm_match_foreign_country(candidates, threshold=threshold)
+    if fm_country:
+        # Found country — try to find state within that country
+        fm_state = trgm_match_foreign_state(
+            candidates, within_country=fm_country.country, threshold=threshold
+        )
+        state_out = fm_state.state if fm_state else None
+        return (state_out, fm_country.country)
+
+    # 3. Try country name from full address text (word-by-word)
+    if full_address_text:
+        words = re.split(r'[,;\s]+', full_address_text)
+        # Try multi-word combinations (2-3 words) for countries like "Saudi Arabia"
+        text_candidates = []
+        for i in range(len(words)):
+            w = words[i].strip()
+            if w and len(w) >= 3:
+                text_candidates.append(w)
+            if i + 1 < len(words):
+                pair = f"{words[i]} {words[i+1]}".strip()
+                if len(pair) >= 5:
+                    text_candidates.append(pair)
+            if i + 2 < len(words):
+                triple = f"{words[i]} {words[i+1]} {words[i+2]}".strip()
+                if len(triple) >= 5:
+                    text_candidates.append(triple)
+
+        fm_country = trgm_match_foreign_country(text_candidates, threshold=threshold)
+        if fm_country:
+            fm_state = trgm_match_foreign_state(
+                candidates + text_candidates,
+                within_country=fm_country.country, threshold=threshold,
+            )
+            state_out = fm_state.state if fm_state else None
+            return (state_out, fm_country.country)
+
+    # 4. Try state/city match (no country anchor) — broader search
+    fm_state = trgm_match_foreign_state(candidates, threshold=threshold)
+    if fm_state:
+        return (fm_state.state, fm_state.country)
+
     return None
 
 
@@ -448,7 +656,8 @@ def fetch_records_needing_update(
     else:
         logger.info(f"Fetching ALL records from {table_name}")
 
-    with psycopg.connect(DB_DSN) as conn:
+    pool = PostgreSQLConnectionPool()
+    with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
@@ -513,7 +722,8 @@ def update_location(
     params.append(record_id)
     sql = f"UPDATE {table_name} SET {', '.join(updates)} WHERE {id_column} = %s"
 
-    with psycopg.connect(DB_DSN) as conn:
+    pool = PostgreSQLConnectionPool()
+    with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
         conn.commit()
@@ -531,14 +741,11 @@ def process_records(
     dry_run: bool = False,
 ) -> None:
     logger.info("=" * 80)
-    logger.info("Address District/State/Country Pipeline  (pg_trgm + ref.txt)")
+    logger.info("Address District/State/Country Pipeline  (pg_trgm: geo_reference + geo_countries)")
     logger.info("=" * 80)
     logger.info(f"Table: {table_name}  |  ID: {id_column}  |  Limit: {limit or 'ALL'}")
     logger.info(f"Dry run: {dry_run}")
     logger.info("=" * 80)
-
-    # Load foreign reference
-    ref_data = parse_foreign_reference(REF_DATA_FILE)
 
     # Fetch records
     records = fetch_records_needing_update(table_name, id_column, limit)
@@ -547,9 +754,11 @@ def process_records(
         return
 
     total = len(records)
+    
+    stats_lock = threading.Lock()
     stats = {"ok": 0, "fail": 0, "skip": 0, "geo": 0, "ref": 0, "unresolved": 0, "null": 0}
 
-    for idx, rec in enumerate(records, 1):
+    def process_single_record(idx, rec):
         logger.info("-" * 80)
         logger.info(f"[{idx}/{total}] ID={rec.record_id}  district={rec.permanent_district}  state={rec.permanent_state_ut}  country={rec.permanent_country}")
         addr_text = rec.get_address_components()
@@ -558,8 +767,9 @@ def process_records(
         # --- already complete ---
         if rec.is_complete():
             logger.info("  Skip: district, state & country already set")
-            stats["skip"] += 1
-            continue
+            with stats_lock:
+                stats["skip"] += 1
+            return
 
         try:
             district_out: Optional[str] = None
@@ -571,7 +781,8 @@ def process_records(
             if not rec.has_any_address():
                 logger.info("  No address info → setting district, state & country to NULL")
                 district_out, state_out, country_out, source = None, None, None, "null"
-                stats["null"] += 1
+                with stats_lock:
+                    stats["null"] += 1
 
             else:
                 geo: Optional[GeoMatch] = None
@@ -584,7 +795,8 @@ def process_records(
                         state_out = rec.permanent_state_ut
                         country_out = "India"
                         source = "geo"
-                        stats["geo"] += 1
+                        with stats_lock:
+                            stats["geo"] += 1
 
                 # --- Step 1b: District matching (high trust) ---
                 if not geo and not rec.needs_district():
@@ -595,9 +807,32 @@ def process_records(
                         state_out = geo.state
                         country_out = "India"
                         source = "geo"
-                        stats["geo"] += 1
+                        with stats_lock:
+                            stats["geo"] += 1
 
-                # --- Step 1c: Village/Mandal matching (only if above didn't resolve) ---
+                # --- Step 1b2: District unknown → extract from address text ---
+                if not geo and rec.needs_district():
+                    ext_candidates = rec.get_extended_candidates()
+                    if ext_candidates:
+                        known_state = rec.permanent_state_ut.strip() if not rec.needs_state() else None
+                        logger.info(f"  Step 1b2: trying district from address text {ext_candidates[:5]} …")
+                        for cand in ext_candidates:
+                            geo = trgm_match_district(cand)
+                            if geo:
+                                # If state is known, verify the match is in same state
+                                if known_state and geo.state and _norm(geo.state) != _norm(known_state):
+                                    logger.info(f"    District '{cand}' → {geo.district}/{geo.state}, state mismatch with {known_state}")
+                                    geo = None
+                                    continue
+                                district_out = geo.district
+                                state_out = geo.state or known_state
+                                country_out = "India"
+                                source = "geo"
+                                with stats_lock:
+                                    stats["geo"] += 1
+                                break
+
+                # --- Step 1c: Village/Mandal matching (expanded candidates) ---
                 if not geo:
                     vm_candidates = [
                         rec.permanent_locality_village,
@@ -609,10 +844,14 @@ def process_records(
                         )
                     )
 
+                    # If primary candidates are empty, use extended candidates from all fields
+                    if not vm_candidates:
+                        vm_candidates = rec.get_extended_candidates()
+
                     if vm_candidates:
                         # If district is known, scope the search to that district
                         scope_district = rec.permanent_district.strip() if not rec.needs_district() else None
-                        logger.info(f"  Step 1b: matching village/mandal {vm_candidates}"
+                        logger.info(f"  Step 1c: matching village/mandal {vm_candidates}"
                                     f"{' within ' + scope_district if scope_district else ''} …")
                         geo = trgm_match_village_mandal(
                             vm_candidates,
@@ -623,37 +862,48 @@ def process_records(
                             state_out = geo.state
                             country_out = "India"
                             source = "geo"
-                            stats["geo"] += 1
+                            with stats_lock:
+                                stats["geo"] += 1
 
-                # --- Step 2: foreign ref.txt fallback ---
+                # --- Step 2: foreign geo_countries pg_trgm fallback ---
                 if source == "none":
-                    all_candidates = list(
-                        dict.fromkeys(
-                            [c.strip() for c in [
-                                rec.permanent_locality_village,
-                                rec.permanent_area_mandal,
-                                rec.permanent_district,
-                            ] if c and c.strip()]
+                    # Use extended candidates from ALL address fields
+                    all_candidates = rec.get_extended_candidates()
+                    if not all_candidates:
+                        all_candidates = list(
+                            dict.fromkeys(
+                                [c.strip() for c in [
+                                    rec.permanent_locality_village,
+                                    rec.permanent_area_mandal,
+                                    rec.permanent_district,
+                                ] if c and c.strip()]
+                            )
                         )
+                    full_text = rec.get_full_address_text()
+                    logger.info(f"  Step 2: foreign geo_countries lookup (candidates={all_candidates[:5]}) …")
+                    foreign = trgm_match_foreign_full(
+                        all_candidates, full_text,
+                        existing_state=rec.permanent_state_ut,
                     )
-                    logger.info("  Step 2: foreign ref lookup …")
-                    foreign = lookup_foreign(all_candidates, rec.permanent_state_ut, ref_data)
                     if foreign:
                         state_out, country_out = foreign
                         source = "ref"
-                        stats["ref"] += 1
-                        logger.info(f"    Matched via ref.txt: state={state_out}, country={country_out}")
+                        with stats_lock:
+                            stats["ref"] += 1
+                        logger.info(f"    Matched via geo_countries: state={state_out}, country={country_out}")
                     else:
-                        logger.warning(f"  Unresolved: no geo or ref match")
-                        stats["unresolved"] += 1
+                        logger.warning(f"  Unresolved: no geo or foreign match")
+                        with stats_lock:
+                            stats["unresolved"] += 1
 
             # --- WRITE ---
             logger.info(f"  Result ({source}): district={district_out}, state={state_out}, country={country_out}")
 
             if dry_run:
                 logger.info("  [DRY RUN] — not writing")
-                stats["ok"] += 1
-                continue
+                with stats_lock:
+                    stats["ok"] += 1
+                return
 
             # Only write fields that are currently missing
             write_district = rec.needs_district() and (district_out is not None or not rec.has_any_address())
@@ -670,14 +920,27 @@ def process_records(
                     update_state_field=write_state,
                     update_country_field=write_country,
                 )
-                stats["ok"] += 1
+                with stats_lock:
+                    stats["ok"] += 1
             else:
                 logger.warning(f"  No updates applicable for ID={rec.record_id}")
-                stats["skip"] += 1
+                with stats_lock:
+                    stats["skip"] += 1
 
         except Exception as e:
             logger.error(f"  FAILED ID={rec.record_id}: {e}", exc_info=True)
-            stats["fail"] += 1
+            with stats_lock:
+                stats["fail"] += 1
+
+    pool = PostgreSQLConnectionPool() # ensure initialized
+    max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_single_record, idx, rec): rec for idx, rec in enumerate(records, 1)}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Thread execution failed: {e}")
 
     # --- Summary ---
     logger.info("=" * 80)
@@ -687,7 +950,7 @@ def process_records(
     logger.info(f"  Skipped:       {stats['skip']}")
     logger.info(f"  Failed:        {stats['fail']}")
     logger.info(f"  via geo_ref:   {stats['geo']}")
-    logger.info(f"  via ref.txt:   {stats['ref']}")
+    logger.info(f"  via geo_countries: {stats['ref']}")
     logger.info(f"  unresolved:    {stats['unresolved']}")
     logger.info(f"  set to NULL:   {stats['null']}")
     logger.info("=" * 80)

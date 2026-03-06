@@ -15,8 +15,12 @@ import logging
 import colorlog
 from typing import List, Dict, Optional, Tuple, Set
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
+from db_pooling import PostgreSQLConnectionPool
 
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
@@ -154,6 +158,27 @@ class MoSeizureETL:
     def __init__(self):
         self.db_conn = None
         self.db_cursor = None
+        
+        # Thread safety locks
+        self.stats_lock = threading.Lock()
+        self.log_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
+        
+        # Initialize connection pool
+        max_workers = int(os.environ.get('MAX_WORKERS', (os.cpu_count() or 1) * 4))
+        self.max_workers = min(32, max_workers)  # Cap at 32 concurrent connections max
+        
+        try:
+            self.db_pool = PostgreSQLConnectionPool(
+                minconn=1,
+                maxconn=self.max_workers + 2,
+                **DB_CONFIG
+            )
+            logger.info(f"✅ Created connection pool with max {self.max_workers + 2} connections")
+        except Exception as e:
+            logger.error(f"❌ Failed to create connection pool: {e}")
+            raise
+            
         self.stats = {
             'total_api_calls': 0,
             'total_seizures_fetched': 0,
@@ -253,9 +278,17 @@ class MoSeizureETL:
             self.duplicates_log.close()
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database (creates connection pool if not exists)"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
+            if not hasattr(self, 'db_pool'):
+                self.db_pool = PostgreSQLConnectionPool(
+                    minconn=1,
+                    maxconn=self.max_workers + 2,
+                    **DB_CONFIG
+                )
+            
+            # Keep a persistent connection for schema/single-thread ops
+            self.db_conn = self.db_pool.get_connection()
             self.db_cursor = self.db_conn.cursor()
             logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
             return True
@@ -264,22 +297,26 @@ class MoSeizureETL:
             return False
     
     def close_db(self):
-        """Close database connection"""
-        if self.db_cursor:
+        """Close database connection and pool"""
+        if hasattr(self, 'db_cursor') and self.db_cursor:
             self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
+        if hasattr(self, 'db_conn') and self.db_conn:
+            self.db_pool.release_connection(self.db_conn)
+        if hasattr(self, 'db_pool') and self.db_pool:
+            self.db_pool.close_all()
         logger.info("Database connection closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = %s
+                    """, (table_name,))
+                    return {row[0] for row in cur.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -291,28 +328,30 @@ class MoSeizureETL:
         - If table has data: return max(date_created, date_modified) from table
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {MO_SEIZURES_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
-                return '2022-01-01T00:00:00+05:30'
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-            min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {MO_SEIZURES_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    # Check if table has any data
+                    cur.execute(f"SELECT COUNT(*) FROM {MO_SEIZURES_TABLE}")
+                    count = cur.fetchone()[0]
+                    
+                    if count == 0:
+                        # New database, start from beginning
+                        logger.info("📊 Table is empty, starting from 2022-01-01")
+                        return '2022-01-01T00:00:00+05:30'
+                    
+                    # Table has data, get max of date_created and date_modified
+                    # Only consider dates >= 2022-01-01 to avoid processing very old data
+                    MIN_START_DATE = '2022-01-01T00:00:00+05:30'
+                    min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                    
+                    cur.execute(f"""
+                        SELECT GREATEST(
+                            COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                            COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                        ) as max_date
+                        FROM {MO_SEIZURES_TABLE}
+                    """)
+                    result = cur.fetchone()
             if result and result[0]:
                 max_date = result[0]
                 # Convert to IST timezone if needed
@@ -383,32 +422,34 @@ class MoSeizureETL:
     
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the mo_seizures table."""
-        try:
-            # Determine column type based on field name
-            if column_name == 'seized_at':
-                column_type = 'TIMESTAMPTZ'
-            elif column_name in ('mo_seizure_id', 'crime_id', 'seq_no', 'mo_id'):
-                column_type = 'VARCHAR(50)'  # Matches primary key and foreign key types
-            elif column_name == 'type':
-                column_type = 'VARCHAR(100)'
-            elif 'date' in column_name.lower() or column_name in ('date_created', 'date_modified'):
-                column_type = 'TIMESTAMPTZ'
-            elif column_name.startswith('pos_') or column_name in ('description', 'sub_type', 'seized_from', 'seized_by', 'strength_of_evidence'):
-                column_type = 'TEXT'
-            elif column_name.startswith('mo_media_'):
-                column_type = 'TEXT'
-            else:
-                column_type = 'TEXT'
-            
-            alter_sql = f"ALTER TABLE {MO_SEIZURES_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
-            logger.info(f"✅ Added column {column_name} ({column_type}) to {MO_SEIZURES_TABLE}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
-            return False
+        with self.schema_lock:
+            try:
+                # Determine column type based on field name
+                if column_name == 'seized_at':
+                    column_type = 'TIMESTAMPTZ'
+                elif column_name in ('mo_seizure_id', 'crime_id', 'seq_no', 'mo_id'):
+                    column_type = 'VARCHAR(50)'  # Matches primary key and foreign key types
+                elif column_name == 'type':
+                    column_type = 'VARCHAR(100)'
+                elif 'date' in column_name.lower() or column_name in ('date_created', 'date_modified'):
+                    column_type = 'TIMESTAMPTZ'
+                elif column_name.startswith('pos_') or column_name in ('description', 'sub_type', 'seized_from', 'seized_by', 'strength_of_evidence'):
+                    column_type = 'TEXT'
+                elif column_name.startswith('mo_media_'):
+                    column_type = 'TEXT'
+                else:
+                    column_type = 'TEXT'
+                
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cur:
+                        alter_sql = f"ALTER TABLE {MO_SEIZURES_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                        cur.execute(alter_sql)
+                        conn.commit()
+                        logger.info(f"✅ Added column {column_name} ({column_type}) to {MO_SEIZURES_TABLE}")
+                        return True
+            except Exception as e:
+                logger.error(f"❌ Error adding column {column_name}: {e}")
+                return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
         """
@@ -597,27 +638,28 @@ class MoSeizureETL:
             'error': error
         }
         
-        self.api_log.write(f"\n{'='*80}\n")
-        self.api_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.api_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.api_log.write(f"{'-'*80}\n")
-        
-        if error:
-            self.api_log.write(f"ERROR: {error}\n")
-            self.api_log.write(f"Count: 0\n")
-            self.api_log.write(f"Crime IDs: []\n")
-        else:
-            self.api_log.write(f"Count: {count}\n")
-            self.api_log.write(f"Crime IDs ({len(crime_ids)}):\n")
-            for i, crime_id in enumerate(crime_ids, 1):
-                self.api_log.write(f"  {i}. {crime_id}\n")
+        with self.log_lock:
+            self.api_log.write(f"\n{'='*80}\n")
+            self.api_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.api_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.api_log.write(f"{'-'*80}\n")
             
-            # Also write JSON format for easy parsing
-            self.api_log.write(f"\nJSON Format:\n")
-            self.api_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-            self.api_log.write(f"\n")
-        
-        self.api_log.flush()
+            if error:
+                self.api_log.write(f"ERROR: {error}\n")
+                self.api_log.write(f"Count: 0\n")
+                self.api_log.write(f"Crime IDs: []\n")
+            else:
+                self.api_log.write(f"Count: {count}\n")
+                self.api_log.write(f"Crime IDs ({len(crime_ids)}):\n")
+                for i, crime_id in enumerate(crime_ids, 1):
+                    self.api_log.write(f"  {i}. {crime_id}\n")
+                
+                # Also write JSON format for easy parsing
+                self.api_log.write(f"\nJSON Format:\n")
+                self.api_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+                self.api_log.write(f"\n")
+            
+            self.api_log.flush()
     
     def normalize_date_value(self, value):
         """
@@ -640,7 +682,7 @@ class MoSeizureETL:
                 return value
         return value
     
-    def transform_seizure(self, seizure_raw: Dict) -> Dict:
+    def transform_seizure(self, seizure_raw: Dict, cursor) -> Dict:
         """
         Transform API response to database format
         Dates are always taken from API (never use CURRENT_TIMESTAMP)
@@ -648,6 +690,7 @@ class MoSeizureETL:
         
         Args:
             seizure_raw: Raw seizure data from API
+            cursor: Database cursor to use for validation
         
         Returns:
             Transformed seizure dict ready for database
@@ -661,8 +704,8 @@ class MoSeizureETL:
         if crime_id_str:
             # Validate that crime_id exists in crimes table (crime_id is VARCHAR primary key)
             try:
-                self.db_cursor.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id_str,))
-                result = self.db_cursor.fetchone()
+                cursor.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id_str,))
+                result = cursor.fetchone()
                 if result:
                     crime_id_valid = crime_id_str  # Use the string directly (VARCHAR)
                     logger.trace(f"CRIME_ID {crime_id_str} found in crimes table")
@@ -670,8 +713,7 @@ class MoSeizureETL:
                     logger.trace(f"CRIME_ID {crime_id_str} not found in crimes table")
             except Exception as e:
                 logger.error(f"Error validating crime_id {crime_id_str}: {e}")
-                # Rollback transaction on error to allow continuation
-                self.db_conn.rollback()
+                # Don't rollback here, let the calling method handle the transaction
         
         # Parse SEIZED_DATE to seized_at (TIMESTAMPTZ)
         seized_date_str = seizure_raw.get('SEIZED_DATE')
@@ -713,19 +755,19 @@ class MoSeizureETL:
         logger.trace(f"Transformed seizure: {json.dumps({k: v for k, v in transformed.items() if k != '_original_crime_id'}, indent=2, default=str)}")
         return transformed
     
-    def seizure_exists(self, mo_seizure_id: str) -> bool:
+    def seizure_exists(self, mo_seizure_id: str, cursor) -> bool:
         """Check if seizure already exists in database (based on primary key)"""
         logger.trace(f"Checking if seizure exists: mo_seizure_id={mo_seizure_id}")
         query = f"""
             SELECT 1 FROM {MO_SEIZURES_TABLE} 
             WHERE mo_seizure_id = %s
         """
-        self.db_cursor.execute(query, (mo_seizure_id,))
-        exists = self.db_cursor.fetchone() is not None
+        cursor.execute(query, (mo_seizure_id,))
+        exists = cursor.fetchone() is not None
         logger.trace(f"Seizure exists: {exists}")
         return exists
     
-    def get_existing_seizure(self, mo_seizure_id: str) -> Optional[Dict]:
+    def get_existing_seizure(self, mo_seizure_id: str, cursor) -> Optional[Dict]:
         """Get existing seizure record from database"""
         query = f"""
             SELECT mo_seizure_id, crime_id, seq_no, mo_id, type, sub_type, description,
@@ -737,8 +779,8 @@ class MoSeizureETL:
             FROM {MO_SEIZURES_TABLE}
             WHERE mo_seizure_id = %s
         """
-        self.db_cursor.execute(query, (mo_seizure_id,))
-        row = self.db_cursor.fetchone()
+        cursor.execute(query, (mo_seizure_id,))
+        row = cursor.fetchone()
         if row:
             return {
                 'mo_seizure_id': row[0],
@@ -780,17 +822,18 @@ class MoSeizureETL:
             'seizure_data': seizure
         }
         
-        self.failed_log.write(f"\n{'='*80}\n")
-        self.failed_log.write(f"MO_SEIZURE_ID: {seizure.get('mo_seizure_id')}\n")
-        self.failed_log.write(f"CRIME_ID: {seizure.get('crime_id')}\n")
-        self.failed_log.write(f"REASON: {reason}\n")
-        if error_details:
-            self.failed_log.write(f"ERROR: {error_details}\n")
-        self.failed_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.failed_log.write(f"\nJSON Format:\n")
-        self.failed_log.write(json.dumps(failed_info, indent=2, ensure_ascii=False, default=str))
-        self.failed_log.write(f"\n")
-        self.failed_log.flush()
+        with self.log_lock:
+            self.failed_log.write(f"\n{'='*80}\n")
+            self.failed_log.write(f"MO_SEIZURE_ID: {seizure.get('mo_seizure_id')}\n")
+            self.failed_log.write(f"CRIME_ID: {seizure.get('crime_id')}\n")
+            self.failed_log.write(f"REASON: {reason}\n")
+            if error_details:
+                self.failed_log.write(f"ERROR: {error_details}\n")
+            self.failed_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.failed_log.write(f"\nJSON Format:\n")
+            self.failed_log.write(json.dumps(failed_info, indent=2, ensure_ascii=False, default=str))
+            self.failed_log.write(f"\n")
+            self.failed_log.flush()
     
     def log_invalid_crime_id(self, seizure: Dict, crime_id_str: str, chunk_range: str = ""):
         """Log a seizure that failed due to invalid CRIME_ID (not found in crimes table)"""
@@ -802,16 +845,17 @@ class MoSeizureETL:
             'seizure_data': seizure
         }
         
-        self.invalid_crime_id_log.write(f"\n{'='*80}\n")
-        self.invalid_crime_id_log.write(f"MO_SEIZURE_ID: {seizure.get('mo_seizure_id')}\n")
-        self.invalid_crime_id_log.write(f"CRIME_ID: {crime_id_str}\n")
-        self.invalid_crime_id_log.write(f"REASON: CRIME_ID not found in crimes table\n")
-        self.invalid_crime_id_log.write(f"Chunk: {chunk_range}\n")
-        self.invalid_crime_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.invalid_crime_id_log.write(f"\nJSON Format:\n")
-        self.invalid_crime_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
-        self.invalid_crime_id_log.write(f"\n")
-        self.invalid_crime_id_log.flush()
+        with self.log_lock:
+            self.invalid_crime_id_log.write(f"\n{'='*80}\n")
+            self.invalid_crime_id_log.write(f"MO_SEIZURE_ID: {seizure.get('mo_seizure_id')}\n")
+            self.invalid_crime_id_log.write(f"CRIME_ID: {crime_id_str}\n")
+            self.invalid_crime_id_log.write(f"REASON: CRIME_ID not found in crimes table\n")
+            self.invalid_crime_id_log.write(f"Chunk: {chunk_range}\n")
+            self.invalid_crime_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.invalid_crime_id_log.write(f"\nJSON Format:\n")
+            self.invalid_crime_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
+            self.invalid_crime_id_log.write(f"\n")
+            self.invalid_crime_id_log.flush()
     
     def log_duplicates_chunk(self, from_date: str, to_date: str, duplicates: List[Dict]):
         """Log duplicates found in a chunk"""
@@ -822,27 +866,28 @@ class MoSeizureETL:
             'duplicates': duplicates
         }
         
-        self.duplicates_log.write(f"\n{'='*80}\n")
-        self.duplicates_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.duplicates_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.duplicates_log.write(f"{'-'*80}\n")
-        self.duplicates_log.write(f"Duplicate Count: {len(duplicates)}\n")
-        self.duplicates_log.write(f"Note: These duplicates were PROCESSED (not skipped) to allow updates\n")
-        self.duplicates_log.write(f"\nDuplicates:\n")
-        for i, dup in enumerate(duplicates, 1):
-            self.duplicates_log.write(f"  {i}. MO_SEIZURE_ID: {dup['mo_seizure_id']}\n")
-            self.duplicates_log.write(f"     Occurrence: #{dup.get('occurrence', 'N/A')}\n")
-            self.duplicates_log.write(f"     First seen in: {dup['first_seen_in']}\n")
-            self.duplicates_log.write(f"     Duplicate in: {dup['duplicate_in']}\n")
-        
-        # Also write JSON format for easy parsing
-        self.duplicates_log.write(f"\nJSON Format:\n")
-        self.duplicates_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-        self.duplicates_log.write(f"\n")
-        
-        self.duplicates_log.flush()
+        with self.log_lock:
+            self.duplicates_log.write(f"\n{'='*80}\n")
+            self.duplicates_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.duplicates_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.duplicates_log.write(f"{'-'*80}\n")
+            self.duplicates_log.write(f"Duplicate Count: {len(duplicates)}\n")
+            self.duplicates_log.write(f"Note: These duplicates were PROCESSED (not skipped) to allow updates\n")
+            self.duplicates_log.write(f"\nDuplicates:\n")
+            for i, dup in enumerate(duplicates, 1):
+                self.duplicates_log.write(f"  {i}. MO_SEIZURE_ID: {dup['mo_seizure_id']}\n")
+                self.duplicates_log.write(f"     Occurrence: #{dup.get('occurrence', 'N/A')}\n")
+                self.duplicates_log.write(f"     First seen in: {dup['first_seen_in']}\n")
+                self.duplicates_log.write(f"     Duplicate in: {dup['duplicate_in']}\n")
+            
+            # Also write JSON format for easy parsing
+            self.duplicates_log.write(f"\nJSON Format:\n")
+            self.duplicates_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+            self.duplicates_log.write(f"\n")
+            
+            self.duplicates_log.flush()
     
-    def insert_seizure(self, seizure: Dict, chunk_date_range: str = "") -> Tuple[bool, str]:
+    def insert_seizure(self, seizure: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
         Insert or update single seizure into database with smart update logic
         Dates are always from API (never use CURRENT_TIMESTAMP)
@@ -859,6 +904,8 @@ class MoSeizureETL:
         
         Args:
             seizure: Transformed seizure dict
+            conn: Database connection
+            cursor: Database cursor
             chunk_date_range: Date range for chunk tracking
         
         Returns:
@@ -873,8 +920,9 @@ class MoSeizureETL:
             reason = 'invalid_crime_id'
             error_details = f"CRIME_ID {original_crime_id} not found in crimes table"
             logger.warning(f"⚠️  {error_details}, skipping seizure")
-            self.stats['total_seizures_failed'] += 1
-            self.stats['total_seizures_failed_crime_id'] += 1
+            with self.stats_lock:
+                self.stats['total_seizures_failed'] += 1
+                self.stats['total_seizures_failed_crime_id'] += 1
             self.log_failed_record(seizure, reason, error_details)
             self.log_invalid_crime_id(seizure, original_crime_id, chunk_date_range)
             return False, reason
@@ -883,7 +931,8 @@ class MoSeizureETL:
             reason = 'missing_mo_seizure_id'
             error_details = "Seizure record missing MO_SEIZURE_ID"
             logger.warning(f"⚠️  {error_details}")
-            self.stats['total_seizures_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_seizures_failed'] += 1
             self.log_failed_record(seizure, reason, error_details)
             return False, reason
         
@@ -891,9 +940,9 @@ class MoSeizureETL:
             logger.trace(f"Processing seizure: mo_seizure_id={mo_seizure_id}, crime_id={crime_id}")
             
             # Check if seizure already exists (based on primary key)
-            if self.seizure_exists(mo_seizure_id):
+            if self.seizure_exists(mo_seizure_id, cursor):
                 # Get existing record to compare
-                existing = self.get_existing_seizure(mo_seizure_id)
+                existing = self.get_existing_seizure(mo_seizure_id, cursor)
                 if not existing:
                     logger.warning(f"⚠️  Seizure exists check returned True but fetch returned None")
                     # Fall back to insert
@@ -989,16 +1038,18 @@ class MoSeizureETL:
                             WHERE mo_seizure_id = %s
                         """
                         update_values.append(mo_seizure_id)
-                        self.db_cursor.execute(update_query, tuple(update_values))
-                        self.stats['total_seizures_updated'] += 1
+                        cursor.execute(update_query, tuple(update_values))
+                        with self.stats_lock:
+                            self.stats['total_seizures_updated'] += 1
                         logger.debug(f"Updated seizure: mo_seizure_id={mo_seizure_id} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
-                        self.db_conn.commit()
+                        conn.commit()
                         logger.trace(f"Transaction committed for updated seizure")
                         return True, 'updated'
                     else:
                         # No changes needed
-                        self.stats['total_seizures_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_seizures_no_change'] += 1
                         logger.trace(f"No changes needed for seizure (all fields match or preserved)")
                         return True, 'no_change'
                 else:
@@ -1020,7 +1071,7 @@ class MoSeizureETL:
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
-                self.db_cursor.execute(insert_query, (
+                cursor.execute(insert_query, (
                     mo_seizure_id,
                     crime_id,
                     seizure.get('seq_no'),
@@ -1047,31 +1098,105 @@ class MoSeizureETL:
                     seizure.get('date_created'),  # From API (or NULL)
                     seizure.get('date_modified')  # From API (or NULL)
                 ))
-                self.stats['total_seizures_inserted'] += 1
+                with self.stats_lock:
+                    self.stats['total_seizures_inserted'] += 1
                 logger.debug(f"Inserted seizure: mo_seizure_id={mo_seizure_id}")
                 logger.trace(f"Insert query executed for seizure")
-                self.db_conn.commit()
+                conn.commit()
                 logger.trace(f"Transaction committed for inserted seizure")
                 return True, 'inserted'
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'integrity_error'
             error_details = str(e)
             logger.warning(f"⚠️  Integrity error for seizure: {e}")
-            self.stats['total_seizures_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_seizures_failed'] += 1
             self.log_failed_record(seizure, reason, error_details)
             return False, reason
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'error'
             error_details = str(e)
             logger.error(f"❌ Error inserting seizure: {e}")
-            self.stats['total_seizures_failed'] += 1
-            self.stats['errors'].append(f"Seizure mo_seizure_id={mo_seizure_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['total_seizures_failed'] += 1
+                self.stats['errors'].append(f"Seizure mo_seizure_id={mo_seizure_id}: {str(e)}")
             self.log_failed_record(seizure, reason, error_details)
             return False, reason
     
+    def process_record_worker(self, seizure_record: Dict, chunk_range: str, chunk_state: Dict):
+        """Worker function to process a single seizure record"""
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    seizure = self.transform_seizure(seizure_record, cursor)
+                    mo_seizure_id = seizure.get('mo_seizure_id')
+                    original_crime_id = seizure.get('_original_crime_id')
+                    
+                    # Check if crime_id is valid (exists in crimes table)
+                    if not seizure.get('crime_id'):
+                        logger.warning(f"⚠️  Seizure with CRIME_ID {original_crime_id} not found in crimes table, skipping")
+                        with self.stats_lock:
+                            chunk_state['invalid_crime_ids_in_chunk'].append({
+                                'mo_seizure_id': mo_seizure_id,
+                                'crime_id': original_crime_id
+                            })
+                            chunk_state['failed_keys'].append(mo_seizure_id or 'MISSING_ID')
+                            reason = 'invalid_crime_id'
+                            if reason not in chunk_state['failed_reasons']:
+                                chunk_state['failed_reasons'][reason] = []
+                            chunk_state['failed_reasons'][reason].append(original_crime_id)
+                            self.stats['total_seizures_failed'] += 1
+                            self.stats['total_seizures_failed_crime_id'] += 1
+                        self.log_invalid_crime_id(seizure, original_crime_id, chunk_range)
+                        return
+                    
+                    unique_key = mo_seizure_id
+                    
+                    with self.stats_lock:
+                        # Track occurrences for duplicate reporting (but don't skip - process all)
+                        if unique_key in chunk_state['seen_keys']:
+                            # This is a duplicate occurrence - track it but still process
+                            occurrence_count = chunk_state['key_occurrences'].get(unique_key, 1) + 1
+                            chunk_state['key_occurrences'][unique_key] = occurrence_count
+                            
+                            chunk_state['duplicates_in_chunk'].append({
+                                'mo_seizure_id': mo_seizure_id,
+                                'occurrence': occurrence_count,
+                                'first_seen_in': chunk_state['seen_keys'][unique_key],
+                                'duplicate_in': chunk_range
+                            })
+                            self.stats['total_duplicates'] += 1
+                            logger.trace(f"Duplicate details - First seen: {chunk_state['seen_keys'][unique_key]}, Current occurrence: {occurrence_count}")
+                        else:
+                            chunk_state['seen_keys'][unique_key] = chunk_range
+                            chunk_state['key_occurrences'][unique_key] = 1
+                    
+                    # IMPORTANT: Process ALL records, even duplicates
+                    # If same key appears multiple times, each occurrence might have updated data
+                    # The smart update logic will handle whether to actually update or not
+                    success, operation = self.insert_seizure(seizure, conn, cursor, chunk_range)
+                    
+                    with self.stats_lock:
+                        if success:
+                            if operation == 'inserted':
+                                if unique_key not in chunk_state['inserted_keys']:
+                                    chunk_state['inserted_keys'].append(unique_key)
+                            elif operation == 'updated':
+                                chunk_state['updated_keys'].append(unique_key)
+                            elif operation == 'no_change':
+                                if unique_key not in chunk_state['no_change_keys']:
+                                    chunk_state['no_change_keys'].append(unique_key)
+                        else:
+                            chunk_state['failed_keys'].append(unique_key)
+                            if operation not in chunk_state['failed_reasons']:
+                                chunk_state['failed_reasons'][operation] = []
+                            chunk_state['failed_reasons'][operation].append(unique_key)
+        except Exception as e:
+            logger.error(f"❌ Error in worker thread for mo_seizure_id {seizure_record.get('MO_SEIZURE_ID')}: {e}")
+
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process seizure records for a specific date range"""
         chunk_range = f"{from_date} to {to_date}"
@@ -1105,116 +1230,56 @@ class MoSeizureETL:
                 self.update_existing_records_with_new_fields(new_fields, to_date)
         
         # Transform and insert each seizure
-        self.stats['total_seizures_fetched'] += len(seizures_raw)
+        with self.stats_lock:
+            self.stats['total_seizures_fetched'] += len(seizures_raw)
         logger.trace(f"Processing {len(seizures_raw)} seizure records for chunk {chunk_range}")
         
         # Track operations for this chunk
-        inserted_keys = []
-        updated_keys = []
-        no_change_keys = []
-        failed_keys = []
-        failed_reasons = {}
-        duplicates_in_chunk = []
-        invalid_crime_ids_in_chunk = []
+        chunk_state = {
+            'inserted_keys': [],
+            'updated_keys': [],
+            'no_change_keys': [],
+            'failed_keys': [],
+            'failed_reasons': {},
+            'duplicates_in_chunk': [],
+            'invalid_crime_ids_in_chunk': [],
+            'seen_keys': {},
+            'key_occurrences': {}
+        }
         
-        # Track unique keys seen in this chunk to detect duplicates (for reporting only, not skipping)
-        seen_keys = {}
-        key_occurrences = {}
+        logger.trace(f"Starting to process records for chunk: {chunk_range} with {self.max_workers} workers")
         
-        logger.trace(f"Starting to process records for chunk: {chunk_range}")
-        for idx, seizure_record in enumerate(seizures_raw, 1):
-            logger.trace(f"Processing record {idx}/{len(seizures_raw)}: {seizure_record.get('MO_SEIZURE_ID')}")
-            seizure = self.transform_seizure(seizure_record)
-            mo_seizure_id = seizure.get('mo_seizure_id')
-            crime_id = seizure.get('crime_id')
-            original_crime_id = seizure.get('_original_crime_id')
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = [
+                executor.submit(self.process_record_worker, record, chunk_range, chunk_state)
+                for record in seizures_raw
+            ]
             
-            # Check if crime_id is valid (exists in crimes table)
-            if not crime_id:
-                logger.warning(f"⚠️  Seizure with CRIME_ID {original_crime_id} not found in crimes table, skipping")
-                self.stats['total_seizures_failed'] += 1
-                self.stats['total_seizures_failed_crime_id'] += 1
-                failed_keys.append(mo_seizure_id or 'MISSING_ID')
-                reason = 'invalid_crime_id'
-                if reason not in failed_reasons:
-                    failed_reasons[reason] = []
-                failed_reasons[reason].append(original_crime_id)
-                invalid_crime_ids_in_chunk.append({
-                    'mo_seizure_id': mo_seizure_id,
-                    'crime_id': original_crime_id
-                })
-                self.log_invalid_crime_id(seizure, original_crime_id, chunk_range)
-                continue
-            
-            # Create unique key for tracking duplicates (based on primary key)
-            unique_key = mo_seizure_id
-            
-            # Track occurrences for duplicate reporting (but don't skip - process all)
-            if unique_key in seen_keys:
-                # This is a duplicate occurrence - track it but still process
-                occurrence_count = key_occurrences.get(unique_key, 1) + 1
-                key_occurrences[unique_key] = occurrence_count
-                
-                duplicates_in_chunk.append({
-                    'mo_seizure_id': mo_seizure_id,
-                    'occurrence': occurrence_count,
-                    'first_seen_in': seen_keys[unique_key],
-                    'duplicate_in': chunk_range
-                })
-                self.stats['total_duplicates'] += 1
-                logger.info(f"⚠️  Duplicate seizure found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
-                logger.trace(f"Duplicate details - First seen: {seen_keys[unique_key]}, Current occurrence: {occurrence_count}")
-            else:
-                seen_keys[unique_key] = chunk_range
-                key_occurrences[unique_key] = 1
-                logger.trace(f"New seizure key seen: {unique_key} in chunk {chunk_range}")
-            
-            # IMPORTANT: Process ALL records, even duplicates
-            # If same key appears multiple times, each occurrence might have updated data
-            # The smart update logic will handle whether to actually update or not
-            success, operation = self.insert_seizure(seizure, chunk_range)
-            logger.trace(f"Operation result for seizure: success={success}, operation={operation}")
-            if success:
-                if operation == 'inserted':
-                    # Only add to list if first occurrence (to avoid duplicate entries in log)
-                    if unique_key not in inserted_keys:
-                        inserted_keys.append(unique_key)
-                    logger.trace(f"Added to inserted list: {unique_key}")
-                elif operation == 'updated':
-                    # Track all updates (even if same key updated multiple times)
-                    updated_keys.append(unique_key)
-                    logger.trace(f"Added to updated list: {unique_key} (occurrence #{key_occurrences.get(unique_key, 1)})")
-                elif operation == 'no_change':
-                    # Only add to list if first occurrence
-                    if unique_key not in no_change_keys:
-                        no_change_keys.append(unique_key)
-                    logger.trace(f"Added to no_change list: {unique_key}")
-            else:
-                failed_keys.append(unique_key)
-                if operation not in failed_reasons:
-                    failed_reasons[operation] = []
-                failed_reasons[operation].append(unique_key)
-                logger.trace(f"Added to failed list: {unique_key}, reason: {operation}")
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Records", leave=False):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Thread failed: {e}")
         
         # Log duplicates for this chunk (for reporting, but they were all processed)
-        if duplicates_in_chunk:
-            logger.info(f"📊 Found {len(duplicates_in_chunk)} duplicate occurrences in chunk {chunk_range} - All were processed for potential updates")
-            logger.trace(f"Duplicate details: {duplicates_in_chunk}")
-            self.log_duplicates_chunk(from_date, to_date, duplicates_in_chunk)
+        if chunk_state['duplicates_in_chunk']:
+            logger.info(f"📊 Found {len(chunk_state['duplicates_in_chunk'])} duplicate occurrences in chunk {chunk_range} - All were processed for potential updates")
+            logger.trace(f"Duplicate details: {chunk_state['duplicates_in_chunk']}")
+            self.log_duplicates_chunk(from_date, to_date, chunk_state['duplicates_in_chunk'])
         
         # Log invalid crime_ids for this chunk
-        if invalid_crime_ids_in_chunk:
-            logger.warning(f"⚠️  Found {len(invalid_crime_ids_in_chunk)} seizure records with invalid CRIME_IDs in chunk {chunk_range}")
+        if chunk_state['invalid_crime_ids_in_chunk']:
+            logger.warning(f"⚠️  Found {len(chunk_state['invalid_crime_ids_in_chunk'])} seizure records with invalid CRIME_IDs in chunk {chunk_range}")
             # Extract unique CRIME_IDs
-            unique_crime_ids = list(set([f['crime_id'] for f in invalid_crime_ids_in_chunk if f.get('crime_id')]))
+            unique_crime_ids = list(set([f['crime_id'] for f in chunk_state['invalid_crime_ids_in_chunk'] if f.get('crime_id')]))
             logger.warning(f"   Invalid CRIME_IDs: {unique_crime_ids}")
         
         # Log database operations for this chunk
-        logger.trace(f"Chunk summary - Inserted: {len(inserted_keys)}, Updated: {len(updated_keys)}, No Change: {len(no_change_keys)}, Failed: {len(failed_keys)}, Duplicates: {len(duplicates_in_chunk)}, Invalid CRIME_IDs: {len(invalid_crime_ids_in_chunk)}")
-        self.log_db_chunk(from_date, to_date, len(seizures_raw), inserted_keys, updated_keys, 
-                         no_change_keys, failed_keys, failed_reasons)
+        logger.trace(f"Chunk summary - Inserted: {len(chunk_state['inserted_keys'])}, Updated: {len(chunk_state['updated_keys'])}, No Change: {len(chunk_state['no_change_keys'])}, Failed: {len(chunk_state['failed_keys'])}, Duplicates: {len(chunk_state['duplicates_in_chunk'])}, Invalid CRIME_IDs: {len(chunk_state['invalid_crime_ids_in_chunk'])}")
+        self.log_db_chunk(from_date, to_date, len(seizures_raw), chunk_state['inserted_keys'], chunk_state['updated_keys'], 
+                         chunk_state['no_change_keys'], chunk_state['failed_keys'], chunk_state['failed_reasons'])
         
-        logger.info(f"✅ Completed: {chunk_range} - Inserted: {len(inserted_keys)}, Updated: {len(updated_keys)}, No Change: {len(no_change_keys)}, Failed: {len(failed_keys)}, Duplicates: {len(duplicates_in_chunk)}, Invalid CRIME_IDs: {len(invalid_crime_ids_in_chunk)}")
+        logger.info(f"✅ Completed: {chunk_range} - Inserted: {len(chunk_state['inserted_keys'])}, Updated: {len(chunk_state['updated_keys'])}, No Change: {len(chunk_state['no_change_keys'])}, Failed: {len(chunk_state['failed_keys'])}, Duplicates: {len(chunk_state['duplicates_in_chunk'])}, Invalid CRIME_IDs: {len(chunk_state['invalid_crime_ids_in_chunk'])}")
         logger.trace(f"Chunk processing complete for {chunk_range}")
     
     def log_db_chunk(self, from_date: str, to_date: str, total_fetched: int,
@@ -1237,42 +1302,43 @@ class MoSeizureETL:
             'error': error
         }
         
-        self.db_log.write(f"\n{'='*80}\n")
-        self.db_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.db_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.db_log.write(f"{'-'*80}\n")
-        
-        if error:
-            self.db_log.write(f"ERROR: {error}\n")
-        else:
-            self.db_log.write(f"Total Fetched from API: {total_fetched}\n")
-            self.db_log.write(f"\nINSERTED: {len(inserted_keys)}\n")
-            for i, key in enumerate(inserted_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
+        with self.log_lock:
+            self.db_log.write(f"\n{'='*80}\n")
+            self.db_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.db_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.db_log.write(f"{'-'*80}\n")
             
-            self.db_log.write(f"\nUPDATED: {len(updated_keys)}\n")
-            for i, key in enumerate(updated_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
+            if error:
+                self.db_log.write(f"ERROR: {error}\n")
+            else:
+                self.db_log.write(f"Total Fetched from API: {total_fetched}\n")
+                self.db_log.write(f"\nINSERTED: {len(inserted_keys)}\n")
+                for i, key in enumerate(inserted_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                
+                self.db_log.write(f"\nUPDATED: {len(updated_keys)}\n")
+                for i, key in enumerate(updated_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                
+                self.db_log.write(f"\nNO CHANGE: {len(no_change_keys)}\n")
+                for i, key in enumerate(no_change_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                
+                self.db_log.write(f"\nFAILED: {len(failed_keys)}\n")
+                if failed_reasons:
+                    for reason, keys in failed_reasons.items():
+                        self.db_log.write(f"  Reason: {reason} ({len(keys)})\n")
+                        for i, key in enumerate(keys[:20], 1):  # Show first 20
+                            self.db_log.write(f"    {i}. {key}\n")
+                        if len(keys) > 20:
+                            self.db_log.write(f"    ... and {len(keys) - 20} more\n")
+                
+                # Also write JSON format for easy parsing
+                self.db_log.write(f"\nJSON Format:\n")
+                self.db_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+                self.db_log.write(f"\n")
             
-            self.db_log.write(f"\nNO CHANGE: {len(no_change_keys)}\n")
-            for i, key in enumerate(no_change_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
-            
-            self.db_log.write(f"\nFAILED: {len(failed_keys)}\n")
-            if failed_reasons:
-                for reason, keys in failed_reasons.items():
-                    self.db_log.write(f"  Reason: {reason} ({len(keys)})\n")
-                    for i, key in enumerate(keys[:20], 1):  # Show first 20
-                        self.db_log.write(f"    {i}. {key}\n")
-                    if len(keys) > 20:
-                        self.db_log.write(f"    ... and {len(keys) - 20} more\n")
-            
-            # Also write JSON format for easy parsing
-            self.db_log.write(f"\nJSON Format:\n")
-            self.db_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-            self.db_log.write(f"\n")
-        
-        self.db_log.flush()
+            self.db_log.flush()
     
     def write_log_summaries(self):
         """Write summary sections to all log files"""
@@ -1393,8 +1459,10 @@ class MoSeizureETL:
                 time.sleep(1)  # Be nice to the API
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {MO_SEIZURES_TABLE}")
-            db_seizures_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM {MO_SEIZURES_TABLE}")
+                    db_seizures_count = cur.fetchone()[0]
             
             # Store for summary
             self.stats['db_total_count'] = db_seizures_count

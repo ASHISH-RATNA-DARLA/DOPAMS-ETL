@@ -6,14 +6,20 @@ Only processes person_ids from accused records that were added/updated since las
 """
 
 import sys
+import os
 import time
 import requests
 import psycopg2
 from psycopg2.extras import execute_batch
 from datetime import datetime, timezone, timedelta
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import colorlog
 from typing import Dict, Optional, List, Set
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
 
 from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -44,8 +50,7 @@ logger.setLevel(LOG_CONFIG['level'])
 
 class PersonsETL:
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self.db_pool = None
         self.stats = {
             'person_ids': 0,
             'api_calls': 0,
@@ -53,36 +58,41 @@ class PersonsETL:
             'inserted': 0,
             'updated': 0,
             'no_change': 0,  # Records that exist but no changes needed
+            'no_data': 0,   # API returned 404 / no data (dead person_id)
             'failed': 0,  # Records that failed to process
             'errors': 0
         }
+        self.stats_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
 
     def connect_db(self):
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool(
+                min_conn=1,
+                max_conn=min(32, (os.cpu_count() or 1) * 4), 
+                **DB_CONFIG
+            )
+            logger.info(f"✅ Connected to database: {DB_CONFIG['database']} (Pool max: {self.db_pool.max_conn})")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")
             return False
 
     def close_db(self):
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
-        logger.info("Database connection closed")
+        if self.db_pool:
+            self.db_pool.close_all()
+        logger.info("Database connection pool closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as (conn, cursor):
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s
+                """, (table_name,))
+                return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -200,42 +210,43 @@ class PersonsETL:
     
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the persons table."""
-        try:
-            # Determine column type based on field name
-            if 'date' in column_name.lower():
-                column_type = 'DATE'
-            elif column_name == 'age':
-                column_type = 'INTEGER'
-            elif column_name in ('is_died',):
-                column_type = 'BOOLEAN'
-            elif column_name in ('name', 'surname', 'alias', 'full_name', 'occupation', 
-                                'education_qualification', 'designation', 'place_of_work'):
-                column_type = 'VARCHAR(500)'
-            elif column_name in ('relation_type', 'gender', 'caste', 'sub_caste', 'religion', 
-                                'nationality', 'residency_type', 'country_code'):
-                column_type = 'VARCHAR(100)'
-            elif 'pin_code' in column_name.lower() or 'jurisdiction_ps' in column_name.lower():
-                column_type = 'VARCHAR(20)'
-            elif 'phone_number' in column_name.lower() or 'email_id' in column_name.lower():
-                column_type = 'VARCHAR(255)'
-            elif 'house_no' in column_name.lower() or 'street' in column_name.lower() or \
-                 'ward' in column_name.lower() or 'landmark' in column_name.lower() or \
-                 'locality' in column_name.lower() or 'area' in column_name.lower() or \
-                 'district' in column_name.lower() or 'state' in column_name.lower() or \
-                 'country' in column_name.lower():
-                column_type = 'VARCHAR(255)'
-            else:
-                column_type = 'VARCHAR(255)'
-            
-            alter_sql = f"ALTER TABLE {PERSONS_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
-            logger.info(f"✅ Added column {column_name} ({column_type}) to {PERSONS_TABLE}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
-            return False
+        with self.schema_lock:
+            try:
+                # Determine column type based on field name
+                if 'date' in column_name.lower():
+                    column_type = 'DATE'
+                elif column_name == 'age':
+                    column_type = 'INTEGER'
+                elif column_name in ('is_died',):
+                    column_type = 'BOOLEAN'
+                elif column_name in ('name', 'surname', 'alias', 'full_name', 'occupation', 
+                                    'education_qualification', 'designation', 'place_of_work'):
+                    column_type = 'VARCHAR(500)'
+                elif column_name in ('relation_type', 'gender', 'caste', 'sub_caste', 'religion', 
+                                    'nationality', 'residency_type', 'country_code'):
+                    column_type = 'VARCHAR(100)'
+                elif 'pin_code' in column_name.lower() or 'jurisdiction_ps' in column_name.lower():
+                    column_type = 'VARCHAR(20)'
+                elif 'phone_number' in column_name.lower() or 'email_id' in column_name.lower():
+                    column_type = 'VARCHAR(255)'
+                elif 'house_no' in column_name.lower() or 'street' in column_name.lower() or \
+                     'ward' in column_name.lower() or 'landmark' in column_name.lower() or \
+                     'locality' in column_name.lower() or 'area' in column_name.lower() or \
+                     'district' in column_name.lower() or 'state' in column_name.lower() or \
+                     'country' in column_name.lower():
+                    column_type = 'VARCHAR(255)'
+                else:
+                    column_type = 'VARCHAR(255)'
+                
+                with self.db_pool.get_connection_context() as (conn, cursor):
+                    alter_sql = f"ALTER TABLE {PERSONS_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    cursor.execute(alter_sql)
+                    conn.commit()
+                logger.info(f"✅ Added column {column_name} ({column_type}) to {PERSONS_TABLE}")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Error adding column {column_name}: {e}")
+                return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str]):
         """
@@ -253,7 +264,7 @@ class PersonsETL:
             logger.error(f"❌ Error updating existing records: {e}")
     
     def update_new_fields(self, person_id: str, p: Dict, personal: Dict, present: Dict, 
-                         permanent: Dict, contact: Dict, table_columns: Set[str]):
+                         permanent: Dict, contact: Dict, table_columns: Set[str], cursor):
         """
         Update any new fields that were added via schema evolution.
         This handles fields that exist in table_columns but are not in the standard field list.
@@ -387,7 +398,7 @@ class PersonsETL:
                     UPDATE {PERSONS_TABLE} SET {', '.join(set_clauses)}
                     WHERE person_id = %s
                 """
-                self.db_cursor.execute(update_query, update_values_list)
+                cursor.execute(update_query, update_values_list)
                 logger.debug(f"Updated new fields for person {person_id}: {list(new_fields_to_update.keys())}")
             except Exception as e:
                 logger.warning(f"⚠️  Error updating new fields for person {person_id}: {e}")
@@ -399,47 +410,48 @@ class PersonsETL:
         Returns max(date_created, date_modified) or None if table is empty.
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {PERSONS_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, return None to process all
-                logger.info("📊 Persons table is empty, will process all person_ids from accused table")
-                return None
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = datetime(2022, 1, 1, tzinfo=IST_OFFSET)
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {PERSONS_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
-            if result and result[0]:
-                max_date = result[0]
-                # Convert to IST timezone if needed
-                if isinstance(max_date, datetime):
-                    if max_date.tzinfo is None:
-                        max_date = max_date.replace(tzinfo=IST_OFFSET)
-                    else:
-                        max_date = max_date.astimezone(IST_OFFSET)
-                    
-                    # Ensure we never go before 2022-01-01
-                    if max_date < MIN_START_DATE:
-                        logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
-                        return MIN_START_DATE
-                    
-                    logger.info(f"📊 Persons table has data, last processed date: {max_date.isoformat()}")
-                    return max_date
-            
-            # Fallback to start date
-            logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-            return MIN_START_DATE
+            with self.db_pool.get_connection_context() as (conn, cursor):
+                # Check if table has any data
+                cursor.execute(f"SELECT COUNT(*) FROM {PERSONS_TABLE}")
+                count = cursor.fetchone()[0]
+                
+                if count == 0:
+                    # New database, return None to process all
+                    logger.info("📊 Persons table is empty, will process all person_ids from accused table")
+                    return None
+                
+                # Table has data, get max of date_created and date_modified
+                # Only consider dates >= 2022-01-01 to avoid processing very old data
+                MIN_START_DATE = datetime(2022, 1, 1, tzinfo=IST_OFFSET)
+                
+                cursor.execute(f"""
+                    SELECT GREATEST(
+                        COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                        COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                    ) as max_date
+                    FROM {PERSONS_TABLE}
+                """)
+                result = cursor.fetchone()
+                if result and result[0]:
+                    max_date = result[0]
+                    # Convert to IST timezone if needed
+                    if isinstance(max_date, datetime):
+                        if max_date.tzinfo is None:
+                            max_date = max_date.replace(tzinfo=IST_OFFSET)
+                        else:
+                            max_date = max_date.astimezone(IST_OFFSET)
+                        
+                        # Ensure we never go before 2022-01-01
+                        if max_date < MIN_START_DATE:
+                            logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                            return MIN_START_DATE
+                        
+                        logger.info(f"📊 Persons table has data, last processed date: {max_date.isoformat()}")
+                        return max_date
+                
+                # Fallback to start date
+                logger.warning("⚠️  Could not determine max date, using 2022-01-01")
+                return MIN_START_DATE
             
         except Exception as e:
             logger.error(f"❌ Error getting last processed date: {e}")
@@ -455,34 +467,42 @@ class PersonsETL:
         # Get last processed date from persons table
         last_date = self.get_last_processed_date()
         
-        if last_date is None:
-            # First run - process all person_ids from accused table
-            logger.info("🔄 First run: Processing all person_ids from accused table")
-            self.db_cursor.execute(f"""
-                SELECT DISTINCT person_id 
-                FROM {ACCUSED_TABLE} 
-                WHERE person_id IS NOT NULL
-            """)
-        else:
-            # Incremental run - process person_ids from:
-            #   1. Accused records updated after last_date (incremental)
-            #   2. Stub persons (name IS NULL) — created by accused ETL but never populated,
-            #      regardless of accused.date_created/date_modified (which may be NULL or old)
-            logger.info(f"🔄 Incremental run: Processing person_ids from accused records updated after {last_date.isoformat()} + any unpopulated stubs")
-            self.db_cursor.execute(f"""
-                SELECT DISTINCT a.person_id 
-                FROM {ACCUSED_TABLE} a
-                LEFT JOIN {PERSONS_TABLE} p ON a.person_id = p.person_id
-                WHERE a.person_id IS NOT NULL
-                AND (
-                    p.name IS NULL
-                    OR a.date_created >= %s 
-                    OR a.date_modified >= %s
-                )
-            """, (last_date, last_date))
+        with self.db_pool.get_connection_context() as (conn, cursor):
+            if last_date is None:
+                # First run - process all person_ids from accused table
+                logger.info("🔄 First run: Processing all person_ids from accused table")
+                cursor.execute(f"""
+                    SELECT DISTINCT person_id 
+                    FROM {ACCUSED_TABLE} 
+                    WHERE person_id IS NOT NULL
+                """)
+            else:
+                # Incremental run - process person_ids from:
+                #   1. Accused records updated after last_date (incremental)
+                #   2. Stub persons (name IS NULL) — created by accused ETL but never populated,
+                #      regardless of accused.date_created/date_modified (which may be NULL or old)
+                logger.info(f"🔄 Incremental run: Processing person_ids from accused records updated after {last_date.isoformat()} + any unpopulated stubs")
+                cursor.execute(f"""
+                    SELECT DISTINCT a.person_id 
+                    FROM {ACCUSED_TABLE} a
+                    LEFT JOIN {PERSONS_TABLE} p ON a.person_id = p.person_id
+                    WHERE a.person_id IS NOT NULL
+                    AND (
+                        -- Stub person: row exists but core identity fields are all NULL
+                        (p.person_id IS NOT NULL AND p.name IS NULL AND p.gender IS NULL
+                         AND p.date_of_birth IS NULL AND p.nationality IS NULL)
+                        -- Person row doesn't exist at all yet
+                        OR p.person_id IS NULL
+                        -- Accused record updated after last persons run
+                        OR a.date_created >= %s 
+                        OR a.date_modified >= %s
+                    )
+                """, (last_date, last_date))
+            
+            rows = [r[0] for r in cursor.fetchall()]
         
-        rows = [r[0] for r in self.db_cursor.fetchall()]
-        self.stats['person_ids'] = len(rows)
+        with self.stats_lock:
+            self.stats['person_ids'] = len(rows)
         
         if last_date is None:
             logger.info(f"📊 Found {len(rows)} person_ids to process (first run - all records)")
@@ -507,20 +527,26 @@ class PersonsETL:
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get('status') and data.get('data'):
-                        self.stats['api_calls'] += 1
+                        with self.stats_lock:
+                            self.stats['api_calls'] += 1
                         return data['data']
                     else:
                         # API returned 200 but no valid data
                         logger.warning(f"API returned 200 but no valid data for person {person_id}")
+                        with self.stats_lock:
+                            self.stats['no_data'] += 1
                         return None
                 elif resp.status_code == 404:
                     # Person not found - don't retry
                     logger.debug(f"Person {person_id} not found (404)")
+                    with self.stats_lock:
+                        self.stats['no_data'] += 1
                     return None
                 elif resp.status_code == 400:
                     # Specific logic for 400: Bad Request (Likely dead/expunged ID) - skip instantly
                     logger.error(f"API rejected person_id {person_id} (400 Bad Request). Skipping.")
-                    self.stats['failed_api_calls'] += 1
+                    with self.stats_lock:
+                        self.stats['no_data'] += 1
                     return None
                 else:
                     # Other status codes - retry
@@ -539,12 +565,14 @@ class PersonsETL:
             except Exception as e:
                 logger.error(f"API error for person {person_id}: {e}")
                 if attempt == API_CONFIG['max_retries'] - 1:
-                    self.stats['failed_api_calls'] += 1
+                    with self.stats_lock:
+                        self.stats['failed_api_calls'] += 1
                 if attempt < API_CONFIG['max_retries'] - 1:
                     time.sleep(2 ** attempt)
         
         logger.error(f"❌ Failed to fetch person {person_id} after {API_CONFIG['max_retries']} attempts")
-        self.stats['failed_api_calls'] += 1
+        with self.stats_lock:
+            self.stats['failed_api_calls'] += 1
         return None
 
     def truncate_string(self, value: Optional[str], max_length: int = 100, field_name: str = "") -> Optional[str]:
@@ -558,7 +586,7 @@ class PersonsETL:
             return value[:max_length]
         return value
 
-    def upsert_person(self, d: Dict, table_columns: Set[str] = None):
+    def upsert_person(self, d: Dict, table_columns: Set[str], conn, cursor):
         p = d or {}
         personal = p.get('PERSONAL_DETAILS') or {}
         present = p.get('PRESENT_ADDRESS') or {}
@@ -590,28 +618,61 @@ class PersonsETL:
             age_value = None
 
         try:
-            self.db_cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (p.get('PERSON_ID'),))
-            exists = self.db_cursor.fetchone() is not None
+            cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (p.get('PERSON_ID'),))
+            exists = cursor.fetchone() is not None
 
             if exists:
-                self.db_cursor.execute(
+                # Use COALESCE so existing non-NULL values are never overwritten by API nulls
+                cursor.execute(
                     f"""
                     UPDATE {PERSONS_TABLE} SET
-                        name=%s, surname=%s, alias=%s, full_name=%s,
-                        relation_type=%s, relative_name=%s, gender=%s, is_died=%s,
-                        date_of_birth=NULLIF(%s,'')::date, age=%s, occupation=%s,
-                        education_qualification=%s, caste=%s, sub_caste=%s, religion=%s,
-                        nationality=%s, designation=%s, place_of_work=%s,
-                        present_house_no=%s, present_street_road_no=%s, present_ward_colony=%s,
-                        present_landmark_milestone=%s, present_locality_village=%s, present_area_mandal=%s,
-                        present_district=%s, present_state_ut=%s, present_country=%s, present_residency_type=%s,
-                        present_pin_code=%s, present_jurisdiction_ps=%s,
-                        permanent_house_no=%s, permanent_street_road_no=%s, permanent_ward_colony=%s,
-                        permanent_landmark_milestone=%s, permanent_locality_village=%s, permanent_area_mandal=%s,
-                        permanent_district=%s, permanent_state_ut=%s, permanent_country=%s, permanent_residency_type=%s,
-                        permanent_pin_code=%s, permanent_jurisdiction_ps=%s,
-                        phone_number=%s, country_code=%s, email_id=%s,
-                        date_created=%s, date_modified=%s
+                        name=COALESCE(%s, name),
+                        surname=COALESCE(%s, surname),
+                        alias=COALESCE(%s, alias),
+                        full_name=COALESCE(%s, full_name),
+                        relation_type=COALESCE(%s, relation_type),
+                        relative_name=COALESCE(%s, relative_name),
+                        gender=COALESCE(%s, gender),
+                        is_died=COALESCE(%s, is_died),
+                        date_of_birth=COALESCE(NULLIF(%s,'')::date, date_of_birth),
+                        age=COALESCE(%s, age),
+                        occupation=COALESCE(%s, occupation),
+                        education_qualification=COALESCE(%s, education_qualification),
+                        caste=COALESCE(%s, caste),
+                        sub_caste=COALESCE(%s, sub_caste),
+                        religion=COALESCE(%s, religion),
+                        nationality=COALESCE(%s, nationality),
+                        designation=COALESCE(%s, designation),
+                        place_of_work=COALESCE(%s, place_of_work),
+                        present_house_no=COALESCE(%s, present_house_no),
+                        present_street_road_no=COALESCE(%s, present_street_road_no),
+                        present_ward_colony=COALESCE(%s, present_ward_colony),
+                        present_landmark_milestone=COALESCE(%s, present_landmark_milestone),
+                        present_locality_village=COALESCE(%s, present_locality_village),
+                        present_area_mandal=COALESCE(%s, present_area_mandal),
+                        present_district=COALESCE(%s, present_district),
+                        present_state_ut=COALESCE(%s, present_state_ut),
+                        present_country=COALESCE(%s, present_country),
+                        present_residency_type=COALESCE(%s, present_residency_type),
+                        present_pin_code=COALESCE(%s, present_pin_code),
+                        present_jurisdiction_ps=COALESCE(%s, present_jurisdiction_ps),
+                        permanent_house_no=COALESCE(%s, permanent_house_no),
+                        permanent_street_road_no=COALESCE(%s, permanent_street_road_no),
+                        permanent_ward_colony=COALESCE(%s, permanent_ward_colony),
+                        permanent_landmark_milestone=COALESCE(%s, permanent_landmark_milestone),
+                        permanent_locality_village=COALESCE(%s, permanent_locality_village),
+                        permanent_area_mandal=COALESCE(%s, permanent_area_mandal),
+                        permanent_district=COALESCE(%s, permanent_district),
+                        permanent_state_ut=COALESCE(%s, permanent_state_ut),
+                        permanent_country=COALESCE(%s, permanent_country),
+                        permanent_residency_type=COALESCE(%s, permanent_residency_type),
+                        permanent_pin_code=COALESCE(%s, permanent_pin_code),
+                        permanent_jurisdiction_ps=COALESCE(%s, permanent_jurisdiction_ps),
+                        phone_number=COALESCE(%s, phone_number),
+                        country_code=COALESCE(%s, country_code),
+                        email_id=COALESCE(%s, email_id),
+                        date_created=COALESCE(%s, date_created),
+                        date_modified=COALESCE(%s, date_modified)
                     WHERE person_id=%s
                     """,
                     (
@@ -656,20 +717,21 @@ class PersonsETL:
                         self.truncate_string(permanent.get('RESIDENCY_TYPE'), 100, 'permanent_residency_type'),
                         self.truncate_string(permanent.get('PIN_CODE'), 20, 'permanent_pin_code'),
                         self.truncate_string(permanent.get('JURISDICTION_PS'), 20, 'permanent_jurisdiction_ps'),
-                        self.truncate_string(contact.get('PHONE_NUMBER'), 20, 'phone_number'),
+                        self.truncate_string(contact.get('PHONE_NUMBER'), 255, 'phone_number'),
                         self.truncate_string(contact.get('COUNTRY_CODE'), 10, 'country_code'),
                         self.truncate_string(contact.get('EMAIL_ID'), 255, 'email_id'),
                         date_created, date_modified,
                         person_id
                     )
                 )
-                self.stats['updated'] += 1
+                with self.stats_lock:
+                    self.stats['updated'] += 1
                 
                 # Update any new fields that were added via schema evolution
                 if table_columns:
-                    self.update_new_fields(person_id, p, personal, present, permanent, contact, table_columns)
+                    self.update_new_fields(person_id, p, personal, present, permanent, contact, table_columns, cursor)
             else:
-                self.db_cursor.execute(
+                cursor.execute(
                     f"""
                     INSERT INTO {PERSONS_TABLE} (
                         person_id, name, surname, alias, full_name,
@@ -748,25 +810,27 @@ class PersonsETL:
                         self.truncate_string(permanent.get('RESIDENCY_TYPE'), 100, 'permanent_residency_type'),
                         self.truncate_string(permanent.get('PIN_CODE'), 20, 'permanent_pin_code'),
                         self.truncate_string(permanent.get('JURISDICTION_PS'), 20, 'permanent_jurisdiction_ps'),
-                        self.truncate_string(contact.get('PHONE_NUMBER'), 20, 'phone_number'),
+                        self.truncate_string(contact.get('PHONE_NUMBER'), 255, 'phone_number'),
                         self.truncate_string(contact.get('COUNTRY_CODE'), 10, 'country_code'),
                         self.truncate_string(contact.get('EMAIL_ID'), 255, 'email_id'),
                         date_created, date_modified
                     )
                 )
-                self.stats['inserted'] += 1
+                with self.stats_lock:
+                    self.stats['inserted'] += 1
                 
                 # Update any new fields that were added via schema evolution (for new inserts, new fields will be NULL initially)
                 # They'll be updated when the person is reprocessed in future runs
                 if table_columns:
-                    self.update_new_fields(person_id, p, personal, present, permanent, contact, table_columns)
+                    self.update_new_fields(person_id, p, personal, present, permanent, contact, table_columns, cursor)
 
-            self.db_conn.commit()
+            conn.commit()
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             logger.error(f"❌ Error upserting person {p.get('PERSON_ID')}: {e}")
-            self.stats['failed'] += 1
-            self.stats['errors'] += 1
+            with self.stats_lock:
+                self.stats['failed'] += 1
+                self.stats['errors'] += 1
 
     def run(self):
         logger.info("=" * 80)
@@ -794,49 +858,60 @@ class PersonsETL:
             batch_size = 100  # Log batch stats every 100 records
             first_record_processed = False
             
-            for idx, pid in enumerate(tqdm(person_ids, desc="Processing persons", unit="person"), 1):
-                # Store initial stats for batch calculation
-                if idx % batch_size == 1:
-                    batch_start_inserted = self.stats['inserted']
-                    batch_start_updated = self.stats['updated']
-                    batch_start_no_change = self.stats['no_change']
-                    batch_start_failed = self.stats['failed']
-                
+            def process_person(pid, table_columns):
+                nonlocal first_record_processed
                 data = self.fetch_person_api(pid)
                 if data:
                     # Check for schema evolution on first record
                     if not first_record_processed and table_columns is not None:
-                        new_fields = self.detect_new_fields(data, table_columns)
-                        if new_fields:
-                            logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
-                            # Add new columns to table
-                            for api_field, db_column in new_fields.items():
-                                if self.add_column_to_table(db_column):
-                                    # Update table_columns set
-                                    table_columns.add(db_column)
-                            # Update existing records with new fields
-                            self.update_existing_records_with_new_fields(new_fields)
-                        first_record_processed = True
+                        with self.schema_lock:
+                            # Double check in case another thread already did it
+                            if not first_record_processed:
+                                new_fields = self.detect_new_fields(data, table_columns)
+                                if new_fields:
+                                    logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
+                                    # Add new columns to table
+                                    for api_field, db_column in new_fields.items():
+                                        if self.add_column_to_table(db_column):
+                                            # Update table_columns set
+                                            table_columns.add(db_column)
+                                    # Update existing records with new fields
+                                    self.update_existing_records_with_new_fields(new_fields)
+                                first_record_processed = True
                     
-                    self.upsert_person(data, table_columns)
+                    with self.db_pool.get_connection_context() as (conn, cursor):
+                        self.upsert_person(data, table_columns, conn, cursor)
                 else:
-                    self.stats['failed'] += 1
+                    with self.stats_lock:
+                        self.stats['no_data'] += 1
+
+            max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(process_person, pid, table_columns): pid for pid in person_ids}
                 
-                # Log batch statistics every batch_size records
-                if idx % batch_size == 0:
-                    batch_inserted = self.stats['inserted'] - batch_start_inserted
-                    batch_updated = self.stats['updated'] - batch_start_updated
-                    batch_no_change = self.stats['no_change'] - batch_start_no_change
-                    batch_failed = self.stats['failed'] - batch_start_failed
-                    logger.info(f"   📊 Batch Stats (Records {idx-batch_size+1}-{idx}) - "
-                               f"Inserted: {batch_inserted}, Updated: {batch_updated}, "
-                               f"No Change: {batch_no_change}, Failed: {batch_failed}")
-                
-                time.sleep(0.2)
+                with tqdm(total=len(person_ids), desc="Processing persons", unit="person") as pbar:
+                    for idx, future in enumerate(as_completed(futures), 1):
+                        pid = futures[future]
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logger.error(f"Error processing person {pid}: {e}")
+                            with self.stats_lock:
+                                self.stats['failed'] += 1
+                                self.stats['errors'] += 1
+                        
+                        pbar.update(1)
+                        if idx % batch_size == 0:
+                            # Log batch statistics every batch_size records
+                            with self.stats_lock:
+                                logger.info(f"   📊 Progress: {idx}/{len(person_ids)} - "
+                                           f"Inserted: {self.stats['inserted']}, Updated: {self.stats['updated']}, "
+                                           f"Failed: {self.stats['failed']}")
 
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {PERSONS_TABLE}")
-            db_persons_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as (conn, cursor):
+                cursor.execute(f"SELECT COUNT(*) FROM {PERSONS_TABLE}")
+                db_persons_count = cursor.fetchone()[0]
             
             logger.info("")
             logger.info("=" * 80)
@@ -853,6 +928,7 @@ class PersonsETL:
             logger.info(f"  Total Inserted (New):     {self.stats['inserted']}")
             logger.info(f"  Total Updated:            {self.stats['updated']}")
             logger.info(f"  Total No Change:          {self.stats['no_change']}")
+            logger.info(f"  Total No Data (404/dead): {self.stats['no_data']}")
             logger.info(f"  Total Failed:              {self.stats['failed']}")
             logger.info(f"  Total in DB:               {db_persons_count}")
             logger.info(f"")

@@ -2,23 +2,23 @@ import psycopg2
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from db_pooling import PostgreSQLConnectionPool
+except ImportError:
+    pass
 
 # Load environment variables
 load_dotenv()
 
-
 def connect_to_db():
-    """Connect to PostgreSQL database"""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        raise Exception("DATABASE_URL not found in environment variables")
-
-    # Remove schema parameter from URL as psycopg2 doesn't recognize it
-    if "?schema=" in db_url:
-        db_url = db_url.split("?schema=")[0]
-
-    return psycopg2.connect(db_url)
+    """Connect to PostgreSQL database using db_pool"""
+    pool = PostgreSQLConnectionPool()
+    return pool
 
 
 def extract_alias_from_name(name):
@@ -155,8 +155,7 @@ def clean_name(name):
 def fix_person_data():
     """Fix person data by cleaning names and extracting information"""
 
-    conn = connect_to_db()
-    cursor = conn.cursor()
+    pool = PostgreSQLConnectionPool()
 
     print("\n=== Fixing Person Name Data ===\n")
     print("This script will:")
@@ -169,40 +168,41 @@ def fix_person_data():
 
     # Check if raw_full_name column exists, if not create it
     print("Checking if raw_full_name column exists...")
-    cursor.execute(
-        """
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name='persons' AND column_name='raw_full_name';
-    """
-    )
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='persons' AND column_name='raw_full_name';
+            """
+            )
 
-    column_exists = cursor.fetchone()
+            column_exists = cursor.fetchone()
 
-    if not column_exists:
-        print("raw_full_name column does NOT exist. Will be created.")
-        create_column = True
-    else:
-        print("raw_full_name column already exists.")
-        create_column = False
+            if not column_exists:
+                print("raw_full_name column does NOT exist. Will be created.")
+                create_column = True
+            else:
+                print("raw_full_name column already exists.")
+                create_column = False
 
-    print()
+            print()
 
-    # Fetch all persons with issues
-    cursor.execute(
-        """
-        SELECT person_id, name, surname, full_name, alias, 
-               relative_name, relation_type
-        FROM persons
-    """
-    )
+            # Fetch all persons with issues
+            cursor.execute(
+                """
+                SELECT person_id, name, surname, full_name, alias, 
+                       relative_name, relation_type
+                FROM persons
+            """
+            )
 
-    persons = cursor.fetchall()
+            persons = cursor.fetchall()
+            
     print(f"Total Persons to analyze: {len(persons)}\n")
 
-    updates = []
-
-    for person in persons:
+    def analyze_person(person):
         person_id, name, surname, full_name, alias, relative_name, relation_type = (
             person
         )
@@ -211,7 +211,7 @@ def fix_person_data():
         original_name = (full_name or name or "").strip()
 
         if not original_name:
-            continue
+            return None
 
         # Track changes
         changes = {}
@@ -246,13 +246,22 @@ def fix_person_data():
                 changes["raw_full_name"] = original_name
                 changes["full_name"] = cleaned_name
 
-                updates.append(
-                    {
-                        "person_id": person_id,
-                        "original_name": original_name,
-                        "changes": changes,
-                    }
-                )
+                return {
+                    "person_id": person_id,
+                    "original_name": original_name,
+                    "changes": changes,
+                }
+        return None
+
+    updates = []
+    max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(analyze_person, p): p for p in persons}
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                updates.append(res)
 
     print(f"Found {len(updates)} records that need updates.\n")
 
@@ -292,55 +301,69 @@ def fix_person_data():
     if create_column:
         print("Creating raw_full_name column...")
         try:
-            cursor.execute(
-                """
-                ALTER TABLE persons 
-                ADD COLUMN raw_full_name TEXT;
-            """
-            )
-            conn.commit()
+            with pool.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        ALTER TABLE persons 
+                        ADD COLUMN raw_full_name TEXT;
+                    """
+                    )
+                conn.commit()
             print("✓ raw_full_name column created successfully.\n")
         except Exception as e:
             print(f"✗ Error creating column: {e}\n")
-            cursor.close()
-            conn.close()
             return
 
     update_count = 0
     error_count = 0
+    stats_lock = threading.Lock()
 
-    for update in updates:
-        try:
-            # Build the UPDATE query dynamically based on changes
-            set_clauses = []
-            values = []
+    def process_update_batch(batch):
+        local_updated = 0
+        local_errors = 0
+        with pool.get_connection_context() as conn:
+            with conn.cursor() as cursor:
+                for update in batch:
+                    try:
+                        # Build the UPDATE query dynamically based on changes
+                        set_clauses = []
+                        values = []
 
-            for field, value in update["changes"].items():
-                set_clauses.append(f"{field} = %s")
-                values.append(value)
+                        for field, value in update["changes"].items():
+                            set_clauses.append(f"{field} = %s")
+                            values.append(value)
 
-            # Add person_id for WHERE clause
-            values.append(update["person_id"])
+                        # Add person_id for WHERE clause
+                        values.append(update["person_id"])
 
-            query = f"""
-                UPDATE persons
-                SET {', '.join(set_clauses)}
-                WHERE person_id = %s
-            """
+                        query = f"""
+                            UPDATE persons
+                            SET {', '.join(set_clauses)}
+                            WHERE person_id = %s
+                        """
 
-            cursor.execute(query, values)
-            update_count += 1
-
-            if update_count % 50 == 0:
+                        cursor.execute(query, values)
+                        local_updated += 1
+                    except Exception as e:
+                        local_errors += 1
+                        print(f"Error updating {update['person_id']}: {e}")
+            conn.commit()
+            
+        with stats_lock:
+            nonlocal update_count, error_count
+            update_count += local_updated
+            error_count += local_errors
+            if update_count % 500 == 0:
                 print(f"Updated {update_count} records...")
-                conn.commit()  # Commit in batches
 
-        except Exception as e:
-            error_count += 1
-            print(f"Error updating {update['person_id']}: {e}")
-
-    # Final commit
-    conn.commit()
+    batch_size = 500
+    update_batches = [updates[i:i + batch_size] for i in range(0, len(updates), batch_size)]
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_update_batch, batch): batch for batch in update_batches}
+        for future in as_completed(futures):
+            future.result()
 
     print(f"\n=== Update Complete ===")
     print(f"Successfully updated: {update_count} records")
@@ -362,10 +385,6 @@ def fix_person_data():
     print(f"Aliases extracted: {alias_updates}")
     print(f"Relationship info extracted: {relation_updates}")
     print(f"Names cleaned: {name_cleanups}")
-
-    # Close connection
-    cursor.close()
-    conn.close()
 
     print("\n✅ Data fix completed successfully!\n")
 

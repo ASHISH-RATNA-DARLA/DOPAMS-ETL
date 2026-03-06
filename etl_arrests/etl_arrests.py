@@ -15,8 +15,12 @@ import logging
 import colorlog
 from typing import List, Dict, Optional, Tuple, Set
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
+from db_pooling import PostgreSQLConnectionPool
 
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
@@ -143,6 +147,27 @@ class ArrestsETL:
     def __init__(self):
         self.db_conn = None
         self.db_cursor = None
+        
+        # Thread safety locks
+        self.stats_lock = threading.Lock()
+        self.log_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
+        
+        # Initialize connection pool
+        max_workers = int(os.environ.get('MAX_WORKERS', (os.cpu_count() or 1) * 4))
+        self.max_workers = min(32, max_workers)  # Cap at 32 concurrent connections max
+        
+        try:
+            self.db_pool = PostgreSQLConnectionPool(
+                minconn=1,
+                maxconn=self.max_workers + 2,
+                **DB_CONFIG
+            )
+            logger.info(f"✅ Created connection pool with max {self.max_workers + 2} connections")
+        except Exception as e:
+            logger.error(f"❌ Failed to create connection pool: {e}")
+            raise
+            
         self.stats = {
             'total_api_calls': 0,
             'total_arrests_fetched': 0,
@@ -257,9 +282,17 @@ class ArrestsETL:
             self.duplicates_log.close()
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database (creates connection pool if not exists)"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
+            if not hasattr(self, 'db_pool'):
+                self.db_pool = PostgreSQLConnectionPool(
+                    minconn=1,
+                    maxconn=self.max_workers + 2,
+                    **DB_CONFIG
+                )
+            
+            # Keep a persistent connection for schema/single-thread ops
+            self.db_conn = self.db_pool.get_connection()
             self.db_cursor = self.db_conn.cursor()
             logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
             return True
@@ -268,22 +301,26 @@ class ArrestsETL:
             return False
     
     def close_db(self):
-        """Close database connection"""
-        if self.db_cursor:
+        """Close database connection and pool"""
+        if hasattr(self, 'db_cursor') and self.db_cursor:
             self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
+        if hasattr(self, 'db_conn') and self.db_conn:
+            self.db_pool.release_connection(self.db_conn)
+        if hasattr(self, 'db_pool') and self.db_pool:
+            self.db_pool.close_all()
         logger.info("Database connection closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = %s
+                    """, (table_name,))
+                    return {row[0] for row in cur.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -295,28 +332,30 @@ class ArrestsETL:
         - If table has data: return max(date_created, date_modified) from table
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {ARRESTS_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
-                return '2022-01-01T00:00:00+05:30'
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-            min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {ARRESTS_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    # Check if table has any data
+                    cur.execute(f"SELECT COUNT(*) FROM {ARRESTS_TABLE}")
+                    count = cur.fetchone()[0]
+                    
+                    if count == 0:
+                        # New database, start from beginning
+                        logger.info("📊 Table is empty, starting from 2022-01-01")
+                        return '2022-01-01T00:00:00+05:30'
+                    
+                    # Table has data, get max of date_created and date_modified
+                    # Only consider dates >= 2022-01-01 to avoid processing very old data
+                    MIN_START_DATE = '2022-01-01T00:00:00+05:30'
+                    min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                    
+                    cur.execute(f"""
+                        SELECT GREATEST(
+                            COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                            COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                        ) as max_date
+                        FROM {ARRESTS_TABLE}
+                    """)
+                    result = cur.fetchone()
             if result and result[0]:
                 max_date = result[0]
                 # Convert to IST timezone if needed
@@ -378,33 +417,35 @@ class ArrestsETL:
     
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the arrests table."""
-        try:
-            # Determine column type based on field name
-            if 'date' in column_name.lower() or 'at' in column_name.lower():
-                if column_name == 'date_of_issue_41a':
-                    column_type = 'DATE'
+        with self.schema_lock:
+            try:
+                # Determine column type based on field name
+                if 'date' in column_name.lower() or 'at' in column_name.lower():
+                    if column_name == 'date_of_issue_41a':
+                        column_type = 'DATE'
+                    else:
+                        column_type = 'TIMESTAMPTZ'
+                elif column_name in ('crime_id', 'person_id'):
+                    column_type = 'VARCHAR(50)'  # Matches foreign key types
+                elif 'id' in column_name.lower():
+                    column_type = 'VARCHAR(50)'  # Most IDs are VARCHAR in this schema
+                elif column_name.startswith('is_'):
+                    column_type = 'BOOLEAN'
+                elif column_name in ('accused_seq_no', 'accused_code', 'accused_type'):
+                    column_type = 'TEXT'
                 else:
-                    column_type = 'TIMESTAMPTZ'
-            elif column_name in ('crime_id', 'person_id'):
-                column_type = 'VARCHAR(50)'  # Matches foreign key types
-            elif 'id' in column_name.lower():
-                column_type = 'VARCHAR(50)'  # Most IDs are VARCHAR in this schema
-            elif column_name.startswith('is_'):
-                column_type = 'BOOLEAN'
-            elif column_name in ('accused_seq_no', 'accused_code', 'accused_type'):
-                column_type = 'TEXT'
-            else:
-                column_type = 'TEXT'
-            
-            alter_sql = f"ALTER TABLE {ARRESTS_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
-            logger.info(f"✅ Added column {column_name} ({column_type}) to {ARRESTS_TABLE}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
-            return False
+                    column_type = 'TEXT'
+                
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cur:
+                        alter_sql = f"ALTER TABLE {ARRESTS_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                        cur.execute(alter_sql)
+                        conn.commit()
+                        logger.info(f"✅ Added column {column_name} ({column_type}) to {ARRESTS_TABLE}")
+                        return True
+            except Exception as e:
+                logger.error(f"❌ Error adding column {column_name}: {e}")
+                return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
         """
@@ -593,27 +634,28 @@ class ArrestsETL:
             'error': error
         }
         
-        self.api_log.write(f"\n{'='*80}\n")
-        self.api_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.api_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.api_log.write(f"{'-'*80}\n")
-        
-        if error:
-            self.api_log.write(f"ERROR: {error}\n")
-            self.api_log.write(f"Count: 0\n")
-            self.api_log.write(f"Crime IDs: []\n")
-        else:
-            self.api_log.write(f"Count: {count}\n")
-            self.api_log.write(f"Crime IDs ({len(crime_ids)}):\n")
-            for i, crime_id in enumerate(crime_ids, 1):
-                self.api_log.write(f"  {i}. {crime_id}\n")
+        with self.log_lock:
+            self.api_log.write(f"\n{'='*80}\n")
+            self.api_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.api_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.api_log.write(f"{'-'*80}\n")
             
-            # Also write JSON format for easy parsing
-            self.api_log.write(f"\nJSON Format:\n")
-            self.api_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-            self.api_log.write(f"\n")
-        
-        self.api_log.flush()
+            if error:
+                self.api_log.write(f"ERROR: {error}\n")
+                self.api_log.write(f"Count: 0\n")
+                self.api_log.write(f"Crime IDs: []\n")
+            else:
+                self.api_log.write(f"Count: {count}\n")
+                self.api_log.write(f"Crime IDs ({len(crime_ids)}):\n")
+                for i, crime_id in enumerate(crime_ids, 1):
+                    self.api_log.write(f"  {i}. {crime_id}\n")
+                
+                # Also write JSON format for easy parsing
+                self.api_log.write(f"\nJSON Format:\n")
+                self.api_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+                self.api_log.write(f"\n")
+            
+            self.api_log.flush()
     
     def normalize_date_value(self, value):
         """
@@ -630,7 +672,7 @@ class ArrestsETL:
             return None
         return value
     
-    def transform_arrests(self, arrests_raw: Dict) -> Dict:
+    def transform_arrests(self, arrests_raw: Dict, cursor) -> Dict:
         """
         Transform API response to database format
         Dates are always taken from API (never use CURRENT_TIMESTAMP)
@@ -650,8 +692,8 @@ class ArrestsETL:
         
         if crime_id_str:
             try:
-                self.db_cursor.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id_str,))
-                result = self.db_cursor.fetchone()
+                cursor.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id_str,))
+                result = cursor.fetchone()
                 if result:
                     crime_id_valid = crime_id_str
                     logger.trace(f"CRIME_ID {crime_id_str} found in crimes table")
@@ -659,7 +701,7 @@ class ArrestsETL:
                     logger.trace(f"CRIME_ID {crime_id_str} not found in crimes table")
             except Exception as e:
                 logger.error(f"Error validating crime_id {crime_id_str}: {e}")
-                self.db_conn.rollback()
+                # Note: Calling worker handles transaction
         
         # Validate person_id (optional - only if provided)
         person_id_str = arrests_raw.get('PERSON_ID')
@@ -667,8 +709,8 @@ class ArrestsETL:
         
         if person_id_str:
             try:
-                self.db_cursor.execute(f"SELECT person_id FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id_str,))
-                result = self.db_cursor.fetchone()
+                cursor.execute(f"SELECT person_id FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id_str,))
+                result = cursor.fetchone()
                 if result:
                     person_id_valid = person_id_str
                     logger.trace(f"PERSON_ID {person_id_str} found in persons table")
@@ -676,7 +718,7 @@ class ArrestsETL:
                     logger.trace(f"PERSON_ID {person_id_str} not found in persons table")
             except Exception as e:
                 logger.error(f"Error validating person_id {person_id_str}: {e}")
-                self.db_conn.rollback()
+                # Note: Calling worker handles transaction
         
         # Normalize date/timestamp fields (convert empty strings to None)
         transformed = {
@@ -705,19 +747,19 @@ class ArrestsETL:
         logger.trace(f"Transformed arrests: {json.dumps({k: v for k, v in transformed.items() if not k.startswith('_original')}, indent=2, default=str)}")
         return transformed
     
-    def arrests_exists(self, crime_id: str, accused_seq_no: str) -> bool:
+    def arrests_exists(self, crime_id: str, accused_seq_no: str, cursor) -> bool:
         """Check if arrests record already exists in database (based on unique constraint)"""
         logger.trace(f"Checking if arrests exists: crime_id={crime_id}, accused_seq_no={accused_seq_no}")
         query = f"""
             SELECT 1 FROM {ARRESTS_TABLE} 
             WHERE crime_id = %s AND accused_seq_no = %s
         """
-        self.db_cursor.execute(query, (crime_id, accused_seq_no))
-        exists = self.db_cursor.fetchone() is not None
+        cursor.execute(query, (crime_id, accused_seq_no))
+        exists = cursor.fetchone() is not None
         logger.trace(f"Arrests exists: {exists}")
         return exists
     
-    def get_existing_arrests(self, crime_id: str, accused_seq_no: str) -> Optional[Dict]:
+    def get_existing_arrests(self, crime_id: str, accused_seq_no: str, cursor) -> Optional[Dict]:
         """Get existing arrests record from database"""
         query = f"""
             SELECT crime_id, person_id, accused_seq_no, accused_code, accused_type,
@@ -727,8 +769,8 @@ class ArrestsETL:
             FROM {ARRESTS_TABLE}
             WHERE crime_id = %s AND accused_seq_no = %s
         """
-        self.db_cursor.execute(query, (crime_id, accused_seq_no))
-        row = self.db_cursor.fetchone()
+        cursor.execute(query, (crime_id, accused_seq_no))
+        row = cursor.fetchone()
         if row:
             return {
                 'crime_id': row[0],
@@ -762,18 +804,19 @@ class ArrestsETL:
             'arrests_data': arrests
         }
         
-        self.failed_log.write(f"\n{'='*80}\n")
-        self.failed_log.write(f"CRIME_ID: {arrests.get('crime_id')}\n")
-        self.failed_log.write(f"PERSON_ID: {arrests.get('person_id')}\n")
-        self.failed_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
-        self.failed_log.write(f"REASON: {reason}\n")
-        if error_details:
-            self.failed_log.write(f"ERROR: {error_details}\n")
-        self.failed_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.failed_log.write(f"\nJSON Format:\n")
-        self.failed_log.write(json.dumps(failed_info, indent=2, ensure_ascii=False, default=str))
-        self.failed_log.write(f"\n")
-        self.failed_log.flush()
+        with self.log_lock:
+            self.failed_log.write(f"\n{'='*80}\n")
+            self.failed_log.write(f"CRIME_ID: {arrests.get('crime_id')}\n")
+            self.failed_log.write(f"PERSON_ID: {arrests.get('person_id')}\n")
+            self.failed_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
+            self.failed_log.write(f"REASON: {reason}\n")
+            if error_details:
+                self.failed_log.write(f"ERROR: {error_details}\n")
+            self.failed_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.failed_log.write(f"\nJSON Format:\n")
+            self.failed_log.write(json.dumps(failed_info, indent=2, ensure_ascii=False, default=str))
+            self.failed_log.write(f"\n")
+            self.failed_log.flush()
     
     def log_invalid_ids(self, arrests: Dict, invalid_ids: Dict, chunk_range: str = ""):
         """
@@ -803,17 +846,18 @@ class ArrestsETL:
             reasons.append('PERSON_ID not found in persons table')
         reason_str = '; '.join(reasons) if reasons else 'Unknown'
         
-        self.invalid_ids_log.write(f"\n{'='*80}\n")
-        self.invalid_ids_log.write(f"CRIME_ID: {arrests.get('_original_crime_id')}\n")
-        self.invalid_ids_log.write(f"PERSON_ID: {arrests.get('_original_person_id')}\n")
-        self.invalid_ids_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
-        self.invalid_ids_log.write(f"REASON: {reason_str}\n")
-        self.invalid_ids_log.write(f"Chunk: {chunk_range}\n")
-        self.invalid_ids_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.invalid_ids_log.write(f"\nJSON Format:\n")
-        self.invalid_ids_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
-        self.invalid_ids_log.write(f"\n")
-        self.invalid_ids_log.flush()
+        with self.log_lock:
+            self.invalid_ids_log.write(f"\n{'='*80}\n")
+            self.invalid_ids_log.write(f"CRIME_ID: {arrests.get('_original_crime_id')}\n")
+            self.invalid_ids_log.write(f"PERSON_ID: {arrests.get('_original_person_id')}\n")
+            self.invalid_ids_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
+            self.invalid_ids_log.write(f"REASON: {reason_str}\n")
+            self.invalid_ids_log.write(f"Chunk: {chunk_range}\n")
+            self.invalid_ids_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.invalid_ids_log.write(f"\nJSON Format:\n")
+            self.invalid_ids_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
+            self.invalid_ids_log.write(f"\n")
+            self.invalid_ids_log.flush()
     
     def log_invalid_person_id(self, arrests: Dict, original_person_id: str, chunk_range: str = ""):
         """
@@ -835,18 +879,19 @@ class ArrestsETL:
             'arrests_data': arrests
         }
         
-        self.invalid_person_id_log.write(f"\n{'='*80}\n")
-        self.invalid_person_id_log.write(f"CRIME_ID: {arrests.get('_original_crime_id')}\n")
-        self.invalid_person_id_log.write(f"PERSON_ID (from API): {original_person_id}\n")
-        self.invalid_person_id_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
-        self.invalid_person_id_log.write(f"REASON: PERSON_ID not found in persons table\n")
-        self.invalid_person_id_log.write(f"ACTION: Record processed with person_id = NULL\n")
-        self.invalid_person_id_log.write(f"Chunk: {chunk_range}\n")
-        self.invalid_person_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.invalid_person_id_log.write(f"\nJSON Format:\n")
-        self.invalid_person_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
-        self.invalid_person_id_log.write(f"\n")
-        self.invalid_person_id_log.flush()
+        with self.log_lock:
+            self.invalid_person_id_log.write(f"\n{'='*80}\n")
+            self.invalid_person_id_log.write(f"CRIME_ID: {arrests.get('_original_crime_id')}\n")
+            self.invalid_person_id_log.write(f"PERSON_ID (from API): {original_person_id}\n")
+            self.invalid_person_id_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
+            self.invalid_person_id_log.write(f"REASON: PERSON_ID not found in persons table\n")
+            self.invalid_person_id_log.write(f"ACTION: Record processed with person_id = NULL\n")
+            self.invalid_person_id_log.write(f"Chunk: {chunk_range}\n")
+            self.invalid_person_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.invalid_person_id_log.write(f"\nJSON Format:\n")
+            self.invalid_person_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
+            self.invalid_person_id_log.write(f"\n")
+            self.invalid_person_id_log.flush()
     
     def log_duplicates_chunk(self, from_date: str, to_date: str, duplicates: List[Dict]):
         """Log duplicates found in a chunk"""
@@ -857,27 +902,28 @@ class ArrestsETL:
             'duplicates': duplicates
         }
         
-        self.duplicates_log.write(f"\n{'='*80}\n")
-        self.duplicates_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.duplicates_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.duplicates_log.write(f"{'-'*80}\n")
-        self.duplicates_log.write(f"Duplicate Count: {len(duplicates)}\n")
-        self.duplicates_log.write(f"Note: These duplicates were PROCESSED (not skipped) to allow updates\n")
-        self.duplicates_log.write(f"\nDuplicates:\n")
-        for i, dup in enumerate(duplicates, 1):
-            self.duplicates_log.write(f"  {i}. CRIME_ID: {dup['crime_id']}, ACCUSED_SEQ_NO: {dup.get('accused_seq_no')}\n")
-            self.duplicates_log.write(f"     Occurrence: #{dup.get('occurrence', 'N/A')}\n")
-            self.duplicates_log.write(f"     First seen in: {dup['first_seen_in']}\n")
-            self.duplicates_log.write(f"     Duplicate in: {dup['duplicate_in']}\n")
-        
-        # Also write JSON format for easy parsing
-        self.duplicates_log.write(f"\nJSON Format:\n")
-        self.duplicates_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-        self.duplicates_log.write(f"\n")
-        
-        self.duplicates_log.flush()
+        with self.log_lock:
+            self.duplicates_log.write(f"\n{'='*80}\n")
+            self.duplicates_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.duplicates_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.duplicates_log.write(f"{'-'*80}\n")
+            self.duplicates_log.write(f"Duplicate Count: {len(duplicates)}\n")
+            self.duplicates_log.write(f"Note: These duplicates were PROCESSED (not skipped) to allow updates\n")
+            self.duplicates_log.write(f"\nDuplicates:\n")
+            for i, dup in enumerate(duplicates, 1):
+                self.duplicates_log.write(f"  {i}. CRIME_ID: {dup['crime_id']}, ACCUSED_SEQ_NO: {dup.get('accused_seq_no')}\n")
+                self.duplicates_log.write(f"     Occurrence: #{dup.get('occurrence', 'N/A')}\n")
+                self.duplicates_log.write(f"     First seen in: {dup['first_seen_in']}\n")
+                self.duplicates_log.write(f"     Duplicate in: {dup['duplicate_in']}\n")
+            
+            # Also write JSON format for easy parsing
+            self.duplicates_log.write(f"\nJSON Format:\n")
+            self.duplicates_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+            self.duplicates_log.write(f"\n")
+            
+            self.duplicates_log.flush()
     
-    def insert_arrests(self, arrests: Dict, chunk_date_range: str = "") -> Tuple[bool, str]:
+    def insert_arrests(self, arrests: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
         Insert or update single arrests record into database with smart update logic
         Dates are always from API (never use CURRENT_TIMESTAMP)
@@ -919,7 +965,8 @@ class ArrestsETL:
         if original_person_id and not person_id:
             invalid_ids['person_id'] = True
             logger.warning(f"⚠️  PERSON_ID {original_person_id} not found in persons table, will set to NULL and process record")
-            self.stats['total_arrests_failed_person_id'] += 1
+            with self.stats_lock:
+                self.stats['total_arrests_failed_person_id'] += 1
             # Set person_id to None explicitly
             arrests['person_id'] = None
             # Log to separate file for invalid person_id
@@ -931,10 +978,11 @@ class ArrestsETL:
             reason = 'invalid_ids'
             error_details = f"Invalid IDs: {invalid_ids}"
             logger.warning(f"⚠️  {error_details}, skipping arrests")
-            self.stats['total_arrests_failed'] += 1
-            self.stats['total_arrests_failed_crime_id'] += 1
-            if invalid_ids.get('person_id'):
-                self.stats['total_arrests_failed_person_id'] += 1
+            with self.stats_lock:
+                self.stats['total_arrests_failed'] += 1
+                self.stats['total_arrests_failed_crime_id'] += 1
+                if invalid_ids.get('person_id'):
+                    self.stats['total_arrests_failed_person_id'] += 1
             self.log_failed_record(arrests, reason, error_details)
             self.log_invalid_ids(arrests, invalid_ids, chunk_date_range)
             return False, reason
@@ -943,7 +991,8 @@ class ArrestsETL:
             reason = 'missing_accused_seq_no'
             error_details = "Arrests record missing ACCUSED_SEQ_NO"
             logger.warning(f"⚠️  {error_details}")
-            self.stats['total_arrests_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_arrests_failed'] += 1
             self.log_failed_record(arrests, reason, error_details)
             return False, reason
         
@@ -951,9 +1000,9 @@ class ArrestsETL:
             logger.trace(f"Processing arrests: crime_id={crime_id}, accused_seq_no={accused_seq_no}")
             
             # Check if arrests already exists (based on unique constraint)
-            if self.arrests_exists(crime_id, accused_seq_no):
+            if self.arrests_exists(crime_id, accused_seq_no, cursor):
                 # Get existing record to compare
-                existing = self.get_existing_arrests(crime_id, accused_seq_no)
+                existing = self.get_existing_arrests(crime_id, accused_seq_no, cursor)
                 if not existing:
                     logger.warning(f"⚠️  Arrests exists check returned True but fetch returned None")
                     # Fall back to insert
@@ -1032,23 +1081,24 @@ class ArrestsETL:
                                 logger.trace(f"  Both NULL for {db_field}, no update")
                     
                     # Only update if there are changes
-                    if update_fields:
                         update_query = f"""
                             UPDATE {ARRESTS_TABLE} SET
                                 {', '.join(update_fields)}
                             WHERE crime_id = %s AND accused_seq_no = %s
                         """
                         update_values.extend([crime_id, accused_seq_no])
-                        self.db_cursor.execute(update_query, tuple(update_values))
-                        self.stats['total_arrests_updated'] += 1
+                        cursor.execute(update_query, tuple(update_values))
+                        with self.stats_lock:
+                            self.stats['total_arrests_updated'] += 1
                         logger.debug(f"Updated arrests: crime_id={crime_id}, accused_seq_no={accused_seq_no} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
-                        self.db_conn.commit()
+                        conn.commit()
                         logger.trace(f"Transaction committed for updated arrests")
                         return True, 'updated'
                     else:
                         # No changes needed
-                        self.stats['total_arrests_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_arrests_no_change'] += 1
                         logger.trace(f"No changes needed for arrests (all fields match or preserved)")
                         return True, 'no_change'
                 else:
@@ -1057,7 +1107,6 @@ class ArrestsETL:
                     # Fall through to insert logic
             else:
                 # Insert new arrests
-                logger.trace(f"Inserting new arrests: crime_id={crime_id}, accused_seq_no={accused_seq_no}")
                 insert_query = f"""
                     INSERT INTO {ARRESTS_TABLE} (
                         crime_id, person_id, accused_seq_no, accused_code, accused_type,
@@ -1068,7 +1117,7 @@ class ArrestsETL:
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
-                self.db_cursor.execute(insert_query, (
+                cursor.execute(insert_query, (
                     crime_id,
                     person_id,  # Can be NULL
                     accused_seq_no,
@@ -1086,28 +1135,31 @@ class ArrestsETL:
                     arrests.get('date_created'),  # From API (or NULL)
                     arrests.get('date_modified')  # From API (or NULL)
                 ))
-                self.stats['total_arrests_inserted'] += 1
+                with self.stats_lock:
+                    self.stats['total_arrests_inserted'] += 1
                 logger.debug(f"Inserted arrests: crime_id={crime_id}, accused_seq_no={accused_seq_no}")
                 logger.trace(f"Insert query executed for arrests")
-                self.db_conn.commit()
+                conn.commit()
                 logger.trace(f"Transaction committed for inserted arrests")
                 return True, 'inserted'
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'integrity_error'
             error_details = str(e)
             logger.warning(f"⚠️  Integrity error for arrests: {e}")
-            self.stats['total_arrests_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_arrests_failed'] += 1
             self.log_failed_record(arrests, reason, error_details)
             return False, reason
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'error'
             error_details = str(e)
             logger.error(f"❌ Error inserting arrests: {e}")
-            self.stats['total_arrests_failed'] += 1
-            self.stats['errors'].append(f"Arrests crime_id={crime_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['total_arrests_failed'] += 1
+                self.stats['errors'].append(f"Arrests crime_id={crime_id}: {str(e)}")
             self.log_failed_record(arrests, reason, error_details)
             return False, reason
     
@@ -1143,148 +1195,211 @@ class ArrestsETL:
                 # Update existing records from start_date to current chunk end_date
                 self.update_existing_records_with_new_fields(new_fields, to_date)
         
+    def process_record_worker(self, idx: int, total_records: int, arrests_record: Dict, chunk_range: str, 
+                              chunk_state: Dict, chunk_lock: threading.Lock):
+        """Worker method to process a single arrests record"""
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    logger.trace(f"Processing record {idx}/{total_records}: {arrests_record.get('CRIME_ID')}")
+                    arrests = self.transform_arrests(arrests_record, cursor)
+                    crime_id = arrests.get('crime_id')
+                    person_id = arrests.get('person_id')
+                    accused_seq_no = arrests.get('accused_seq_no')
+                    original_crime_id = arrests.get('_original_crime_id')
+                    original_person_id = arrests.get('_original_person_id')
+                    
+                    # Check if any IDs are invalid
+                    invalid_ids = {}
+                    if not crime_id:
+                        invalid_ids['crime_id'] = True
+                    if original_person_id and not person_id:
+                        invalid_ids['person_id'] = True
+                    
+                    # Only skip if crime_id is invalid (required field)
+                    # person_id and accused_id are optional, so we process the record even if they're invalid
+                    if invalid_ids.get('crime_id'):
+                        with chunk_lock:
+                            logger.warning(f"⚠️  Arrests with invalid CRIME_ID: {original_crime_id}, skipping")
+                            with self.stats_lock:
+                                self.stats['total_arrests_failed'] += 1
+                                self.stats['total_arrests_failed_crime_id'] += 1
+                            chunk_state['failed_keys'].append(f"{original_crime_id}:{accused_seq_no}")
+                            reason = 'invalid_ids'
+                            if reason not in chunk_state['failed_reasons']:
+                                chunk_state['failed_reasons'][reason] = []
+                            chunk_state['failed_reasons'][reason].append(f"{original_crime_id}:{accused_seq_no}")
+                            chunk_state['invalid_ids_in_chunk'].append({
+                                'crime_id': original_crime_id,
+                                'person_id': original_person_id,
+                                'accused_seq_no': accused_seq_no,
+                                'invalid_ids': invalid_ids
+                            })
+                            self.log_invalid_ids(arrests, invalid_ids, chunk_range)
+                        return
+                    
+                    # Log warnings for invalid optional IDs but continue processing
+                    if invalid_ids.get('person_id'):
+                        with chunk_lock:
+                            logger.warning(f"⚠️  PERSON_ID {original_person_id} not found, will set to NULL and process record")
+                            with self.stats_lock:
+                                self.stats['total_arrests_failed_person_id'] += 1
+                            arrests['person_id'] = None
+                            chunk_state['invalid_ids_in_chunk'].append({
+                                'crime_id': original_crime_id,
+                                'person_id': original_person_id,
+                                'accused_seq_no': accused_seq_no,
+                                'invalid_ids': invalid_ids
+                            })
+                            # Log to separate file for invalid person_id
+                            self.log_invalid_person_id(arrests, original_person_id, chunk_range)
+                    
+                    # Create unique key for tracking duplicates (based on unique constraint)
+                    unique_key = f"{crime_id}:{accused_seq_no}"
+                    
+                    # Track occurrences for duplicate reporting (but don't skip - process all)
+                    with chunk_lock:
+                        if unique_key in chunk_state['seen_keys']:
+                            # This is a duplicate occurrence - track it but still process
+                            occurrence_count = chunk_state['key_occurrences'].get(unique_key, 1) + 1
+                            chunk_state['key_occurrences'][unique_key] = occurrence_count
+                            
+                            chunk_state['duplicates'].append({
+                                'crime_id': crime_id,
+                                'accused_seq_no': accused_seq_no,
+                                'occurrence': occurrence_count,
+                                'first_seen_in': chunk_state['seen_keys'][unique_key],
+                                'duplicate_in': chunk_range
+                            })
+                            with self.stats_lock:
+                                self.stats['total_duplicates'] += 1
+                            logger.info(f"⚠️  Duplicate arrests found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
+                            logger.trace(f"Duplicate details - First seen: {chunk_state['seen_keys'][unique_key]}, Current occurrence: {occurrence_count}")
+                        else:
+                            chunk_state['seen_keys'][unique_key] = chunk_range
+                            chunk_state['key_occurrences'][unique_key] = 1
+                            logger.trace(f"New arrests key seen: {unique_key} in chunk {chunk_range}")
+                    
+                    # IMPORTANT: Process ALL records, even duplicates
+                    # If same key appears multiple times, each occurrence might have updated data
+                    # The smart update logic will handle whether to actually update or not
+                    success, operation = self.insert_arrests(arrests, conn, cursor, chunk_range)
+                    logger.trace(f"Operation result for arrests: success={success}, operation={operation}")
+                    
+                    with chunk_lock:
+                        if success:
+                            if operation == 'inserted':
+                                # Only add to list if first occurrence (to avoid duplicate entries in log)
+                                if unique_key not in chunk_state['inserted_keys']:
+                                    chunk_state['inserted_keys'].append(unique_key)
+                                logger.trace(f"Added to inserted list: {unique_key}")
+                            elif operation == 'updated':
+                                # Track all updates (even if same key updated multiple times)
+                                chunk_state['updated_keys'].append(unique_key)
+                                logger.trace(f"Added to updated list: {unique_key} (occurrence #{chunk_state['key_occurrences'].get(unique_key, 1)})")
+                            elif operation == 'no_change':
+                                # Only add to list if first occurrence
+                                if unique_key not in chunk_state['no_change_keys']:
+                                    chunk_state['no_change_keys'].append(unique_key)
+                                logger.trace(f"Added to no_change list: {unique_key}")
+                        else:
+                            chunk_state['failed_keys'].append(unique_key)
+                            if operation not in chunk_state['failed_reasons']:
+                                chunk_state['failed_reasons'][operation] = []
+                            chunk_state['failed_reasons'][operation].append(unique_key)
+                            logger.trace(f"Added to failed list: {unique_key}, reason: {operation}")
+
+        except Exception as e:
+            logger.error(f"❌ Error in worker processing record {idx}: {e}")
+            with self.stats_lock:
+                self.stats['total_arrests_failed'] += 1
+    
+    def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
+        """Process arrests records for a specific date range"""
+        chunk_range = f"{from_date} to {to_date}"
+        logger.info(f"📅 Processing: {chunk_range}")
+        
+        # Fetch arrests from API
+        arrests_raw = self.fetch_arrests_api(from_date, to_date)
+        
+        if arrests_raw is None:
+            logger.error(f"❌ Failed to fetch arrests for {chunk_range}")
+            self.log_db_chunk(from_date, to_date, 0, [], [], [], [], [], error="API fetch failed")
+            return
+        
+        if not arrests_raw:
+            logger.info(f"ℹ️  No arrests records found for {chunk_range}")
+            self.log_db_chunk(from_date, to_date, 0, [], [], [], [], [], error="No arrests records in API response")
+            return
+        
+        # Check for schema evolution if we got data
+        if table_columns is not None and len(arrests_raw) > 0:
+            # Check for new fields in first record
+            new_fields = self.detect_new_fields(arrests_raw[0], table_columns)
+            if new_fields:
+                logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
+                # Add new columns to table
+                for api_field, db_column in new_fields.items():
+                    if self.add_column_to_table(db_column):
+                        # Update table_columns set
+                        table_columns.add(db_column)
+                # Update existing records from start_date to current chunk end_date
+                self.update_existing_records_with_new_fields(new_fields, to_date)
+        
         # Transform and insert each arrests
-        self.stats['total_arrests_fetched'] += len(arrests_raw)
+        with self.stats_lock:
+            self.stats['total_arrests_fetched'] += len(arrests_raw)
         logger.trace(f"Processing {len(arrests_raw)} arrests records for chunk {chunk_range}")
         
         # Track operations for this chunk
-        inserted_keys = []
-        updated_keys = []
-        no_change_keys = []
-        failed_keys = []
-        failed_reasons = {}
-        duplicates_in_chunk = []
-        invalid_ids_in_chunk = []
+        chunk_lock = threading.Lock()
+        chunk_state = {
+            'inserted_keys': [],
+            'updated_keys': [],
+            'no_change_keys': [],
+            'failed_keys': [],
+            'failed_reasons': {},
+            'duplicates': [],
+            'invalid_ids_in_chunk': [],
+            'seen_keys': {},
+            'key_occurrences': {}
+        }
         
-        # Track unique keys seen in this chunk to detect duplicates (for reporting only, not skipping)
-        seen_keys = {}
-        key_occurrences = {}
+        logger.trace(f"Starting parallel processing for chunk: {chunk_range}")
+        max_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
         
-        logger.trace(f"Starting to process records for chunk: {chunk_range}")
-        for idx, arrests_record in enumerate(arrests_raw, 1):
-            logger.trace(f"Processing record {idx}/{len(arrests_raw)}: {arrests_record.get('CRIME_ID')}")
-            arrests = self.transform_arrests(arrests_record)
-            crime_id = arrests.get('crime_id')
-            person_id = arrests.get('person_id')
-            accused_seq_no = arrests.get('accused_seq_no')
-            original_crime_id = arrests.get('_original_crime_id')
-            original_person_id = arrests.get('_original_person_id')
-            
-            # Check if any IDs are invalid
-            invalid_ids = {}
-            if not crime_id:
-                invalid_ids['crime_id'] = True
-            if original_person_id and not person_id:
-                invalid_ids['person_id'] = True
-            
-            # Only skip if crime_id is invalid (required field)
-            # person_id and accused_id are optional, so we process the record even if they're invalid
-            if invalid_ids.get('crime_id'):
-                logger.warning(f"⚠️  Arrests with invalid CRIME_ID: {original_crime_id}, skipping")
-                self.stats['total_arrests_failed'] += 1
-                self.stats['total_arrests_failed_crime_id'] += 1
-                failed_keys.append(f"{original_crime_id}:{accused_seq_no}")
-                reason = 'invalid_ids'
-                if reason not in failed_reasons:
-                    failed_reasons[reason] = []
-                failed_reasons[reason].append(f"{original_crime_id}:{accused_seq_no}")
-                invalid_ids_in_chunk.append({
-                    'crime_id': original_crime_id,
-                    'person_id': original_person_id,
-                    'accused_seq_no': accused_seq_no,
-                    'invalid_ids': invalid_ids
-                })
-                self.log_invalid_ids(arrests, invalid_ids, chunk_range)
-                continue
-            
-            # Log warnings for invalid optional IDs but continue processing
-            if invalid_ids.get('person_id'):
-                logger.warning(f"⚠️  PERSON_ID {original_person_id} not found, will set to NULL and process record")
-                self.stats['total_arrests_failed_person_id'] += 1
-                arrests['person_id'] = None
-                invalid_ids_in_chunk.append({
-                    'crime_id': original_crime_id,
-                    'person_id': original_person_id,
-                    'accused_seq_no': accused_seq_no,
-                    'invalid_ids': invalid_ids
-                })
-                # Log to separate file for invalid person_id
-                self.log_invalid_person_id(arrests, original_person_id, chunk_range)
-            
-            # Create unique key for tracking duplicates (based on unique constraint)
-            unique_key = f"{crime_id}:{accused_seq_no}"
-            
-            # Track occurrences for duplicate reporting (but don't skip - process all)
-            if unique_key in seen_keys:
-                # This is a duplicate occurrence - track it but still process
-                occurrence_count = key_occurrences.get(unique_key, 1) + 1
-                key_occurrences[unique_key] = occurrence_count
-                
-                duplicates_in_chunk.append({
-                    'crime_id': crime_id,
-                    'accused_seq_no': accused_seq_no,
-                    'occurrence': occurrence_count,
-                    'first_seen_in': seen_keys[unique_key],
-                    'duplicate_in': chunk_range
-                })
-                self.stats['total_duplicates'] += 1
-                logger.info(f"⚠️  Duplicate arrests found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
-                logger.trace(f"Duplicate details - First seen: {seen_keys[unique_key]}, Current occurrence: {occurrence_count}")
-            else:
-                seen_keys[unique_key] = chunk_range
-                key_occurrences[unique_key] = 1
-                logger.trace(f"New arrests key seen: {unique_key} in chunk {chunk_range}")
-            
-            # IMPORTANT: Process ALL records, even duplicates
-            # If same key appears multiple times, each occurrence might have updated data
-            # The smart update logic will handle whether to actually update or not
-            success, operation = self.insert_arrests(arrests, chunk_range)
-            logger.trace(f"Operation result for arrests: success={success}, operation={operation}")
-            if success:
-                if operation == 'inserted':
-                    # Only add to list if first occurrence (to avoid duplicate entries in log)
-                    if unique_key not in inserted_keys:
-                        inserted_keys.append(unique_key)
-                    logger.trace(f"Added to inserted list: {unique_key}")
-                elif operation == 'updated':
-                    # Track all updates (even if same key updated multiple times)
-                    updated_keys.append(unique_key)
-                    logger.trace(f"Added to updated list: {unique_key} (occurrence #{key_occurrences.get(unique_key, 1)})")
-                elif operation == 'no_change':
-                    # Only add to list if first occurrence
-                    if unique_key not in no_change_keys:
-                        no_change_keys.append(unique_key)
-                    logger.trace(f"Added to no_change list: {unique_key}")
-            else:
-                failed_keys.append(unique_key)
-                if operation not in failed_reasons:
-                    failed_reasons[operation] = []
-                failed_reasons[operation].append(unique_key)
-                logger.trace(f"Added to failed list: {unique_key}, reason: {operation}")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            total_records = len(arrests_raw)
+            futures = [
+                executor.submit(self.process_record_worker, idx + 1, total_records, record, chunk_range, chunk_state, chunk_lock)
+                for idx, record in enumerate(arrests_raw)
+            ]
+            for future in as_completed(futures):
+                future.result()  # raise exceptions if any occurred in worker
         
         # Log duplicates for this chunk (for reporting, but they were all processed)
-        if duplicates_in_chunk:
-            logger.info(f"📊 Found {len(duplicates_in_chunk)} duplicate occurrences in chunk {chunk_range} - All were processed for potential updates")
-            logger.trace(f"Duplicate details: {duplicates_in_chunk}")
-            self.log_duplicates_chunk(from_date, to_date, duplicates_in_chunk)
+        if chunk_state['duplicates']:
+            logger.info(f"📊 Found {len(chunk_state['duplicates'])} duplicate occurrences in chunk {chunk_range} - All were processed for potential updates")
+            logger.trace(f"Duplicate details: {chunk_state['duplicates']}")
+            self.log_duplicates_chunk(from_date, to_date, chunk_state['duplicates'])
         
         # Log invalid IDs for this chunk
-        if invalid_ids_in_chunk:
-            logger.warning(f"⚠️  Found {len(invalid_ids_in_chunk)} arrests records with invalid IDs in chunk {chunk_range}")
+        if chunk_state['invalid_ids_in_chunk']:
+            logger.warning(f"⚠️  Found {len(chunk_state['invalid_ids_in_chunk'])} arrests records with invalid IDs in chunk {chunk_range}")
             # Extract unique invalid IDs
-            invalid_crime_ids = list(set([f['crime_id'] for f in invalid_ids_in_chunk if f.get('invalid_ids', {}).get('crime_id')]))
-            invalid_person_ids = list(set([f['person_id'] for f in invalid_ids_in_chunk if f.get('invalid_ids', {}).get('person_id')]))
+            invalid_crime_ids = list(set([f['crime_id'] for f in chunk_state['invalid_ids_in_chunk'] if f.get('invalid_ids', {}).get('crime_id')]))
+            invalid_person_ids = list(set([f['person_id'] for f in chunk_state['invalid_ids_in_chunk'] if f.get('invalid_ids', {}).get('person_id')]))
             if invalid_crime_ids:
                 logger.warning(f"   Invalid CRIME_IDs: {invalid_crime_ids}")
             if invalid_person_ids:
                 logger.warning(f"   Invalid PERSON_IDs: {invalid_person_ids}")
         
         # Log database operations for this chunk
-        logger.trace(f"Chunk summary - Inserted: {len(inserted_keys)}, Updated: {len(updated_keys)}, No Change: {len(no_change_keys)}, Failed: {len(failed_keys)}, Duplicates: {len(duplicates_in_chunk)}, Invalid IDs: {len(invalid_ids_in_chunk)}")
-        self.log_db_chunk(from_date, to_date, len(arrests_raw), inserted_keys, updated_keys, 
-                         no_change_keys, failed_keys, failed_reasons)
+        logger.trace(f"Chunk summary - Inserted: {len(chunk_state['inserted_keys'])}, Updated: {len(chunk_state['updated_keys'])}, No Change: {len(chunk_state['no_change_keys'])}, Failed: {len(chunk_state['failed_keys'])}, Duplicates: {len(chunk_state['duplicates'])}, Invalid IDs: {len(chunk_state['invalid_ids_in_chunk'])}")
+        self.log_db_chunk(from_date, to_date, len(arrests_raw), chunk_state['inserted_keys'], chunk_state['updated_keys'], 
+                         chunk_state['no_change_keys'], chunk_state['failed_keys'], chunk_state['failed_reasons'])
         
-        logger.info(f"✅ Completed: {chunk_range} - Inserted: {len(inserted_keys)}, Updated: {len(updated_keys)}, No Change: {len(no_change_keys)}, Failed: {len(failed_keys)}, Duplicates: {len(duplicates_in_chunk)}, Invalid IDs: {len(invalid_ids_in_chunk)}")
+        logger.info(f"✅ Completed: {chunk_range} - Inserted: {len(chunk_state['inserted_keys'])}, Updated: {len(chunk_state['updated_keys'])}, No Change: {len(chunk_state['no_change_keys'])}, Failed: {len(chunk_state['failed_keys'])}, Duplicates: {len(chunk_state['duplicates'])}, Invalid IDs: {len(chunk_state['invalid_ids_in_chunk'])}")
         logger.trace(f"Chunk processing complete for {chunk_range}")
     
     def log_db_chunk(self, from_date: str, to_date: str, total_fetched: int,
@@ -1307,42 +1422,43 @@ class ArrestsETL:
             'error': error
         }
         
-        self.db_log.write(f"\n{'='*80}\n")
-        self.db_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.db_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.db_log.write(f"{'-'*80}\n")
-        
-        if error:
-            self.db_log.write(f"ERROR: {error}\n")
-        else:
-            self.db_log.write(f"Total Fetched from API: {total_fetched}\n")
-            self.db_log.write(f"\nINSERTED: {len(inserted_keys)}\n")
-            for i, key in enumerate(inserted_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
+        with self.log_lock:
+            self.db_log.write(f"\n{'='*80}\n")
+            self.db_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.db_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.db_log.write(f"{'-'*80}\n")
             
-            self.db_log.write(f"\nUPDATED: {len(updated_keys)}\n")
-            for i, key in enumerate(updated_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
+            if error:
+                self.db_log.write(f"ERROR: {error}\n")
+            else:
+                self.db_log.write(f"Total Fetched from API: {total_fetched}\n")
+                self.db_log.write(f"\nINSERTED: {len(inserted_keys)}\n")
+                for i, key in enumerate(inserted_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                
+                self.db_log.write(f"\nUPDATED: {len(updated_keys)}\n")
+                for i, key in enumerate(updated_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                
+                self.db_log.write(f"\nNO CHANGE: {len(no_change_keys)}\n")
+                for i, key in enumerate(no_change_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                
+                self.db_log.write(f"\nFAILED: {len(failed_keys)}\n")
+                if failed_reasons:
+                    for reason, keys in failed_reasons.items():
+                        self.db_log.write(f"  Reason: {reason} ({len(keys)})\n")
+                        for i, key in enumerate(keys[:20], 1):  # Show first 20
+                            self.db_log.write(f"    {i}. {key}\n")
+                        if len(keys) > 20:
+                            self.db_log.write(f"    ... and {len(keys) - 20} more\n")
+                
+                # Also write JSON format for easy parsing
+                self.db_log.write(f"\nJSON Format:\n")
+                self.db_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+                self.db_log.write(f"\n")
             
-            self.db_log.write(f"\nNO CHANGE: {len(no_change_keys)}\n")
-            for i, key in enumerate(no_change_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
-            
-            self.db_log.write(f"\nFAILED: {len(failed_keys)}\n")
-            if failed_reasons:
-                for reason, keys in failed_reasons.items():
-                    self.db_log.write(f"  Reason: {reason} ({len(keys)})\n")
-                    for i, key in enumerate(keys[:20], 1):  # Show first 20
-                        self.db_log.write(f"    {i}. {key}\n")
-                    if len(keys) > 20:
-                        self.db_log.write(f"    ... and {len(keys) - 20} more\n")
-            
-            # Also write JSON format for easy parsing
-            self.db_log.write(f"\nJSON Format:\n")
-            self.db_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-            self.db_log.write(f"\n")
-        
-        self.db_log.flush()
+            self.db_log.flush()
     
     def write_log_summaries(self):
         """Write summary sections to all log files"""
@@ -1476,8 +1592,10 @@ class ArrestsETL:
                 time.sleep(1)  # Be nice to the API
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {ARRESTS_TABLE}")
-            db_arrests_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM {ARRESTS_TABLE}")
+                    db_arrests_count = cur.fetchone()[0]
             
             # Store for summary
             self.stats['db_total_count'] = db_arrests_count

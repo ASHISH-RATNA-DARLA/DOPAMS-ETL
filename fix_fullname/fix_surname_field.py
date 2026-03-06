@@ -2,23 +2,24 @@ import psycopg2
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from db_pooling import PostgreSQLConnectionPool
+except ImportError:
+    pass
 
 # Load environment variables
 load_dotenv()
 
 
 def connect_to_db():
-    """Connect to PostgreSQL database"""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        raise Exception("DATABASE_URL not found in environment variables")
-
-    # Remove schema parameter from URL as psycopg2 doesn't recognize it
-    if "?schema=" in db_url:
-        db_url = db_url.split("?schema=")[0]
-
-    return psycopg2.connect(db_url)
+    """Connect to PostgreSQL database using db_pool"""
+    pool = PostgreSQLConnectionPool()
+    return pool
 
 
 def clean_surname(surname):
@@ -42,29 +43,29 @@ def clean_surname(surname):
 def fix_surname_field():
     """Fix the surname field by removing @ symbols"""
 
-    conn = connect_to_db()
-    cursor = conn.cursor()
+    pool = connect_to_db()
 
     print("\n=== Fixing 'surname' Field ===\n")
     print("This script will clean the 'surname' field by removing @ symbols\n")
 
     # Find all records where surname has @
-    cursor.execute(
-        """
-        SELECT person_id, name, surname, full_name
-        FROM persons
-        WHERE surname LIKE '%@%'
-        ORDER BY person_id
-    """
-    )
-
-    records = cursor.fetchall()
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT person_id, name, surname, full_name
+                FROM persons
+                WHERE surname LIKE '%@%'
+                ORDER BY person_id
+            """
+            )
+        
+            records = cursor.fetchall()
+            
     print(f"Found {len(records)} records where 'surname' field has @ symbol\n")
 
     if len(records) == 0:
         print("No records to update!")
-        cursor.close()
-        conn.close()
         return
 
     # Show sample
@@ -95,34 +96,50 @@ def fix_surname_field():
 
     update_count = 0
     error_count = 0
+    stats_lock = threading.Lock()
 
-    for person_id, name, surname, full_name in records:
-        try:
-            # Clean the surname
-            clean = clean_surname(surname)
+    def process_update_batch(batch):
+        local_updated = 0
+        local_errors = 0
+        with pool.get_connection_context() as conn:
+            with conn.cursor() as cursor:
+                for person_id, name, surname, full_name in batch:
+                    try:
+                        # Clean the surname
+                        clean = clean_surname(surname)
 
-            # Update the surname field (can be empty string)
-            cursor.execute(
-                """
-                UPDATE persons
-                SET surname = %s
-                WHERE person_id = %s
-                """,
-                (clean, person_id),
-            )
+                        # Update the surname field (can be empty string)
+                        cursor.execute(
+                            """
+                            UPDATE persons
+                            SET surname = %s
+                            WHERE person_id = %s
+                            """,
+                            (clean, person_id),
+                        )
 
-            update_count += 1
+                        local_updated += 1
+                        
+                    except Exception as e:
+                        local_errors += 1
+                        print(f"Error updating {person_id}: {e}")
+            conn.commit()
 
-            if update_count % 50 == 0:
+        with stats_lock:
+            nonlocal update_count, error_count
+            update_count += local_updated
+            error_count += local_errors
+            if update_count % 500 == 0:
                 print(f"Updated {update_count} records...")
-                conn.commit()  # Commit in batches
 
-        except Exception as e:
-            error_count += 1
-            print(f"Error updating {person_id}: {e}")
-
-    # Final commit
-    conn.commit()
+    batch_size = 500
+    batches = [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
+    
+    max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_update_batch, batch): batch for batch in batches}
+        for future in as_completed(futures):
+            future.result()
 
     print(f"\n=== Update Complete ===")
     print(f"Successfully updated: {update_count} records")
@@ -130,20 +147,18 @@ def fix_surname_field():
 
     # Verify the changes
     print("\n=== Verifying Changes ===\n")
-    cursor.execute(
-        """
-        SELECT COUNT(*) 
-        FROM persons 
-        WHERE surname LIKE '%@%'
-    """
-    )
-    remaining = cursor.fetchone()[0]
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*) 
+                FROM persons 
+                WHERE surname LIKE '%@%'
+            """
+            )
+            remaining = cursor.fetchone()[0]
 
     print(f"Records with @ in 'surname' field after cleanup: {remaining}")
-
-    # Close connection
-    cursor.close()
-    conn.close()
 
     print("\n✅ Surname field cleanup completed!\n")
 

@@ -10,6 +10,14 @@ import requests
 import psycopg2
 from psycopg2.extras import execute_batch
 from datetime import datetime, timedelta, timezone
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+import sys
+
+# Import PostgreSQLConnectionPool using relative path based on user instructions
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
 from tqdm import tqdm
 import logging
 import colorlog
@@ -79,8 +87,9 @@ class HierarchyETL:
     """ETL Pipeline for Hierarchy API"""
     
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self.db_pool = None
+        self.stats_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
         self.stats = {
             'total_api_calls': 0,
             'total_hierarchy_fetched': 0,
@@ -142,33 +151,32 @@ class HierarchyETL:
             self.duplicates_log.close()
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database pool"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
+            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']}")
             return True
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
+            logger.error(f"❌ Database connection pool initialization failed: {e}")
             return False
     
     def close_db(self):
-        """Close database connection"""
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
-        logger.info("Database connection closed")
+        """Close database pool"""
+        if self.db_pool:
+            self.db_pool.close_all()
+        logger.info("Database connection pool closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s
+                """, (table_name,))
+                return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -184,25 +192,27 @@ class HierarchyETL:
         min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
         
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {HIERARCHY_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
-                return MIN_START_DATE
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {HIERARCHY_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                # Check if table has any data
+                cursor.execute(f"SELECT COUNT(*) FROM {HIERARCHY_TABLE}")
+                count = cursor.fetchone()[0]
+                
+                if count == 0:
+                    # New database, start from beginning
+                    logger.info("📊 Table is empty, starting from 2022-01-01")
+                    return MIN_START_DATE
+                
+                # Table has data, get max of date_created and date_modified
+                # Only consider dates >= 2022-01-01 to avoid processing very old data
+                cursor.execute(f"""
+                    SELECT GREATEST(
+                        COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                        COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                    ) as max_date
+                    FROM {HIERARCHY_TABLE}
+                """)
+                result = cursor.fetchone()
             if result and result[0]:
                 max_date = result[0]
                 # Convert to IST timezone if needed
@@ -265,7 +275,7 @@ class HierarchyETL:
         
         return new_fields
     
-    def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
+    def add_column_to_table(self, column_name: str, conn, cursor, column_type: str = 'TEXT'):
         """Add a new column to the hierarchy table."""
         try:
             # Determine column type based on field name
@@ -277,16 +287,16 @@ class HierarchyETL:
                 column_type = 'VARCHAR(255)'
             
             alter_sql = f"ALTER TABLE {HIERARCHY_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
+            cursor.execute(alter_sql)
+            conn.commit()
             logger.info(f"✅ Added column {column_name} ({column_type}) to {HIERARCHY_TABLE}")
             return True
         except Exception as e:
             logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
+            conn.rollback()
             return False
     
-    def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
+    def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str, conn, cursor):
         """
         Update existing records from start_date to chunk_end_date with new fields.
         For new fields, we need to fetch those records from API and update them.
@@ -416,7 +426,8 @@ class HierarchyETL:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    self.stats['total_api_calls'] += 1
+                    with self.stats_lock:
+                        self.stats['total_api_calls'] += 1
                     
                     # Handle both single object and array responses
                     if data.get('status'):
@@ -464,8 +475,9 @@ class HierarchyETL:
             except Exception as e:
                 logger.error(f"API error: {e}")
                 if attempt == API_CONFIG['max_retries'] - 1:
-                    self.stats['failed_api_calls'] += 1
-                    self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
+                    with self.stats_lock:
+                        self.stats['failed_api_calls'] += 1
+                        self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
                     self.log_api_chunk(from_date, to_date, 0, [], [], error=str(e))
                 time.sleep(2 ** attempt)
         
@@ -565,15 +577,15 @@ class HierarchyETL:
         logger.trace(f"Transformed record: {json.dumps(transformed, indent=2, default=str)}")
         return transformed
     
-    def hierarchy_exists(self, ps_code: str) -> bool:
+    def hierarchy_exists(self, ps_code: str, cursor) -> bool:
         """Check if hierarchy record already exists in database"""
         logger.trace(f"Checking if PS_CODE exists in database: {ps_code}")
-        self.db_cursor.execute(f"SELECT 1 FROM {HIERARCHY_TABLE} WHERE ps_code = %s", (ps_code,))
-        exists = self.db_cursor.fetchone() is not None
+        cursor.execute(f"SELECT 1 FROM {HIERARCHY_TABLE} WHERE ps_code = %s", (ps_code,))
+        exists = cursor.fetchone() is not None
         logger.trace(f"PS_CODE {ps_code} exists: {exists}")
         return exists
     
-    def get_existing_hierarchy(self, ps_code: str) -> Optional[Dict]:
+    def get_existing_hierarchy(self, ps_code: str, cursor) -> Optional[Dict]:
         """Get existing hierarchy record from database"""
         query = f"""
             SELECT ps_code, ps_name,
@@ -588,8 +600,8 @@ class HierarchyETL:
             FROM {HIERARCHY_TABLE}
             WHERE ps_code = %s
         """
-        self.db_cursor.execute(query, (ps_code,))
-        row = self.db_cursor.fetchone()
+        cursor.execute(query, (ps_code,))
+        row = cursor.fetchone()
         if row:
             return {
                 'ps_code': row[0],
@@ -613,12 +625,13 @@ class HierarchyETL:
             }
         return None
     
-    def insert_hierarchy(self, record: Dict, chunk_date_range: str = "", table_columns: Set[str] = None) -> Tuple[bool, str]:
+    def insert_hierarchy(self, record: Dict, cursor, chunk_date_range: str = "", table_columns: Set[str] = None) -> Tuple[bool, str]:
         """
         Insert or update single hierarchy record into database
         
         Args:
             record: Transformed hierarchy dict
+            cursor: Database cursor object for queries execution
             chunk_date_range: Date range for chunk tracking
             table_columns: Set of existing table columns (for dynamic field handling)
         
@@ -628,16 +641,17 @@ class HierarchyETL:
         try:
             if not record['ps_code']:
                 logger.warning(f"⚠️  Hierarchy record missing PS_CODE, skipping")
-                self.stats['total_hierarchy_failed'] += 1
+                with self.stats_lock:
+                    self.stats['total_hierarchy_failed'] += 1
                 return False, 'skipped_missing_ps_code'
             
             # Check if hierarchy record already exists
             ps_code = record['ps_code']
             logger.trace(f"Processing hierarchy record: PS_CODE={ps_code}, PS_NAME={record.get('ps_name')}")
             
-            if self.hierarchy_exists(ps_code):
+            if self.hierarchy_exists(ps_code, cursor):
                 # Get existing record to compare
-                existing = self.get_existing_hierarchy(ps_code)
+                existing = self.get_existing_hierarchy(ps_code, cursor)
                 if not existing:
                     logger.warning(f"⚠️  PS_CODE {ps_code} exists check returned True but fetch returned None")
                     # Fall back to insert
@@ -716,16 +730,23 @@ class HierarchyETL:
                             WHERE ps_code = %s
                         """
                         update_values.append(ps_code)
-                        self.db_cursor.execute(update_query, tuple(update_values))
-                        self.stats['total_hierarchy_updated'] += 1
+                        try:
+                            cursor.execute("SAVEPOINT smart_upsert")
+                            cursor.execute(update_query, tuple(update_values))
+                            cursor.execute("RELEASE SAVEPOINT smart_upsert")
+                        except Exception as inner_e:
+                            cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert")
+                            raise inner_e
+                        
+                        with self.stats_lock:
+                            self.stats['total_hierarchy_updated'] += 1
                         logger.debug(f"Updated hierarchy: {ps_code} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
-                        self.db_conn.commit()
-                        logger.trace(f"Transaction committed for updated PS_CODE: {ps_code}")
                         return True, 'updated'
                     else:
                         # No changes needed
-                        self.stats['total_hierarchy_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_hierarchy_no_change'] += 1
                         logger.trace(f"No changes needed for PS_CODE: {ps_code} (all fields match or preserved)")
                         return True, 'no_change'
                 else:
@@ -756,23 +777,29 @@ class HierarchyETL:
                 """
                 values = tuple(fields_to_insert.values())
                 
-                self.db_cursor.execute(insert_query, values)
-                self.stats['total_hierarchy_inserted'] += 1
+                try:
+                    cursor.execute("SAVEPOINT smart_upsert")
+                    cursor.execute(insert_query, values)
+                    cursor.execute("RELEASE SAVEPOINT smart_upsert")
+                except Exception as inner_e:
+                    cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert")
+                    raise inner_e
+                
+                with self.stats_lock:
+                    self.stats['total_hierarchy_inserted'] += 1
                 logger.debug(f"Inserted hierarchy: {record['ps_code']}")
                 logger.trace(f"Insert query executed for PS_CODE: {ps_code}")
-                self.db_conn.commit()
-                logger.trace(f"Transaction committed for inserted PS_CODE: {ps_code}")
                 return True, 'inserted'
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
             logger.warning(f"⚠️  Integrity error for hierarchy {record['ps_code']}: {e}")
-            self.stats['total_hierarchy_skipped'] += 1
+            with self.stats_lock:
+                self.stats['total_hierarchy_skipped'] += 1
             return False, 'skipped_integrity_error'
         except Exception as e:
-            self.db_conn.rollback()
             logger.error(f"❌ Error inserting hierarchy {record['ps_code']}: {e}")
-            self.stats['errors'].append(f"Hierarchy {record['ps_code']}: {str(e)}")
+            with self.stats_lock:
+                self.stats['errors'].append(f"Hierarchy {record['ps_code']}: {str(e)}")
             return False, 'skipped_error'
     
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
@@ -794,87 +821,96 @@ class HierarchyETL:
             return
         
         # Check for schema evolution if we got data
-        if table_columns is not None and len(hierarchy_raw) > 0:
-            # Check for new fields in first record
-            new_fields = self.detect_new_fields(hierarchy_raw[0], table_columns)
-            if new_fields:
-                logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
-                # Add new columns to table
-                for api_field, db_column in new_fields.items():
-                    if self.add_column_to_table(db_column):
-                        # Update table_columns set
-                        table_columns.add(db_column)
-                # Update existing records from start_date to current chunk end_date
-                self.update_existing_records_with_new_fields(new_fields, to_date)
-        
-        # Transform and insert each hierarchy record
-        self.stats['total_hierarchy_fetched'] += len(hierarchy_raw)
-        logger.trace(f"Processing {len(hierarchy_raw)} hierarchy records for chunk {chunk_range}")
-        
-        # Track operations for this chunk
-        inserted_ps_codes = []
-        updated_ps_codes = []
-        no_change_ps_codes = []  # Records that exist but no changes needed
-        skipped_ps_codes = []
-        skipped_reasons = {}
-        duplicates_in_chunk = []
-        
-        # Track ps_codes seen in this chunk to detect duplicates within the chunk
-        seen_ps_codes = {}
-        
-        logger.trace(f"Starting to process records for chunk: {chunk_range}")
-        for idx, record_raw in enumerate(hierarchy_raw, 1):
-            logger.trace(f"Processing record {idx}/{len(hierarchy_raw)}: {record_raw.get('PS_CODE')}")
-            record = self.transform_hierarchy(record_raw, table_columns)
-            ps_code = record['ps_code']
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            if table_columns is not None and len(hierarchy_raw) > 0:
+                with self.schema_lock:
+                    # Check for new fields in first record
+                    new_fields = self.detect_new_fields(hierarchy_raw[0], table_columns)
+                    if new_fields:
+                        logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
+                        # Add new columns to table
+                        for api_field, db_column in new_fields.items():
+                            if self.add_column_to_table(db_column, conn, cursor):
+                                # Update table_columns set
+                                table_columns.add(db_column)
+                        # Update existing records from start_date to current chunk end_date
+                        self.update_existing_records_with_new_fields(new_fields, to_date, conn, cursor)
+                        conn.commit()
             
-            if not ps_code:
-                logger.warning(f"⚠️  Hierarchy record missing PS_CODE, skipping")
-                self.stats['total_hierarchy_failed'] += 1
-                skipped_ps_codes.append(None)
-                if 'missing_ps_code' not in skipped_reasons:
-                    skipped_reasons['missing_ps_code'] = []
-                skipped_reasons['missing_ps_code'].append(None)
-                continue
+            # Transform and insert each hierarchy record
+            with self.stats_lock:
+                self.stats['total_hierarchy_fetched'] += len(hierarchy_raw)
+            logger.trace(f"Processing {len(hierarchy_raw)} hierarchy records for chunk {chunk_range}")
             
-            # Check for duplicates within this chunk
-            if ps_code in seen_ps_codes:
-                duplicates_in_chunk.append({
-                    'ps_code': ps_code,
-                    'first_seen_in': seen_ps_codes[ps_code],
-                    'duplicate_in': chunk_range
-                })
-                self.stats['total_duplicates'] += 1
-                logger.warning(f"⚠️  Duplicate PS_CODE {ps_code} found in chunk {chunk_range}")
-                logger.trace(f"Duplicate details - First seen: {seen_ps_codes[ps_code]}, Current: {chunk_range}")
-            else:
-                seen_ps_codes[ps_code] = chunk_range
-                logger.trace(f"New PS_CODE seen: {ps_code} in chunk {chunk_range}")
+            # Track operations for this chunk
+            inserted_ps_codes = []
+            updated_ps_codes = []
+            no_change_ps_codes = []  # Records that exist but no changes needed
+            skipped_ps_codes = []
+            skipped_reasons = {}
+            duplicates_in_chunk = []
             
-            # Check if this ps_code was already processed in this chunk (duplicate)
-            if ps_code in inserted_ps_codes or ps_code in updated_ps_codes or ps_code in no_change_ps_codes:
-                # This is a duplicate within the chunk, skip processing
-                logger.trace(f"Skipping duplicate PS_CODE {ps_code} - already processed in this chunk")
-                continue
+            # Track ps_codes seen in this chunk to detect duplicates within the chunk
+            seen_ps_codes = {}
             
-            success, operation = self.insert_hierarchy(record, chunk_range, table_columns)
-            logger.trace(f"Operation result for PS_CODE {ps_code}: success={success}, operation={operation}")
-            if success:
-                if operation == 'inserted':
-                    inserted_ps_codes.append(ps_code)
-                    logger.trace(f"Added to inserted list: {ps_code}")
-                elif operation == 'updated':
-                    updated_ps_codes.append(ps_code)
-                    logger.trace(f"Added to updated list: {ps_code}")
-                elif operation == 'no_change':
-                    no_change_ps_codes.append(ps_code)
-                    logger.trace(f"Added to no_change list: {ps_code}")
-            else:
-                skipped_ps_codes.append(ps_code)
-                if operation not in skipped_reasons:
-                    skipped_reasons[operation] = []
-                skipped_reasons[operation].append(ps_code)
-                logger.trace(f"Added to skipped list: {ps_code}, reason: {operation}")
+            logger.trace(f"Starting to process records for chunk: {chunk_range}")
+            for idx, record_raw in enumerate(hierarchy_raw, 1):
+                logger.trace(f"Processing record {idx}/{len(hierarchy_raw)}: {record_raw.get('PS_CODE')}")
+                record = self.transform_hierarchy(record_raw, table_columns)
+                ps_code = record['ps_code']
+                
+                if not ps_code:
+                    logger.warning(f"⚠️  Hierarchy record missing PS_CODE, skipping")
+                    with self.stats_lock:
+                        self.stats['total_hierarchy_failed'] += 1
+                    skipped_ps_codes.append(None)
+                    if 'missing_ps_code' not in skipped_reasons:
+                        skipped_reasons['missing_ps_code'] = []
+                    skipped_reasons['missing_ps_code'].append(None)
+                    continue
+                
+                # Check for duplicates within this chunk
+                if ps_code in seen_ps_codes:
+                    duplicates_in_chunk.append({
+                        'ps_code': ps_code,
+                        'first_seen_in': seen_ps_codes[ps_code],
+                        'duplicate_in': chunk_range
+                    })
+                    with self.stats_lock:
+                        self.stats['total_duplicates'] += 1
+                    logger.warning(f"⚠️  Duplicate PS_CODE {ps_code} found in chunk {chunk_range}")
+                    logger.trace(f"Duplicate details - First seen: {seen_ps_codes[ps_code]}, Current: {chunk_range}")
+                else:
+                    seen_ps_codes[ps_code] = chunk_range
+                    logger.trace(f"New PS_CODE seen: {ps_code} in chunk {chunk_range}")
+                
+                # Check if this ps_code was already processed in this chunk (duplicate)
+                if ps_code in inserted_ps_codes or ps_code in updated_ps_codes or ps_code in no_change_ps_codes:
+                    # This is a duplicate within the chunk, skip processing
+                    logger.trace(f"Skipping duplicate PS_CODE {ps_code} - already processed in this chunk")
+                    continue
+                
+                success, operation = self.insert_hierarchy(record, cursor, chunk_range, table_columns)
+                logger.trace(f"Operation result for PS_CODE {ps_code}: success={success}, operation={operation}")
+                if success:
+                    if operation == 'inserted':
+                        inserted_ps_codes.append(ps_code)
+                        logger.trace(f"Added to inserted list: {ps_code}")
+                    elif operation == 'updated':
+                        updated_ps_codes.append(ps_code)
+                        logger.trace(f"Added to updated list: {ps_code}")
+                    elif operation == 'no_change':
+                        no_change_ps_codes.append(ps_code)
+                        logger.trace(f"Added to no_change list: {ps_code}")
+                else:
+                    skipped_ps_codes.append(ps_code)
+                    if operation not in skipped_reasons:
+                        skipped_reasons[operation] = []
+                    skipped_reasons[operation].append(ps_code)
+                    logger.trace(f"Added to skipped list: {ps_code}, reason: {operation}")
+            
+            conn.commit()
         
         # Log duplicates for this chunk
         if duplicates_in_chunk:
@@ -1058,15 +1094,25 @@ class HierarchyETL:
             logger.trace(f"Generated date ranges: {date_ranges[:5]}{'...' if len(date_ranges) > 5 else ''} (showing first 5)")
             logger.info("")
             
-            # Process each date range with progress bar
-            for from_date, to_date in tqdm(date_ranges, desc="Processing date ranges", unit="range"):
-                # Process the chunk (will check for schema evolution and process data)
-                self.process_date_range(from_date, to_date, table_columns)
-                time.sleep(1)  # Be nice to the API
+            # Process each date range concurrently
+            max_workers = ETL_CONFIG.get('max_workers', 5)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(self.process_date_range, from_date, to_date, table_columns): (from_date, to_date)
+                    for from_date, to_date in date_ranges
+                }
+                
+                for future in tqdm(as_completed(futures), total=len(futures), desc="Processing chunks", unit="chunk"):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"❌ Unhandled error in thread: {e}")
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {HIERARCHY_TABLE}")
-            db_hierarchy_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT COUNT(*) FROM {HIERARCHY_TABLE}")
+                db_hierarchy_count = cursor.fetchone()[0]
             
             # Store for summary
             self.stats['db_total_count'] = db_hierarchy_count

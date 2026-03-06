@@ -11,6 +11,11 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import logging
 from typing import Optional
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
 
 # Configure logging
 logging.basicConfig(
@@ -195,22 +200,27 @@ def classify_domicile(permanent_state_ut: Optional[str], permanent_country: Opti
     return CLASSIFICATION_INTERNATIONAL
 
 
-def process_persons(cursor):
-    """Process all persons and classify their domicile."""
+def process_persons(cursor=None):
+    """Process all persons and classify their domicile using parallel batch processing."""
     try:
+        pool = PostgreSQLConnectionPool()
+        
         # Fetch all persons with relevant data
         logger.info("Fetching persons data...")
-        cursor.execute("""
-            SELECT person_id, permanent_state_ut, permanent_country 
-            FROM persons
-            ORDER BY person_id;
-        """)
+        with pool.get_connection_context() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT person_id, permanent_state_ut, permanent_country 
+                    FROM persons
+                    ORDER BY person_id;
+                """)
+                persons = cur.fetchall()
         
-        persons = cursor.fetchall()
         total_persons = len(persons)
         logger.info(f"Found {total_persons} persons to process")
         
         # Statistics
+        stats_lock = threading.Lock()
         stats = {
             CLASSIFICATION_NATIVE: 0,
             CLASSIFICATION_INTER: 0,
@@ -218,31 +228,54 @@ def process_persons(cursor):
             'null': 0
         }
         
-        # Process each person
-        for idx, person in enumerate(persons, 1):
-            person_id = person['person_id']
-            state = person['permanent_state_ut']
-            country = person['permanent_country']
+        def process_batch(batch):
+            updates = []
+            local_stats = {CLASSIFICATION_NATIVE: 0, CLASSIFICATION_INTER: 0, CLASSIFICATION_INTERNATIONAL: 0, 'null': 0}
+            for person in batch:
+                person_id = person['person_id']
+                state = person['permanent_state_ut']
+                country = person['permanent_country']
+                
+                # Classify
+                classification = classify_domicile(state, country)
+                
+                # Update statistics
+                if classification is None:
+                    local_stats['null'] += 1
+                else:
+                    local_stats[classification] += 1
+                
+                updates.append((classification, person_id))
             
-            # Classify
-            classification = classify_domicile(state, country)
-            
-            # Update statistics
-            if classification is None:
-                stats['null'] += 1
-            else:
-                stats[classification] += 1
-            
-            # Update database
-            cursor.execute("""
-                UPDATE persons 
-                SET domicile_classification = %s 
-                WHERE person_id = %s;
-            """, (classification, person_id))
-            
-            # Log progress every 100 records
-            if idx % 100 == 0:
-                logger.info(f"Processed {idx}/{total_persons} persons...")
+            with stats_lock:
+                for k in stats:
+                    stats[k] += local_stats[k]
+                    
+            if updates:
+                with pool.get_connection_context() as conn:
+                    with conn.cursor() as update_cur:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(update_cur, """
+                            UPDATE persons 
+                            SET domicile_classification = %s 
+                            WHERE person_id = %s;
+                        """, updates)
+                    conn.commit()
+
+        batch_size = 1000
+        batches = [persons[i:i + batch_size] for i in range(0, total_persons, batch_size)]
+        
+        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_batch, batch): i for i, batch in enumerate(batches)}
+            for i, future in enumerate(as_completed(futures), 1):
+                try:
+                    future.result()
+                    if i % 10 == 0 or i == len(batches):
+                        processed = min(i * batch_size, total_persons)
+                        logger.info(f"Processed {processed}/{total_persons} persons...")
+                except Exception as e:
+                    logger.error(f"Error processing batch: {e}")
         
         logger.info(f"Completed processing all {total_persons} persons")
         logger.info(f"Classification Statistics:")
@@ -293,7 +326,7 @@ def main():
         # Step 2: Process all persons and classify
         logger.info("Step 2: Processing persons and classifying domicile...")
         stats = process_persons(cursor)
-        connection.commit()
+        # connection.commit()  # Commits are handled inside process_persons using db pool
         logger.info("")
         
         logger.info("=" * 60)

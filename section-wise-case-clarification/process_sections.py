@@ -5,19 +5,25 @@ Combines logic from logic-1.py and logic-2.py for database processing.
 
 Process:
 1. Connect to database using .env variables
-2. Process one section at a time from crimes table
+2. Process chunks of crimes in parallel
 3. Clean NDPS sections (logic-1: extract and normalize)
 4. Classify sections (logic-2: categorize into Small/Intermediate/Commercial/Cultivation)
-5. Update class_classification in database
+5. Update class_classification in database using executemany/batch
 """
 
 import os
 import re
 import csv
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_batch
 from dotenv import load_dotenv
 from typing import Optional, List, Dict, Tuple
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Enable importing db_pooling from parent directory
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
 
 # Load environment variables from .env file
 load_dotenv()
@@ -303,22 +309,6 @@ class SectionClassifier:
         return best.capitalize()
 
 
-def get_db_connection():
-    """Create and return a database connection using environment variables from .env"""
-    try:
-        conn = psycopg2.connect(
-            host=os.getenv('DB_HOST'),
-            port=os.getenv('DB_PORT'),
-            database=os.getenv('DB_NAME'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD')
-        )
-        return conn
-    except Exception as e:
-        print(f"✗ Error connecting to database: {e}")
-        raise
-
-
 def check_column_exists(cursor) -> bool:
     """Check if class_classification column exists in crimes table"""
     try:
@@ -348,170 +338,50 @@ def create_column(cursor, conn):
         raise
 
 
-def process_sections():
-    """Main function to process sections from database and update classifications"""
+def process_crime_chunk(chunk: List[Dict], cleaner: NDPSSectionCleaner, classifier: SectionClassifier, db_pool: PostgreSQLConnectionPool):
+    """Process a chunk of crimes: extract, classify, and update db."""
+    logic1_data = []
+    logic2_data = []
+    logic2_entity_details = []
     
-    print("=" * 80)
-    print("Section Processing and Classification Script")
-    print("Combined logic from logic-1.py and logic-2.py")
-    print("=" * 80)
+    stats = {
+        'total': 0, 'updated': 0, 'no_change': 0, 'null_sections': 0,
+        'no_match': 0, 'cultivation': 0, 'commercial': 0,
+        'intermediate': 0, 'small': 0, 'null_classification': 0,
+        'errors': 0
+    }
     
-    # Initialize components
-    cleaner = NDPSSectionCleaner()
-    classifier = SectionClassifier()
+    update_batch = []
     
-    # Connect to database
-    print("\n[STEP 1] Connecting to database...")
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        print("  ✓ Connected successfully")
-        print(f"  → Host: {os.getenv('DB_HOST')}")
-        print(f"  → Database: {os.getenv('DB_NAME')}")
-    except Exception as e:
-        print(f"  ✗ Failed to connect: {e}")
-        return
-    
-    try:
-        # Check and create column if needed
-        print("\n[STEP 2] Checking column existence...")
-        column_exists = check_column_exists(cursor)
-        
-        if not column_exists:
-            print("  → Column 'class_classification' does not exist")
-            print("  → Creating column...")
-            create_column(cursor, conn)
-        else:
-            print("  ✓ Column 'class_classification' already exists")
-        
-        # Get total count
-        print("\n[STEP 3] Counting records...")
-        cursor.execute("SELECT COUNT(*) as count FROM crimes")
-        total_records = cursor.fetchone()['count']
-        print(f"  ✓ Found {total_records} crime records to process")
-        
-        # Fetch all crime records
-        print("\n[STEP 4] Fetching crime records...")
-        cursor.execute("""
-            SELECT crime_id, acts_sections, class_classification 
-            FROM crimes 
-            ORDER BY crime_id
-        """)
-        crimes = cursor.fetchall()
-        print(f"  ✓ Retrieved {len(crimes)} records")
-        
-        # ============================================================
-        # PHASE 1: LOGIC-1 - Extract Sections as Entities
-        # ============================================================
-        print("\n" + "=" * 80)
-        print("[PHASE 1] LOGIC-1: Extracting Sections as Entities")
-        print("=" * 80)
-        print("-" * 80)
-        
-        logic1_output_file = "logic1_output.csv"
-        logic1_data = []  # Store data for CSV
-        
-        for idx, crime in enumerate(crimes, 1):
+    for crime in chunk:
+        try:
             crime_id = crime['crime_id']
             sections_text = crime['acts_sections']
+            existing_classification = crime.get('class_classification')
             
-            # Log every 100 records or for first 10 records
-            log_detail = (idx % 100 == 0) or (idx <= 10)
+            stats['total'] += 1
             
-            if log_detail:
-                print(f"\n[{idx}/{total_records}] Crime ID: {crime_id}")
-                print(f"  [EXTRACT] Original sections: {sections_text}")
-            
-            # Step 1: Extract sections as entities (logic-1)
+            # Phase 1: Extract Entities
             entities = cleaner.extract_sections_as_entities(sections_text)
             entities_str = ", ".join(entities) if entities else ""
             
-            if log_detail:
-                print(f"  [EXTRACT] Entities found: {len(entities)}")
-                print(f"  [EXTRACT] Entities: {entities_str}")
-            
-            # Store data for CSV
             logic1_data.append({
                 'crime_id': crime_id,
                 'acts_sections': sections_text or '',
                 'entities': entities_str,
                 'entity_count': len(entities)
             })
-        
-        # Save Logic-1 results to CSV
-        print(f"\n[PHASE 1] Saving Logic-1 results to {logic1_output_file}...")
-        with open(logic1_output_file, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['crime_id', 'acts_sections', 'entities', 'entity_count']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(logic1_data)
-        print(f"  ✓ Saved {len(logic1_data)} records to {logic1_output_file}")
-        
-        # ============================================================
-        # PHASE 2: LOGIC-2 - Classify Each Entity
-        # ============================================================
-        print("\n" + "=" * 80)
-        print("[PHASE 2] LOGIC-2: Classifying Each Entity")
-        print("=" * 80)
-        print("-" * 80)
-        
-        logic2_output_file = "logic2_output.csv"
-        logic2_data = []  # Store data for CSV
-        logic2_entity_details_file = "logic2_entity_details.csv"
-        logic2_entity_details = []  # Store entity-level details
-        
-        # Statistics
-        stats = {
-            'total': 0,
-            'updated': 0,
-            'no_change': 0,
-            'null_sections': 0,
-            'no_match': 0,
-            'cultivation': 0,
-            'commercial': 0,
-            'intermediate': 0,
-            'small': 0,
-            'null_classification': 0
-        }
-        
-        for idx, logic1_record in enumerate(logic1_data, 1):
-            crime_id = logic1_record['crime_id']
-            entities_str = logic1_record['entities']
             
-            # Parse entities from string
-            entities = [e.strip() for e in entities_str.split(',') if e.strip()] if entities_str else []
-            
-            # Get original crime record for existing classification
-            original_crime = next((c for c in crimes if c['crime_id'] == crime_id), None)
-            existing_classification = original_crime.get('class_classification') if original_crime else None
-            
-            stats['total'] += 1
-            
-            # Log every 100 records or for first 10 records
-            log_detail = (idx % 100 == 0) or (idx <= 10)
-            
-            if log_detail:
-                print(f"\n[{idx}/{total_records}] Crime ID: {crime_id}")
-                print(f"  [CLASSIFY] Entities: {entities_str}")
-            
-            # Step 2: Classify each entity individually (logic-2)
+            # Phase 2: Classify Entities
             classification, entity_details = classifier.classify_entities(entities)
             
-            if log_detail:
-                print(f"  [CLASSIFY] Entity details:")
-                for detail in entity_details:
-                    print(f"    - Entity: {detail['entity']} → {detail['classification']}")
-                print(f"  [CLASSIFY] Final Classification: {classification or 'NULL'}")
-            
-            # Store entity-level details for CSV
             for detail in entity_details:
                 logic2_entity_details.append({
                     'crime_id': crime_id,
                     'entity': detail['entity'],
                     'entity_classification': detail['classification']
                 })
-            
-            # Store summary data for CSV
+                
             logic2_data.append({
                 'crime_id': crime_id,
                 'entities': entities_str,
@@ -519,127 +389,171 @@ def process_sections():
                 'class_classification': classification or ''
             })
             
-            # Track statistics
-            original_sections = original_crime['acts_sections'] if original_crime else None
-            if not original_sections or not original_sections.strip():
+            # Update stats based on classification
+            if not sections_text or not sections_text.strip():
                 stats['null_sections'] += 1
             elif classification:
                 stats[classification.lower()] += 1
             else:
                 stats['no_match'] += 1
                 stats['null_classification'] += 1
-        
-        # Save Logic-2 summary results to CSV
-        print(f"\n[PHASE 2] Saving Logic-2 summary results to {logic2_output_file}...")
-        with open(logic2_output_file, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['crime_id', 'entities', 'entity_count', 'class_classification']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(logic2_data)
-        print(f"  ✓ Saved {len(logic2_data)} records to {logic2_output_file}")
-        
-        # Save Logic-2 entity-level details to CSV
-        print(f"\n[PHASE 2] Saving Logic-2 entity details to {logic2_entity_details_file}...")
-        with open(logic2_entity_details_file, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['crime_id', 'entity', 'entity_classification']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(logic2_entity_details)
-        print(f"  ✓ Saved {len(logic2_entity_details)} entity details to {logic2_entity_details_file}")
-        
-        # ============================================================
-        # PHASE 3: Update Database
-        # ============================================================
-        print("\n" + "=" * 80)
-        print("[PHASE 3] Updating Database")
-        print("=" * 80)
-        print("-" * 80)
-        
-        for idx, logic2_record in enumerate(logic2_data, 1):
-            crime_id = logic2_record['crime_id']
-            classification = logic2_record['class_classification']
-            
-            # Get original crime record for existing classification
-            original_crime = next((c for c in crimes if c['crime_id'] == crime_id), None)
-            existing_classification = original_crime.get('class_classification') if original_crime else None
-            
-            # Log every 100 records or for first 10 records
-            log_detail = (idx % 100 == 0) or (idx <= 10)
-            
-            if log_detail:
-                print(f"\n[{idx}/{total_records}] Crime ID: {crime_id}")
-            
-            # Update database
-            if existing_classification:
-                if existing_classification == classification:
-                    # Already correct, no change needed
-                    stats['no_change'] += 1
-                    if log_detail:
-                        print(f"  [VERIFY] ✓ No change needed (already {classification})")
-                else:
-                    # Classification is different, update it
-                    cursor.execute("""
-                        UPDATE crimes 
-                        SET class_classification = %s 
-                        WHERE crime_id = %s
-                    """, (classification, crime_id))
-                    stats['updated'] += 1
-                    if log_detail:
-                        print(f"  [UPDATE] ✗ Updated from '{existing_classification}' to '{classification or 'NULL'}'")
-            else:
-                # No existing classification, set it
-                cursor.execute("""
-                    UPDATE crimes 
-                    SET class_classification = %s 
-                    WHERE crime_id = %s
-                """, (classification, crime_id))
+                
+            # Phase 3: Prepare DB Update
+            if existing_classification != classification:
+                update_batch.append((classification, crime_id))
                 stats['updated'] += 1
-                if log_detail:
-                    print(f"  [UPDATE] ✓ Set classification to '{classification or 'NULL'}'")
+            else:
+                stats['no_change'] += 1
+                
+        except Exception as e:
+            print(f"Error processing crime_id {crime.get('crime_id', 'Unknown')}: {e}")
+            stats['errors'] += 1
             
-            # Commit every 100 records for safety
-            if idx % 100 == 0:
+    # Execute batch update using connection from pool
+    if update_batch:
+        try:
+            with db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                # Batch update
+                execute_batch(
+                    cursor,
+                    "UPDATE crimes SET class_classification = %s WHERE crime_id = %s",
+                    update_batch,
+                    page_size=100
+                )
                 conn.commit()
-                if log_detail:
-                    print(f"  [COMMIT] Progress saved (processed {idx} records)")
-        
-        # Final commit
-        conn.commit()
-        print("\n  ✓ Database update completed")
-        
-        # Print summary
-        print("\n" + "-" * 80)
-        print("=" * 80)
-        print("SUMMARY")
-        print("=" * 80)
-        print(f"Total Records Processed:      {stats['total']}")
-        print(f"Records Updated:             {stats['updated']}")
-        print(f"Records (No Change):         {stats['no_change']}")
-        print(f"\nClassification Breakdown:")
-        print(f"  - Cultivation:              {stats['cultivation']}")
-        print(f"  - Commercial:              {stats['commercial']}")
-        print(f"  - Intermediate:             {stats['intermediate']}")
-        print(f"  - Small:                    {stats['small']}")
-        print(f"  - NULL (No Match):           {stats['null_classification']}")
-        print(f"\nOther Statistics:")
-        print(f"  - NULL/Empty acts_sections:  {stats['null_sections']}")
-        print(f"\nOutput Files Generated:")
-        print(f"  - {logic1_output_file} (Logic-1: Entity extraction results)")
-        print(f"  - {logic2_output_file} (Logic-2: Summary classification results)")
-        print(f"  - {logic2_entity_details_file} (Logic-2: Entity-level classification details)")
-        print("=" * 80)
-        print("\n✓ Section processing and classification completed successfully!")
-        
+        except Exception as e:
+            print(f"Error updating batch in DB: {e}")
+            stats['errors'] += len(update_batch)
+            stats['updated'] -= len(update_batch)
+            
+    return logic1_data, logic2_data, logic2_entity_details, stats
+
+
+def process_sections():
+    print("=" * 80)
+    print("Section Processing and Classification Script (Parallelized)")
+    print("=" * 80)
+    
+    cleaner = NDPSSectionCleaner()
+    classifier = SectionClassifier()
+    
+    print("\n[STEP 1] Initializing Database Connection Pool...")
+    try:
+        db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
+        with db_pool.get_connection_context() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            print("  ✓ Connected successfully")
+            print(f"  → Host: {os.getenv('DB_HOST')}")
+            print(f"  → Database: {os.getenv('DB_NAME')}")
+            
+            print("\n[STEP 2] Checking column existence...")
+            column_exists = check_column_exists(cursor)
+            
+            if not column_exists:
+                print("  → Column 'class_classification' does not exist. Creating...")
+                create_column(cursor, conn)
+            else:
+                print("  ✓ Column 'class_classification' already exists")
+                
+            print("\n[STEP 3] Fetching crime records...")
+            cursor.execute("SELECT COUNT(*) as count FROM crimes")
+            total_records = cursor.fetchone()['count']
+            print(f"  ✓ Found {total_records} crime records to process")
+            
+            cursor.execute("SELECT crime_id, acts_sections, class_classification FROM crimes ORDER BY crime_id")
+            crimes = cursor.fetchall()
+            print(f"  ✓ Retrieved {len(crimes)} records")
+            
     except Exception as e:
-        conn.rollback()
-        print(f"\n✗ Error during processing: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-    finally:
-        cursor.close()
-        conn.close()
-        print("\n✓ Database connection closed")
+        print(f"  ✗ Failed to initialize: {e}")
+        return
+        
+    print("\n[STEP 4] Processing Records Concurrently...")
+    
+    # Chunking
+    chunk_size = 5000
+    chunks = [crimes[i:i + chunk_size] for i in range(0, len(crimes), chunk_size)]
+    print(f"  → Created {len(chunks)} chunks of size {chunk_size}")
+    
+    all_logic1_data = []
+    all_logic2_data = []
+    all_logic2_entity_details = []
+    
+    global_stats = {
+        'total': 0, 'updated': 0, 'no_change': 0, 'null_sections': 0,
+        'no_match': 0, 'cultivation': 0, 'commercial': 0,
+        'intermediate': 0, 'small': 0, 'null_classification': 0,
+        'errors': 0
+    }
+    
+    # Get max workers from env or default to 5
+    max_workers = int(os.getenv('MAX_WORKERS', '5'))
+    print(f"  → Using ThreadPoolExecutor with {max_workers} workers")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_crime_chunk, chunk, cleaner, classifier, db_pool): i for i, chunk in enumerate(chunks)}
+        
+        for i, future in enumerate(as_completed(futures), 1):
+            try:
+                l1_data, l2_data, l2_ent, stats = future.result()
+                all_logic1_data.extend(l1_data)
+                all_logic2_data.extend(l2_data)
+                all_logic2_entity_details.extend(l2_ent)
+                
+                for k, v in stats.items():
+                    global_stats[k] += v
+                    
+                if i % 10 == 0 or i == len(chunks):
+                    print(f"  ... processed {i}/{len(chunks)} chunks")
+            except Exception as e:
+                print(f"✗ Chunk processing failed: {e}")
+                
+    # Save CSVs
+    print("\n[STEP 5] Saving Results to CSV...")
+    logic1_output_file = "logic1_output.csv"
+    with open(logic1_output_file, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['crime_id', 'acts_sections', 'entities', 'entity_count'])
+        writer.writeheader()
+        writer.writerows(all_logic1_data)
+    print(f"  ✓ Saved {len(all_logic1_data)} records to {logic1_output_file}")
+    
+    logic2_output_file = "logic2_output.csv"
+    with open(logic2_output_file, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['crime_id', 'entities', 'entity_count', 'class_classification'])
+        writer.writeheader()
+        writer.writerows(all_logic2_data)
+    print(f"  ✓ Saved {len(all_logic2_data)} records to {logic2_output_file}")
+    
+    logic2_entity_details_file = "logic2_entity_details.csv"
+    with open(logic2_entity_details_file, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['crime_id', 'entity', 'entity_classification'])
+        writer.writeheader()
+        writer.writerows(all_logic2_entity_details)
+    print(f"  ✓ Saved {len(all_logic2_entity_details)} entity details to {logic2_entity_details_file}")
+    
+    # Close pool
+    if hasattr(db_pool, 'close_all'):
+        db_pool.close_all()
+    
+    # Print summary
+    print("\n" + "-" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+    print(f"Total Records Processed:      {global_stats['total']}")
+    print(f"Records Updated:             {global_stats['updated']}")
+    print(f"Records (No Change):         {global_stats['no_change']}")
+    print(f"Processing Errors:           {global_stats['errors']}")
+    print(f"\nClassification Breakdown:")
+    print(f"  - Cultivation:              {global_stats['cultivation']}")
+    print(f"  - Commercial:               {global_stats['commercial']}")
+    print(f"  - Intermediate:             {global_stats['intermediate']}")
+    print(f"  - Small:                    {global_stats['small']}")
+    print(f"  - NULL (No Match):          {global_stats['null_classification']}")
+    print(f"\nOther Statistics:")
+    print(f"  - NULL/Empty acts_sections: {global_stats['null_sections']}")
+    print("=" * 80)
+    print("\n✓ Section processing and classification completed successfully!")
 
 
 if __name__ == "__main__":
@@ -651,5 +565,3 @@ if __name__ == "__main__":
         print(f"\n✗ Script failed: {e}")
         import traceback
         traceback.print_exc()
-
-

@@ -2,15 +2,22 @@ import psycopg2
 import os
 import sys
 import re
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from db_pooling import PostgreSQLConnectionPool
+except ImportError:
+    pass
 
 load_dotenv()
 
 def connect_to_db():
-    db_url = os.getenv("DATABASE_URL")
-    if "?schema=" in db_url:
-        db_url = db_url.split("?schema=")[0]
-    return psycopg2.connect(db_url)
+    pool = PostgreSQLConnectionPool()
+    return pool
 
 def construct_full_name(name, surname, alias):
     """Construct full_name from name, surname, and alias"""
@@ -108,8 +115,7 @@ def clean_full_name(full_name):
     return full_name
 
 def fix_all_fullnames():
-    conn = connect_to_db()
-    cursor = conn.cursor()
+    pool = connect_to_db()
     
     print("\n=== Fixing ALL full_name Fields ===\n")
     print("This script will:")
@@ -121,12 +127,15 @@ def fix_all_fullnames():
     print("6. Normalize spacing and formatting\n")
     
     # Fetch ALL records to check for cleaning needs
-    cursor.execute("""
-        SELECT person_id, full_name, raw_full_name, name, surname, alias
-        FROM persons
-    """)
-    
-    all_records = cursor.fetchall()
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT person_id, full_name, raw_full_name, name, surname, alias
+                FROM persons
+            """)
+            
+            all_records = cursor.fetchall()
+            
     print(f"Total records in database: {len(all_records)}\n")
     
     # Categorize records
@@ -154,8 +163,6 @@ def fix_all_fullnames():
     
     if not records_with_at and not records_empty and not records_needing_cleanup:
         print("No records to update!")
-        cursor.close()
-        conn.close()
         return
     
     # Show samples
@@ -205,95 +212,96 @@ def fix_all_fullnames():
     print("\nUpdating...")
     update_count = 0
     error_count = 0
+    stats_lock = threading.Lock()
+    updates_to_run = []
     
     # Process records with @ in full_name
     for person_id, full_name, raw_full_name, name, surname, alias in records_with_at:
-        try:
-            clean = clean_full_name(full_name)
+        clean = clean_full_name(full_name)
+        if not raw_full_name:
+            updates_to_run.append((
+                "UPDATE persons SET full_name = %s, raw_full_name = %s WHERE person_id = %s",
+                (clean, full_name, person_id)
+            ))
+        else:
+            updates_to_run.append((
+                "UPDATE persons SET full_name = %s WHERE person_id = %s",
+                (clean, person_id)
+            ))
             
-            # If no raw_full_name exists, save original first
-            if not raw_full_name:
-                cursor.execute("""
-                    UPDATE persons
-                    SET full_name = %s, raw_full_name = %s
-                    WHERE person_id = %s
-                """, (clean, full_name, person_id))
-            else:
-                cursor.execute("""
-                    UPDATE persons
-                    SET full_name = %s
-                    WHERE person_id = %s
-                """, (clean, person_id))
-            update_count += 1
-        except Exception as e:
-            error_count += 1
-            print(f"Error updating {person_id}: {e}")
-    
     # Process records needing cleanup (metadata removal)
     for person_id, full_name, raw_full_name, name, surname, alias in records_needing_cleanup:
-        try:
-            clean = clean_full_name(full_name)
+        clean = clean_full_name(full_name)
+        if not raw_full_name:
+            updates_to_run.append((
+                "UPDATE persons SET full_name = %s, raw_full_name = %s WHERE person_id = %s",
+                (clean, full_name, person_id)
+            ))
+        else:
+            updates_to_run.append((
+                "UPDATE persons SET full_name = %s WHERE person_id = %s",
+                (clean, person_id)
+            ))
             
-            # If no raw_full_name exists, save original first
-            if not raw_full_name:
-                cursor.execute("""
-                    UPDATE persons
-                    SET full_name = %s, raw_full_name = %s
-                    WHERE person_id = %s
-                """, (clean, full_name, person_id))
-            else:
-                cursor.execute("""
-                    UPDATE persons
-                    SET full_name = %s
-                    WHERE person_id = %s
-                """, (clean, person_id))
-            update_count += 1
-        except Exception as e:
-            error_count += 1
-            print(f"Error updating {person_id}: {e}")
-    
     # Process records with empty full_name
     for person_id, full_name, raw_full_name, name, surname, alias in records_empty:
-        try:
-            # Construct full_name from name, surname, alias
-            constructed = construct_full_name(name, surname, alias)
-            if constructed:
-                clean = clean_full_name(constructed)
-                
-                # Save constructed value to raw_full_name if empty
-                if not raw_full_name:
-                    cursor.execute("""
-                        UPDATE persons
-                        SET full_name = %s, raw_full_name = %s
-                        WHERE person_id = %s
-                    """, (clean, constructed, person_id))
-                else:
-                    cursor.execute("""
-                        UPDATE persons
-                        SET full_name = %s
-                        WHERE person_id = %s
-                    """, (clean, person_id))
-                update_count += 1
-        except Exception as e:
-            error_count += 1
-            print(f"Error updating {person_id}: {e}")
+        constructed = construct_full_name(name, surname, alias)
+        if constructed:
+            clean = clean_full_name(constructed)
+            if not raw_full_name:
+                updates_to_run.append((
+                    "UPDATE persons SET full_name = %s, raw_full_name = %s WHERE person_id = %s",
+                    (clean, constructed, person_id)
+                ))
+            else:
+                updates_to_run.append((
+                    "UPDATE persons SET full_name = %s WHERE person_id = %s",
+                    (clean, person_id)
+                ))
+
+    def process_update_batch(batch):
+        local_updated = 0
+        local_errors = 0
+        with pool.get_connection_context() as conn:
+            with conn.cursor() as cursor:
+                for query, params in batch:
+                    try:
+                        cursor.execute(query, params)
+                        local_updated += 1
+                    except Exception as e:
+                        local_errors += 1
+                        print(f"Error updating {params[-1]}: {e}")
+            conn.commit()
+            
+        with stats_lock:
+            nonlocal update_count, error_count
+            update_count += local_updated
+            error_count += local_errors
+            if update_count % 500 == 0:
+                print(f"Updated {update_count} records...")
+
+    batch_size = 500
+    batches = [updates_to_run[i:i + batch_size] for i in range(0, len(updates_to_run), batch_size)]
     
-    conn.commit()
+    max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_update_batch, batch): batch for batch in batches}
+        for future in as_completed(futures):
+            future.result()
     
     # Verify changes
-    cursor.execute("SELECT COUNT(*) FROM persons WHERE full_name LIKE '%@%'")
-    remaining_at = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM persons WHERE (full_name IS NULL OR full_name = '') AND (name IS NOT NULL OR surname IS NOT NULL OR alias IS NOT NULL)")
-    remaining_empty = cursor.fetchone()[0]
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM persons WHERE full_name LIKE '%@%'")
+            remaining_at = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM persons WHERE (full_name IS NULL OR full_name = '') AND (name IS NOT NULL OR surname IS NOT NULL OR alias IS NOT NULL)")
+            remaining_empty = cursor.fetchone()[0]
     
     print(f"\n✅ Updated {update_count} records")
     print(f"Errors: {error_count} records")
     print(f"Remaining with @ in full_name: {remaining_at}")
     print(f"Remaining empty full_name (with available name/surname/alias): {remaining_empty}\n")
-    
-    cursor.close()
-    conn.close()
 
 if __name__ == "__main__":
     fix_all_fullnames()

@@ -10,14 +10,19 @@ import time
 import requests
 import psycopg2
 from psycopg2.extras import execute_batch
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import logging
 import colorlog
 from typing import List, Dict, Optional, Tuple, Set
 import json
 import os
-from datetime import timezone, timedelta
+
+# Import PostgreSQLConnectionPool
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import PostgreSQLConnectionPool
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -89,8 +94,9 @@ def get_yesterday_end_ist() -> str:
 
 class AccusedETL:
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self.db_pool = None
+        self.stats_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
         self.stats = {
             'total_api_calls': 0,
             'total_accused_fetched': 0,
@@ -185,30 +191,33 @@ class AccusedETL:
 
     def connect_db(self):
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool(
+                minconn=1,
+                maxconn=int(os.getenv('MAX_WORKERS', '10')) + 2,
+                **DB_CONFIG
+            )
+            logger.info(f"✅ Connected to database: {DB_CONFIG['database']} via Connection Pool")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")
             return False
 
     def close_db(self):
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
+        if self.db_pool:
+            self.db_pool.close_all()
         logger.info("Database connection closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s
+                """, (table_name,))
+                return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -220,49 +229,51 @@ class AccusedETL:
         - If table has data: return max(date_created, date_modified) from table
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {ACCUSED_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                # Check if table has any data
+                cursor.execute(f"SELECT COUNT(*) FROM {ACCUSED_TABLE}")
+                count = cursor.fetchone()[0]
+                
+                if count == 0:
+                    # New database, start from beginning
+                    logger.info("📊 Table is empty, starting from 2022-01-01")
+                    return '2022-01-01T00:00:00+05:30'
+                
+                # Table has data, get max of date_created and date_modified
+                # Only consider dates >= 2022-01-01 to avoid processing very old data
+                MIN_START_DATE = '2022-01-01T00:00:00+05:30'
+                min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                
+                cursor.execute(f"""
+                    SELECT GREATEST(
+                        COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                        COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                    ) as max_date
+                    FROM {ACCUSED_TABLE}
+                """)
+                result = cursor.fetchone()
+                if result and result[0]:
+                    max_date = result[0]
+                    # Convert to IST timezone if needed
+                    if isinstance(max_date, datetime):
+                        if max_date.tzinfo is None:
+                            max_date = max_date.replace(tzinfo=IST_OFFSET)
+                        else:
+                            max_date = max_date.astimezone(IST_OFFSET)
+                        
+                        # Ensure we never go before 2022-01-01
+                        if max_date < min_start_dt:
+                            logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                            return MIN_START_DATE
+                        
+                        logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
+                        return max_date.isoformat()
+                
+                # Fallback to start date
+                logger.warning("⚠️  Could not determine max date, using 2022-01-01")
                 return '2022-01-01T00:00:00+05:30'
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-            min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {ACCUSED_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
-            if result and result[0]:
-                max_date = result[0]
-                # Convert to IST timezone if needed
-                if isinstance(max_date, datetime):
-                    if max_date.tzinfo is None:
-                        max_date = max_date.replace(tzinfo=IST_OFFSET)
-                    else:
-                        max_date = max_date.astimezone(IST_OFFSET)
-                    
-                    # Ensure we never go before 2022-01-01
-                    if max_date < min_start_dt:
-                        logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
-                        return MIN_START_DATE
-                    
-                    logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
-                    return max_date.isoformat()
-            
-            # Fallback to start date
-            logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-            return '2022-01-01T00:00:00+05:30'
-            
+                
         except Exception as e:
             logger.error(f"❌ Error getting effective start date: {e}")
             logger.warning("⚠️  Using default start date: 2022-01-01")
@@ -321,30 +332,32 @@ class AccusedETL:
     
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the accused table."""
-        try:
-            # Determine column type based on field name
-            if 'date' in column_name.lower():
-                column_type = 'TIMESTAMP'
-            elif 'id' in column_name.lower() or 'code' in column_name.lower():
-                column_type = 'VARCHAR(50)'
-            elif column_name in ('type', 'build', 'color', 'ear', 'eyes', 'face', 'hair', 'nose', 'teeth'):
-                column_type = 'VARCHAR(255)'
-            elif column_name == 'height':
-                column_type = 'VARCHAR(50)'
-            elif column_name == 'is_ccl' or column_name == 'seq_num':
-                column_type = 'INTEGER'
-            else:
-                column_type = 'VARCHAR(255)'
-            
-            alter_sql = f"ALTER TABLE {ACCUSED_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
-            logger.info(f"✅ Added column {column_name} ({column_type}) to {ACCUSED_TABLE}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
-            return False
+        with self.schema_lock:
+            try:
+                with self.db_pool.get_connection_context() as conn:
+                    cursor = conn.cursor()
+                    # Determine column type based on field name
+                    if 'date' in column_name.lower():
+                        column_type = 'TIMESTAMP'
+                    elif 'id' in column_name.lower() or 'code' in column_name.lower():
+                        column_type = 'VARCHAR(50)'
+                    elif column_name in ('type', 'build', 'color', 'ear', 'eyes', 'face', 'hair', 'nose', 'teeth'):
+                        column_type = 'VARCHAR(255)'
+                    elif column_name == 'height':
+                        column_type = 'VARCHAR(50)'
+                    elif column_name == 'is_ccl' or column_name == 'seq_num':
+                        column_type = 'INTEGER'
+                    else:
+                        column_type = 'VARCHAR(255)'
+                    
+                    alter_sql = f"ALTER TABLE {ACCUSED_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    cursor.execute(alter_sql)
+                    conn.commit()
+                    logger.info(f"✅ Added column {column_name} ({column_type}) to {ACCUSED_TABLE}")
+                    return True
+            except Exception as e:
+                logger.error(f"❌ Error adding column {column_name}: {e}")
+                return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
         """
@@ -531,13 +544,15 @@ class AccusedETL:
         logger.trace(f"Transformed crime: {json.dumps(transformed, indent=2, default=str)}")
         return transformed
     
-    def insert_crime(self, crime: Dict) -> Tuple[bool, str]:
+    def insert_crime(self, crime: Dict, conn, cursor) -> Tuple[bool, str]:
         """
         Insert or update single crime into database
         Simplified version for fallback crime insertion from accused ETL
         
         Args:
             crime: Transformed crime dict
+            conn: connection object
+            cursor: cursor object
             
         Returns:
             Tuple of (success: bool, operation: str) where operation is 'inserted', 'updated', or error reason
@@ -550,8 +565,8 @@ class AccusedETL:
         try:
             # Check if PS_CODE exists in hierarchy
             if crime.get('ps_code'):
-                self.db_cursor.execute(f"SELECT 1 FROM {TABLE_CONFIG.get('hierarchy', 'hierarchy')} WHERE ps_code = %s", (crime['ps_code'],))
-                if not self.db_cursor.fetchone():
+                cursor.execute(f"SELECT 1 FROM {TABLE_CONFIG.get('hierarchy', 'hierarchy')} WHERE ps_code = %s", (crime['ps_code'],))
+                if not cursor.fetchone():
                     logger.warning(f"⚠️  PS_CODE {crime['ps_code']} not found in hierarchy table for crime {crime_id}")
                     return False, 'ps_code_not_found'
             else:
@@ -559,8 +574,8 @@ class AccusedETL:
                 return False, 'missing_ps_code'
             
             # Check if crime already exists
-            self.db_cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
-            exists = self.db_cursor.fetchone() is not None
+            cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
+            exists = cursor.fetchone() is not None
             
             if exists:
                 # Update existing crime (simple update, not smart update like etl_crimes.py)
@@ -572,7 +587,7 @@ class AccusedETL:
                         brief_facts = %s, date_created = %s, date_modified = %s
                     WHERE crime_id = %s
                 """
-                self.db_cursor.execute(update_query, (
+                cursor.execute(update_query, (
                     crime['ps_code'], crime['fir_num'], crime['fir_reg_num'], crime['fir_type'],
                     crime['acts_sections'], crime['fir_date'], crime['case_status'],
                     crime['major_head'], crime['minor_head'], crime['crime_type'],
@@ -580,7 +595,6 @@ class AccusedETL:
                     crime['date_created'], crime['date_modified'], crime_id
                 ))
                 logger.debug(f"Updated crime: {crime_id}")
-                self.db_conn.commit()
                 return True, 'updated'
             else:
                 # Insert new crime
@@ -594,7 +608,7 @@ class AccusedETL:
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
-                self.db_cursor.execute(insert_query, (
+                cursor.execute(insert_query, (
                     crime['crime_id'], crime['ps_code'], crime['fir_num'], crime['fir_reg_num'],
                     crime['fir_type'], crime['acts_sections'], crime['fir_date'],
                     crime['case_status'], crime['major_head'], crime['minor_head'],
@@ -602,17 +616,17 @@ class AccusedETL:
                     crime['brief_facts'], crime['date_created'], crime['date_modified']
                 ))
                 logger.info(f"✅ Inserted crime: {crime_id} (from accused ETL fallback)")
-                self.db_conn.commit()
                 return True, 'inserted'
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
+            conn.rollback()
             logger.warning(f"⚠️  Integrity error for crime {crime_id}: {e}")
             return False, 'integrity_error'
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             logger.error(f"❌ Error inserting crime {crime_id}: {e}")
-            self.stats['errors'].append(f"Crime {crime_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['errors'].append(f"Crime {crime_id}: {str(e)}")
             return False, 'error'
     
     def fetch_accused_by_crime_id(self, crime_id: str) -> Optional[List[Dict]]:
@@ -685,29 +699,27 @@ class AccusedETL:
         logger.error(f"❌ Failed to fetch accused by crime_id {crime_id} after {API_CONFIG['max_retries']} attempts")
         return None
 
-    def ensure_person_stub(self, person_id: str):
+    def ensure_person_stub(self, person_id: str, cursor):
         if not person_id:
             return
-        self.db_cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
-        if not self.db_cursor.fetchone():
-            self.db_cursor.execute(
+        cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
+        if not cursor.fetchone():
+            cursor.execute(
                 f"INSERT INTO {PERSONS_TABLE} (person_id) VALUES (%s) ON CONFLICT (person_id) DO NOTHING",
                 (person_id,)
             )
-            self.stats['stub_persons_created'] += 1
+            with self.stats_lock:
+                self.stats['stub_persons_created'] += 1
 
-    def accused_exists(self, accused_id: str) -> bool:
+    def accused_exists(self, accused_id: str, cursor) -> bool:
         """Check if accused exists by accused_id"""
-        self.db_cursor.execute(f"SELECT 1 FROM {ACCUSED_TABLE} WHERE accused_id = %s", (accused_id,))
-        return self.db_cursor.fetchone() is not None
+        cursor.execute(f"SELECT 1 FROM {ACCUSED_TABLE} WHERE accused_id = %s", (accused_id,))
+        return cursor.fetchone() is not None
     
-    def accused_exists_by_crime_and_code(self, crime_id: str, accused_code: str) -> Optional[str]:
+    def accused_exists_by_crime_and_code(self, crime_id: str, accused_code: str, cursor) -> Optional[str]:
         """
         Check if accused exists by (crime_id, accused_code) combination
         Returns the accused_id if found, None otherwise
-        NOTE: This method is kept for backward compatibility but is no longer used
-        in the main insert logic since the unique constraint on (crime_id, accused_code) was removed.
-        Multiple accused_id can now share the same (crime_id, accused_code) combination.
         """
         if not crime_id:
             return None
@@ -715,11 +727,11 @@ class AccusedETL:
         # Normalize accused_code: None or empty string becomes empty string
         accused_code = accused_code or ''
         
-        self.db_cursor.execute(
+        cursor.execute(
             f"SELECT accused_id FROM {ACCUSED_TABLE} WHERE crime_id = %s AND accused_code = %s",
             (crime_id, accused_code)
         )
-        row = self.db_cursor.fetchone()
+        row = cursor.fetchone()
         return row[0] if row else None
 
     def transform_accused(self, row: Dict) -> Dict:
@@ -760,9 +772,9 @@ class AccusedETL:
             'date_modified': date_modified  # From API if available
         }
     
-    def get_existing_accused(self, accused_id: str) -> Optional[Dict]:
+    def get_existing_accused(self, accused_id: str, cursor) -> Optional[Dict]:
         """Get existing accused record from database"""
-        self.db_cursor.execute(f"""
+        cursor.execute(f"""
             SELECT accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
                    beard, build, color, ear, eyes, face, hair, height,
                    leucoderma, mole, mustache, nose, teeth,
@@ -770,7 +782,7 @@ class AccusedETL:
             FROM {ACCUSED_TABLE}
             WHERE accused_id = %s
         """, (accused_id,))
-        row = self.db_cursor.fetchone()
+        row = cursor.fetchone()
         if row:
             return {
                 'accused_id': row[0],
@@ -825,7 +837,7 @@ class AccusedETL:
         self.failed_log.write(f"\n")
         self.failed_log.flush()
 
-    def _insert_accused_without_crime_check(self, accused: Dict, chunk_date_range: str = "") -> Tuple[bool, str]:
+    def _insert_accused_without_crime_check(self, accused: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
         Internal method to insert accused without checking if crime exists.
         Used for fallback accused records when we've already verified the crime exists.
@@ -847,16 +859,17 @@ class AccusedETL:
         try:
             # Check if person exists (create stub if needed) - only if person_id is provided
             if person_id:
-                self.db_cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
-                person_exists = self.db_cursor.fetchone() is not None
+                cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
+                person_exists = cursor.fetchone() is not None
                 
                 if not person_exists:
                     try:
-                        self.db_cursor.execute(
+                        cursor.execute(
                             f"INSERT INTO {PERSONS_TABLE} (person_id) VALUES (%s) ON CONFLICT (person_id) DO NOTHING",
                             (person_id,)
                         )
-                        self.stats['stub_persons_created'] += 1
+                        with self.stats_lock:
+                            self.stats['stub_persons_created'] += 1
                         logger.trace(f"Created stub person: {person_id}")
                     except Exception as e:
                         return False, f'person_not_found: {str(e)}'
@@ -866,11 +879,11 @@ class AccusedETL:
             date_modified = accused.get('date_modified')
             
             if not date_created or not date_modified:
-                self.db_cursor.execute(
+                cursor.execute(
                     f"SELECT date_created, date_modified FROM {CRIMES_TABLE} WHERE crime_id = %s",
                     (crime_id,)
                 )
-                crime_row = self.db_cursor.fetchone()
+                crime_row = cursor.fetchone()
                 if crime_row:
                     if not date_created:
                         date_created = crime_row[0]
@@ -883,8 +896,8 @@ class AccusedETL:
             accused_code = accused.get('accused_code') or ''
             
             # Check if accused already exists
-            if self.accused_exists(accused_id):
-                existing = self.get_existing_accused(accused_id)
+            if self.accused_exists(accused_id, cursor):
+                existing = self.get_existing_accused(accused_id, cursor)
                 if existing:
                     # Smart update logic (same as main insert_accused)
                     update_fields = []
@@ -920,16 +933,18 @@ class AccusedETL:
                     
                     if update_fields:
                         update_values.append(accused_id)
-                        self.db_cursor.execute(
+                        cursor.execute(
                             f"UPDATE {ACCUSED_TABLE} SET {', '.join(update_fields)}, date_modified = %s WHERE accused_id = %s",
                             update_values + [date_modified, accused_id]
                         )
-                        self.db_conn.commit()
-                        self.stats['total_accused_updated'] += 1
+                        conn.commit()
+                        with self.stats_lock:
+                            self.stats['total_accused_updated'] += 1
                         logger.debug(f"Updated fallback accused: {accused_id} ({len(changes)} fields changed)")
                         return True, 'updated'
                     else:
-                        self.stats['total_accused_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_accused_no_change'] += 1
                         return True, 'no_change'
                 else:
                     # Exists check returned True but couldn't fetch - treat as new insert
@@ -939,7 +954,7 @@ class AccusedETL:
             
             # Insert new accused
             if not existing:
-                self.db_cursor.execute(
+                cursor.execute(
                     f"""
                     INSERT INTO {ACCUSED_TABLE} (
                         accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
@@ -963,23 +978,26 @@ class AccusedETL:
                         accused.get('teeth'), date_created, date_modified
                     )
                 )
-                self.db_conn.commit()
-                self.stats['total_accused_inserted'] += 1
+                conn.commit()
+                with self.stats_lock:
+                    self.stats['total_accused_inserted'] += 1
                 logger.debug(f"Inserted fallback accused: {accused_id}")
                 return True, 'inserted'
             
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             logger.error(f"❌ Error inserting fallback accused {accused_id}: {e}")
             return False, f'insert_error: {str(e)}'
     
-    def insert_accused(self, accused: Dict, chunk_date_range: str = "") -> Tuple[bool, str]:
+    def insert_accused(self, accused: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
         Insert or update single accused into database with smart update logic
         Dates priority: API dates > Crime dates > NULL (never use CURRENT_TIMESTAMP)
         
         Args:
             accused: Transformed accused dict
+            conn: Database connection object
+            cursor: Database cursor object
             chunk_date_range: Date range for chunk tracking
         
         Returns:
@@ -998,7 +1016,8 @@ class AccusedETL:
             reason = 'missing_accused_id'
             error_details = "Accused record missing ACCUSED_ID"
             logger.warning(f"⚠️  {error_details}")
-            self.stats['total_accused_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_accused_failed'] += 1
             self.log_failed_record(accused, reason, error_details)
             return False, reason
         
@@ -1006,8 +1025,9 @@ class AccusedETL:
             reason = 'missing_crime_id'
             error_details = "Accused record missing CRIME_ID"
             logger.warning(f"⚠️  {error_details}")
-            self.stats['total_accused_failed'] += 1
-            self.stats['accused_without_crime'] += 1
+            with self.stats_lock:
+                self.stats['total_accused_failed'] += 1
+                self.stats['accused_without_crime'] += 1
             self.log_failed_record(accused, reason, error_details)
             return False, reason
         
@@ -1015,39 +1035,42 @@ class AccusedETL:
             logger.trace(f"Processing accused: ACCUSED_ID={accused_id}, CRIME_ID={crime_id}, PERSON_ID={person_id or 'NULL'}")
             
             # Check if crime exists in crimes table
-            self.db_cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
-            crime_exists = self.db_cursor.fetchone() is not None
+            cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
+            crime_exists = cursor.fetchone() is not None
             
             if not crime_exists:
                 # Old format: Simply warn and skip if crime not found
                 reason = 'crime_not_found'
                 error_details = f"CRIME_ID {crime_id} not found in {CRIMES_TABLE} table"
                 logger.warning(f"⚠️  {error_details}, skipping accused {accused_id}")
-                self.stats['total_accused_failed'] += 1
-                self.stats['accused_without_crime'] += 1
+                with self.stats_lock:
+                    self.stats['total_accused_failed'] += 1
+                    self.stats['accused_without_crime'] += 1
                 self.log_failed_record(accused, reason, error_details)
                 return False, reason
             
             # Check if person exists (create stub if needed) - only if person_id is provided
             if person_id:
-                self.db_cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
-                person_exists = self.db_cursor.fetchone() is not None
+                cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
+                person_exists = cursor.fetchone() is not None
                 
                 if not person_exists:
                     # Try to create stub person
                     try:
-                        self.db_cursor.execute(
+                        cursor.execute(
                             f"INSERT INTO {PERSONS_TABLE} (person_id) VALUES (%s) ON CONFLICT (person_id) DO NOTHING",
                             (person_id,)
                         )
-                        self.stats['stub_persons_created'] += 1
+                        with self.stats_lock:
+                            self.stats['stub_persons_created'] += 1
                         logger.trace(f"Created stub person: {person_id}")
                     except Exception as e:
                         reason = 'person_not_found'
                         error_details = f"PERSON_ID {person_id} not found and could not create stub: {str(e)}"
                         logger.warning(f"⚠️  {error_details}, skipping accused {accused_id}")
-                        self.stats['total_accused_failed'] += 1
-                        self.stats['accused_without_person'] += 1
+                        with self.stats_lock:
+                            self.stats['total_accused_failed'] += 1
+                            self.stats['accused_without_person'] += 1
                         self.log_failed_record(accused, reason, error_details)
                         return False, reason
             else:
@@ -1060,11 +1083,11 @@ class AccusedETL:
             
             if not date_created or not date_modified:
                 # Get crime dates as fallback
-                self.db_cursor.execute(
+                cursor.execute(
                         f"SELECT date_created, date_modified FROM {CRIMES_TABLE} WHERE crime_id = %s",
                         (crime_id,)
                     )
-                crime_row = self.db_cursor.fetchone()
+                crime_row = cursor.fetchone()
                 if crime_row:
                     if not date_created:
                         date_created = crime_row[0]
@@ -1079,12 +1102,10 @@ class AccusedETL:
             accused_code = accused.get('accused_code') or ''
             
             # Check if accused already exists by accused_id (primary key)
-            # NOTE: We no longer check by (crime_id, accused_code) since that constraint is removed
-            # Multiple accused_id can now share the same (crime_id, accused_code) combination
-            if self.accused_exists(accused_id):
+            if self.accused_exists(accused_id, cursor):
                 # Check if accused already exists by accused_id
                 # Get existing record to compare
-                existing = self.get_existing_accused(accused_id)
+                existing = self.get_existing_accused(accused_id, cursor)
                 if not existing:
                     logger.warning(f"⚠️  ACCUSED_ID {accused_id} exists check returned True but fetch returned None")
                     existing = None
@@ -1093,12 +1114,6 @@ class AccusedETL:
             
             if existing:
                     # Smart update: only update fields that need updating
-                    # Rules:
-                    # 1. If existing is NULL and new is not NULL → update
-                    # 2. If existing is not NULL and new is NULL → keep existing (don't update to NULL)
-                    # 3. If both are not NULL and different → update
-                    # 4. If both are not NULL and same → skip update (no change needed)
-                    # Special: date_created and date_modified always from API/crime (even if NULL)
                     
                     update_fields = []
                     update_values = []
@@ -1178,16 +1193,18 @@ class AccusedETL:
                             WHERE accused_id = %s
                         """
                         update_values.append(accused_id)
-                        self.db_cursor.execute(update_query, tuple(update_values))
-                        self.stats['total_accused_updated'] += 1
+                        cursor.execute(update_query, tuple(update_values))
+                        with self.stats_lock:
+                            self.stats['total_accused_updated'] += 1
                         logger.debug(f"Updated accused: {accused_id} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
-                        self.db_conn.commit()
+                        conn.commit()
                         logger.trace(f"Transaction committed for updated ACCUSED_ID: {accused_id}")
                         return True, 'updated'
                     else:
                         # No changes needed
-                        self.stats['total_accused_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_accused_no_change'] += 1
                         logger.trace(f"No changes needed for ACCUSED_ID: {accused_id} (all fields match or preserved)")
                         return True, 'no_change'
             else:
@@ -1195,8 +1212,6 @@ class AccusedETL:
                 logger.trace(f"Inserting new accused: {accused_id}")
                 
                 # Use ON CONFLICT to handle duplicate accused_id (primary key) gracefully
-                # If conflict occurs, update the existing record instead
-                # NOTE: Multiple accused_id can now share the same (crime_id, accused_code) since that constraint is removed
                 insert_query = f"""
                     INSERT INTO {ACCUSED_TABLE} (
                         accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
@@ -1233,9 +1248,9 @@ class AccusedETL:
                 
                 try:
                     # Check if record exists before insert to determine if it's insert or update
-                    existing_before = self.accused_exists(accused_id)
+                    existing_before = self.accused_exists(accused_id, cursor)
                     
-                    self.db_cursor.execute(insert_query, (
+                    cursor.execute(insert_query, (
                         accused['accused_id'],
                         accused['crime_id'],
                         accused['person_id'],
@@ -1261,31 +1276,34 @@ class AccusedETL:
                     ))
                     
                     # Check if it was an insert or update
-                    if self.db_cursor.rowcount == 0:
+                    if cursor.rowcount == 0:
                         # No rows affected - might be duplicate or no change
                         if existing_before:
-                            self.stats['total_accused_no_change'] += 1
+                            with self.stats_lock:
+                                self.stats['total_accused_no_change'] += 1
                             logger.trace(f"No change for ACCUSED_ID: {accused_id} (already exists with same data)")
-                            self.db_conn.commit()
+                            conn.commit()
                             return True, 'no_change'
                         else:
                             # This shouldn't happen, but handle it
                             logger.warning(f"⚠️  Row count is 0 but accused_id {accused_id} doesn't exist")
-                            self.db_conn.commit()
+                            conn.commit()
                             return False, 'insert_failed'
                     else:
                         # Row was inserted or updated
                         if existing_before:
                             # Record existed before, so this was an update via ON CONFLICT
-                            self.stats['total_accused_updated'] += 1
+                            with self.stats_lock:
+                                self.stats['total_accused_updated'] += 1
                             logger.debug(f"Updated accused via ON CONFLICT: {accused_id}")
                         else:
                             # Record didn't exist before, so this was an insert
-                            self.stats['total_accused_inserted'] += 1
+                            with self.stats_lock:
+                                self.stats['total_accused_inserted'] += 1
                             logger.debug(f"Inserted accused: {accused_id}")
                     
                     logger.trace(f"Insert/Update query executed for ACCUSED_ID: {accused_id}")
-                    self.db_conn.commit()
+                    conn.commit()
                     logger.trace(f"Transaction committed for ACCUSED_ID: {accused_id}")
                     return True, 'inserted' if not existing_before else 'updated'
                     
@@ -1294,9 +1312,9 @@ class AccusedETL:
                     if 'accused_id' in str(e).lower():
                         # accused_id already exists - treat as update
                         logger.warning(f"⚠️  ACCUSED_ID {accused_id} already exists, treating as update")
-                        self.db_conn.rollback()
+                        conn.rollback()
                         # Fall through to update logic below
-                        existing = self.get_existing_accused(accused_id)
+                        existing = self.get_existing_accused(accused_id, cursor)
                         if existing:
                             # Use the smart update logic
                             # (This will be handled by the update logic above)
@@ -1305,20 +1323,22 @@ class AccusedETL:
                         raise  # Re-raise other integrity errors
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'integrity_error'
             error_details = str(e)
             logger.warning(f"⚠️  Integrity error for accused {accused_id}: {e}")
-            self.stats['total_accused_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_accused_failed'] += 1
             self.log_failed_record(accused, reason, error_details)
             return False, reason
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             reason = 'error'
             error_details = str(e)
             logger.error(f"❌ Error inserting accused {accused_id}: {e}")
-            self.stats['total_accused_failed'] += 1
-            self.stats['errors'].append(f"Accused {accused_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['total_accused_failed'] += 1
+                self.stats['errors'].append(f"Accused {accused_id}: {str(e)}")
             self.log_failed_record(accused, reason, error_details)
             return False, reason
 
@@ -1461,71 +1481,72 @@ class AccusedETL:
         seen_accused_ids = {}
         accused_id_occurrences = {}  # Track how many times each accused_id appears
         
-        logger.trace(f"Starting to process records for chunk: {chunk_range}")
-        for idx, accused_raw_row in enumerate(accused_raw, 1):
-            logger.trace(f"Processing record {idx}/{len(accused_raw)}: {accused_raw_row.get('ACCUSED_ID')}")
-            accused = self.transform_accused(accused_raw_row)
-            accused_id = accused.get('accused_id')
-            
-            if not accused_id:
-                logger.warning(f"⚠️  Accused missing ACCUSED_ID, skipping")
-                self.stats['total_accused_failed'] += 1
-                failed_ids.append(None)
-                reason = 'missing_accused_id'
-                if reason not in failed_reasons:
-                    failed_reasons[reason] = []
-                failed_reasons[reason].append(None)
-                continue
-            
-            # Track occurrences for duplicate reporting (but don't skip - process all)
-            if accused_id in seen_accused_ids:
-                # This is a duplicate occurrence - track it but still process
-                occurrence_count = accused_id_occurrences.get(accused_id, 1) + 1
-                accused_id_occurrences[accused_id] = occurrence_count
-                
-                duplicates_in_chunk.append({
-                    'accused_id': accused_id,
-                    'crime_id': accused.get('crime_id'),
-                    'person_id': accused.get('person_id'),
-                    'occurrence': occurrence_count,
-                    'first_seen_in': seen_accused_ids[accused_id],
-                    'duplicate_in': chunk_range
-                })
-                self.stats['total_duplicates'] += 1
-                logger.info(f"⚠️  Duplicate ACCUSED_ID {accused_id} found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
-                logger.trace(f"Duplicate details - First seen: {seen_accused_ids[accused_id]}, Current occurrence: {occurrence_count}")
-            else:
-                seen_accused_ids[accused_id] = chunk_range
-                accused_id_occurrences[accused_id] = 1
-                logger.trace(f"New ACCUSED_ID seen: {accused_id} in chunk {chunk_range}")
-            
-            # IMPORTANT: Process ALL records, even duplicates
-            # If same accused_id appears multiple times, each occurrence might have updated data
-            # The smart update logic will handle whether to actually update or not
-            success, operation = self.insert_accused(accused, chunk_range)
-            logger.trace(f"Operation result for ACCUSED_ID {accused.get('accused_id')}: success={success}, operation={operation}")
-            
-            if success:
-                if operation == 'inserted':
-                    # Only add to list if first occurrence (to avoid duplicate entries in log)
-                    if accused_id not in inserted_ids:
-                        inserted_ids.append(accused_id)
-                    logger.trace(f"Added to inserted list: {accused_id}")
-                elif operation == 'updated':
-                    # Track all updates (even if same accused_id updated multiple times)
-                    updated_ids.append(accused_id)
-                    logger.trace(f"Added to updated list: {accused_id} (occurrence #{accused_id_occurrences.get(accused_id, 1)})")
-                elif operation == 'no_change':
-                    # Only add to list if first occurrence
-                    if accused_id not in no_change_ids:
-                        no_change_ids.append(accused_id)
-                    logger.trace(f"Added to no_change list: {accused_id}")
-            else:
-                failed_ids.append(accused_id)
-                if operation not in failed_reasons:
-                    failed_reasons[operation] = []
-                failed_reasons[operation].append(accused_id)
-                logger.trace(f"Added to failed list: {accused_id}, reason: {operation}")
+        logger.trace(f"Starting to process records for chunk: {chunk_range} concurrently")
+        
+        def process_row(accused_raw_row, chunk_range):
+            with self.db_pool.get_connection_context() as (conn, cursor):
+                accused = self.transform_accused(accused_raw_row)
+                accused_id = accused.get('accused_id')
+                if not accused_id:
+                    with self.stats_lock:
+                        self.stats['total_accused_failed'] += 1
+                    return {'accused_id': None, 'operation': 'missing_accused_id', 'success': False, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
+                success, operation = self.insert_accused(accused, conn, cursor, chunk_range)
+                return {'accused_id': accused_id, 'operation': operation, 'success': success, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
+
+        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_row = {executor.submit(process_row, row, chunk_range): row for row in accused_raw}
+            for future in as_completed(future_to_row):
+                try:
+                    res = future.result()
+                    accused_id = res['accused_id']
+                    operation = res['operation']
+                    success = res['success']
+                    
+                    if not accused_id:
+                        failed_ids.append(None)
+                        if operation not in failed_reasons:
+                            failed_reasons[operation] = []
+                        failed_reasons[operation].append(None)
+                        continue
+                        
+                    # Track occurrences for duplicate reporting
+                    with self.stats_lock:
+                        if accused_id in seen_accused_ids:
+                            occurrence_count = accused_id_occurrences.get(accused_id, 1) + 1
+                            accused_id_occurrences[accused_id] = occurrence_count
+                            duplicates_in_chunk.append({
+                                'accused_id': accused_id,
+                                'crime_id': res.get('crime_id'),
+                                'person_id': res.get('person_id'),
+                                'occurrence': occurrence_count,
+                                'first_seen_in': seen_accused_ids[accused_id],
+                                'duplicate_in': chunk_range
+                            })
+                            self.stats['total_duplicates'] += 1
+                            logger.trace(f"Duplicate details - First seen: {seen_accused_ids[accused_id]}, Current occurrence: {occurrence_count}")
+                        else:
+                            seen_accused_ids[accused_id] = chunk_range
+                            accused_id_occurrences[accused_id] = 1
+                            logger.trace(f"New ACCUSED_ID seen: {accused_id} in chunk {chunk_range}")
+
+                    if success:
+                        if operation == 'inserted':
+                            if accused_id not in inserted_ids:
+                                inserted_ids.append(accused_id)
+                        elif operation == 'updated':
+                            updated_ids.append(accused_id)
+                        elif operation == 'no_change':
+                            if accused_id not in no_change_ids:
+                                no_change_ids.append(accused_id)
+                    else:
+                        failed_ids.append(accused_id)
+                        if operation not in failed_reasons:
+                            failed_reasons[operation] = []
+                        failed_reasons[operation].append(accused_id)
+                except Exception as exc:
+                    logger.error(f"Record generated an exception: {exc}")
         
         # Log duplicates for this chunk (for reporting, but they were all processed)
         if duplicates_in_chunk:

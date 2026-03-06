@@ -9,6 +9,8 @@ import os
 import time
 import requests
 import psycopg2
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg2.extras import Json
 from datetime import datetime, timedelta
 from tqdm import tqdm
@@ -16,6 +18,12 @@ import logging
 import colorlog
 from typing import List, Dict, Optional, Tuple, Set
 from datetime import timezone, timedelta
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from db_pooling import PostgreSQLConnectionPool
+except ImportError:
+    pass
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -62,8 +70,9 @@ class PropertiesETL:
     """ETL Pipeline for Property Details API"""
     
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self.db_pool = None
+        self.stats_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
         self.stats = {
             'total_api_calls': 0,
             'total_properties_fetched': 0,
@@ -76,33 +85,32 @@ class PropertiesETL:
         }
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database using db_pool"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool()
+            logger.info(f"✅ Connected to connection pool")
             return True
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
+            logger.error(f"❌ Database connection pool failed: {e}")
             return False
     
     def close_db(self):
         """Close database connection"""
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
+        if self.db_pool:
+            self.db_pool.close_all()
         logger.info("Database connection closed")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s
-            """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = %s
+                    """, (table_name,))
+                    return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -114,48 +122,50 @@ class PropertiesETL:
         - If table has data: return max(date_created, date_modified) from table
         """
         try:
-            # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {PROPERTIES_TABLE}")
-            count = self.db_cursor.fetchone()[0]
-            
-            if count == 0:
-                # New database, start from beginning
-                logger.info("📊 Table is empty, starting from 2022-01-01")
-                return '2022-01-01T00:00:00+05:30'
-            
-            # Table has data, get max of date_created and date_modified
-            # Only consider dates >= 2022-01-01 to avoid processing very old data
-            MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-            min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
-            
-            self.db_cursor.execute(f"""
-                SELECT GREATEST(
-                    COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                    COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
-                ) as max_date
-                FROM {PROPERTIES_TABLE}
-            """)
-            result = self.db_cursor.fetchone()
-            if result and result[0]:
-                max_date = result[0]
-                # Convert to IST timezone if needed
-                if isinstance(max_date, datetime):
-                    if max_date.tzinfo is None:
-                        max_date = max_date.replace(tzinfo=IST_OFFSET)
-                    else:
-                        max_date = max_date.astimezone(IST_OFFSET)
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    # Check if table has any data
+                    cursor.execute(f"SELECT COUNT(*) FROM {PROPERTIES_TABLE}")
+                    count = cursor.fetchone()[0]
                     
-                    # Ensure we never go before 2022-01-01
-                    if max_date < min_start_dt:
-                        logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
-                        return MIN_START_DATE
+                    if count == 0:
+                        # New database, start from beginning
+                        logger.info("📊 Table is empty, starting from 2022-01-01")
+                        return '2022-01-01T00:00:00+05:30'
                     
-                    logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
-                    return max_date.isoformat()
-            
-            # Fallback to start date
-            logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-            return '2022-01-01T00:00:00+05:30'
+                    # Table has data, get max of date_created and date_modified
+                    # Only consider dates >= 2022-01-01 to avoid processing very old data
+                    MIN_START_DATE = '2022-01-01T00:00:00+05:30'
+                    min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                    
+                    cursor.execute(f"""
+                        SELECT GREATEST(
+                            COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
+                            COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                        ) as max_date
+                        FROM {PROPERTIES_TABLE}
+                    """)
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        max_date = result[0]
+                        # Convert to IST timezone if needed
+                        if isinstance(max_date, datetime):
+                            if max_date.tzinfo is None:
+                                max_date = max_date.replace(tzinfo=IST_OFFSET)
+                            else:
+                                max_date = max_date.astimezone(IST_OFFSET)
+                            
+                            # Ensure we never go before 2022-01-01
+                            if max_date < min_start_dt:
+                                logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                                return MIN_START_DATE
+                            
+                            logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
+                            return max_date.isoformat()
+                    
+                    # Fallback to start date
+                    logger.warning("⚠️  Could not determine max date, using 2022-01-01")
+                    return '2022-01-01T00:00:00+05:30'
             
         except Exception as e:
             logger.error(f"❌ Error getting effective start date: {e}")
@@ -199,28 +209,30 @@ class PropertiesETL:
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the properties table."""
         try:
-            # Determine column type based on field name
-            if 'date' in column_name.lower():
-                column_type = 'TIMESTAMP'
-            elif 'id' in column_name.lower() or 'code' in column_name.lower():
-                column_type = 'VARCHAR(50)'
-            elif column_name in ('additional_details', 'media'):
-                column_type = 'JSONB'
-            elif column_name in ('particular_of_property', 'nature'):
-                column_type = 'TEXT'
-            elif 'value' in column_name.lower():
-                column_type = 'NUMERIC'
-            else:
-                column_type = 'VARCHAR(255)'
-            
-            alter_sql = f"ALTER TABLE {PROPERTIES_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            self.db_conn.commit()
-            logger.info(f"✅ Added column {column_name} ({column_type}) to {PROPERTIES_TABLE}")
-            return True
+            with self.schema_lock:
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cursor:
+                        # Determine column type based on field name
+                        if 'date' in column_name.lower():
+                            column_type = 'TIMESTAMP'
+                        elif 'id' in column_name.lower() or 'code' in column_name.lower():
+                            column_type = 'VARCHAR(50)'
+                        elif column_name in ('additional_details', 'media'):
+                            column_type = 'JSONB'
+                        elif column_name in ('particular_of_property', 'nature'):
+                            column_type = 'TEXT'
+                        elif 'value' in column_name.lower():
+                            column_type = 'NUMERIC'
+                        else:
+                            column_type = 'VARCHAR(255)'
+                        
+                        alter_sql = f"ALTER TABLE {PROPERTIES_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                        cursor.execute(alter_sql)
+                        conn.commit()
+                        logger.info(f"✅ Added column {column_name} ({column_type}) to {PROPERTIES_TABLE}")
+                        return True
         except Exception as e:
             logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
             return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
@@ -313,7 +325,8 @@ class PropertiesETL:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    self.stats['total_api_calls'] += 1
+                    with self.stats_lock:
+                        self.stats['total_api_calls'] += 1
                     
                     if data.get('status'):
                         property_data = data.get('data')
@@ -344,8 +357,9 @@ class PropertiesETL:
             except Exception as e:
                 logger.error(f"API error: {e}")
                 if attempt == API_CONFIG['max_retries'] - 1:
-                    self.stats['failed_api_calls'] += 1
-                    self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
+                    with self.stats_lock:
+                        self.stats['failed_api_calls'] += 1
+                        self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
                 time.sleep(2 ** attempt)
         
         logger.error(f"❌ Failed to fetch properties for {from_date} to {to_date} after {API_CONFIG['max_retries']} attempts")
@@ -438,24 +452,26 @@ class PropertiesETL:
             'date_modified': date_modified  # Parsed from API (or NULL)
         }
     
-    def property_exists(self, property_id: str) -> bool:
+    def property_exists(self, property_id: str, cursor) -> bool:
         """Check if property already exists in database"""
-        self.db_cursor.execute(f"SELECT 1 FROM {PROPERTIES_TABLE} WHERE property_id = %s", (property_id,))
-        return self.db_cursor.fetchone() is not None
+        cursor.execute(f"SELECT 1 FROM {PROPERTIES_TABLE} WHERE property_id = %s", (property_id,))
+        return cursor.fetchone() is not None
     
-    def insert_property(self, prop: Dict) -> bool:
+    def insert_property(self, prop: Dict, conn, cursor) -> bool:
         """
         Insert or update single property in database
         
         Args:
             prop: Transformed property dict
+            conn: Database connection
+            cursor: Database cursor
             
         Returns:
             True if successful, False otherwise
         """
         try:
             # Check if property already exists
-            if self.property_exists(prop['property_id']):
+            if self.property_exists(prop['property_id'], cursor):
                 # Update existing property
                 # Note: date_created is NOT updated (preserved from original insert)
                 # date_modified comes from API (as per API response)
@@ -478,7 +494,7 @@ class PropertiesETL:
                         date_modified = %s
                     WHERE property_id = %s
                 """
-                self.db_cursor.execute(update_query, (
+                cursor.execute(update_query, (
                     prop['crime_id'],
                     prop['case_property_id'],
                     prop['property_status'],
@@ -496,7 +512,8 @@ class PropertiesETL:
                     prop['date_modified'],  # Only update date_modified from API
                     prop['property_id']
                 ))
-                self.stats['total_properties_updated'] += 1
+                with self.stats_lock:
+                    self.stats['total_properties_updated'] += 1
                 logger.debug(f"Updated property: {prop['property_id']}")
             else:
                 # Insert new property
@@ -511,7 +528,7 @@ class PropertiesETL:
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
-                self.db_cursor.execute(insert_query, (
+                cursor.execute(insert_query, (
                     prop['property_id'],
                     prop['crime_id'],
                     prop['case_property_id'],
@@ -530,21 +547,24 @@ class PropertiesETL:
                     prop['date_created'],
                     prop['date_modified']
                 ))
-                self.stats['total_properties_inserted'] += 1
+                with self.stats_lock:
+                    self.stats['total_properties_inserted'] += 1
                 logger.debug(f"Inserted property: {prop['property_id']}")
             
-            self.db_conn.commit()
+            # The commit action for db pool is moved to process_date_range process_prop function 
             return True
             
         except psycopg2.IntegrityError as e:
-            self.db_conn.rollback()
+            conn.rollback()
             logger.warning(f"⚠️  Integrity error for property {prop['property_id']}: {e}")
-            self.stats['total_properties_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_properties_failed'] += 1
             return False
         except Exception as e:
-            self.db_conn.rollback()
+            conn.rollback()
             logger.error(f"❌ Error inserting property {prop['property_id']}: {e}")
-            self.stats['errors'].append(f"Property {prop['property_id']}: {str(e)}")
+            with self.stats_lock:
+                self.stats['errors'].append(f"Property {prop['property_id']}: {str(e)}")
             return False
     
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
@@ -559,11 +579,12 @@ class PropertiesETL:
             'failed': 0
         }
         
-        # Store initial stats to calculate chunk differences
-        initial_inserted = self.stats['total_properties_inserted']
-        initial_updated = self.stats['total_properties_updated']
-        initial_no_change = self.stats['total_properties_no_change']
-        initial_failed = self.stats['total_properties_failed']
+        with self.stats_lock:
+            # Store initial stats to calculate chunk differences
+            initial_inserted = self.stats['total_properties_inserted']
+            initial_updated = self.stats['total_properties_updated']
+            initial_no_change = self.stats['total_properties_no_change']
+            initial_failed = self.stats['total_properties_failed']
         
         # Fetch properties from API
         properties_raw = self.fetch_properties_api(from_date, to_date)
@@ -571,7 +592,8 @@ class PropertiesETL:
         if properties_raw is None:
             logger.error(f"❌ Failed to fetch properties for {from_date} to {to_date}")
             chunk_stats['failed'] = 1  # API call failed
-            self.stats['total_properties_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_properties_failed'] += 1
             return
         
         if not properties_raw:
@@ -593,24 +615,36 @@ class PropertiesETL:
                 self.update_existing_records_with_new_fields(new_fields, to_date)
         
         # Transform and insert each property
-        self.stats['total_properties_fetched'] += len(properties_raw)
+        with self.stats_lock:
+            self.stats['total_properties_fetched'] += len(properties_raw)
         
-        for property_raw in properties_raw:
-            prop = self.transform_property(property_raw)
-            if prop['property_id']:
-                result = self.insert_property(prop)
-                if not result:
-                    chunk_stats['failed'] += 1
-            else:
-                logger.warning(f"⚠️  Property missing PROPERTY_ID, skipping")
-                chunk_stats['failed'] += 1
-                self.stats['total_properties_failed'] += 1
+        def process_prop(property_raw):
+            try:
+                prop = self.transform_property(property_raw)
+                if prop['property_id']:
+                    with self.db_pool.get_connection_context() as conn:
+                        with conn.cursor() as cur:
+                            self.insert_property(prop, conn, cur)
+                            conn.commit()
+                else:
+                    logger.warning(f"⚠️  Property missing PROPERTY_ID, skipping")
+                    with self.stats_lock:
+                        self.stats['total_properties_failed'] += 1
+            except Exception as e:
+                logger.error(f"Error in process_prop: {e}")
+                with self.stats_lock:
+                    self.stats['total_properties_failed'] += 1
         
-        # Calculate chunk statistics
-        chunk_stats['inserted'] = self.stats['total_properties_inserted'] - initial_inserted
-        chunk_stats['updated'] = self.stats['total_properties_updated'] - initial_updated
-        chunk_stats['no_change'] = self.stats['total_properties_no_change'] - initial_no_change
-        chunk_stats['failed'] = self.stats['total_properties_failed'] - initial_failed
+        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(process_prop, properties_raw))
+        
+        with self.stats_lock:
+            # Calculate chunk statistics
+            chunk_stats['inserted'] = self.stats['total_properties_inserted'] - initial_inserted
+            chunk_stats['updated'] = self.stats['total_properties_updated'] - initial_updated
+            chunk_stats['no_change'] = self.stats['total_properties_no_change'] - initial_no_change
+            chunk_stats['failed'] = self.stats['total_properties_failed'] - initial_failed
         
         # Log chunk statistics
         logger.info(f"✅ Completed: {from_date} to {to_date}")
@@ -669,8 +703,10 @@ class PropertiesETL:
                 time.sleep(1)  # Be nice to the API
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {PROPERTIES_TABLE}")
-            db_properties_count = self.db_cursor.fetchone()[0]
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(f"SELECT COUNT(*) FROM {PROPERTIES_TABLE}")
+                    db_properties_count = cursor.fetchone()[0]
             
             # Print final statistics
             logger.info("")
