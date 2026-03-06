@@ -816,7 +816,6 @@ class PersonsETL:
                     self.upsert_person(data, table_columns)
                 else:
                     self.stats['failed'] += 1
-                    self.stats['failed_api_calls'] += 1
                 
                 # Log batch statistics every batch_size records
                 if idx % batch_size == 0:
