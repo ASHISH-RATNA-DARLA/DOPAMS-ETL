@@ -1484,7 +1484,8 @@ class AccusedETL:
         logger.trace(f"Starting to process records for chunk: {chunk_range} concurrently")
         
         def process_row(accused_raw_row, chunk_range):
-            with self.db_pool.get_connection_context() as (conn, cursor):
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
                 accused = self.transform_accused(accused_raw_row)
                 accused_id = accused.get('accused_id')
                 if not accused_id:
