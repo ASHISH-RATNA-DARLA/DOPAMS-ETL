@@ -191,15 +191,12 @@ class AccusedETL:
 
     def connect_db(self):
         try:
-            # Calculate required pool size based on max workers
             chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '1'))
-            if chunk_workers <= 1:
-                max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
-            else:
-                max_workers = chunk_workers
+            row_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            total_workers = chunk_workers * row_workers
                 
-            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_workers + 5, **DB_CONFIG)
-            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']}")
+            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=total_workers + 10, **DB_CONFIG)
+            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']} (maxconn={total_workers + 10})")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection pool initialization failed: {e}")
