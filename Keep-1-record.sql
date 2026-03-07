@@ -48,4 +48,20 @@ AND person_id != '62ab45de447aa0823c735af1';
 DELETE FROM crimes WHERE crime_id != '62aa9b9ea2d2490c539be447';
 DELETE FROM hierarchy WHERE ps_code != '2022057';
 
+-- DATE MODIFICATION FOR KEPT RECORD
+-- Set dates back to 2022-01-01 to force ETL into processing it as an UPDATE from that date
+UPDATE crimes SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE arrests SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE properties SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE mo_seizures SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE disposal SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE fsl_case_property SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE charge_sheet_updates SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE brief_facts_accused SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE brief_facts_crime_summaries SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE brief_facts_drug SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE crime_id = '62aa9b9ea2d2490c539be447';
+UPDATE persons SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE person_id = '62ab45de447aa0823c735af1';
+UPDATE interrogation_reports SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE interrogation_report_id = '63787aaf50929367f95f1ec6';
+UPDATE chargesheets SET date_modified = '2022-01-01', date_created = '2022-01-01' WHERE id = '0294b57b-adf2-4d2a-9aa0-2808f88452fe';
+
 COMMIT;

@@ -911,7 +911,7 @@ def run(
                 table, id_col, limit or "ALL", dry_run)
 
     # Ensure the pool is initialised before spawning threads
-    pool = PostgreSQLConnectionPool()
+    pool = PostgreSQLConnectionPool(minconn=5, maxconn=MAX_WORKERS + 5)
 
     total_pending = count_pending(table, id_col)
     effective_total = min(total_pending, limit) if limit else total_pending
