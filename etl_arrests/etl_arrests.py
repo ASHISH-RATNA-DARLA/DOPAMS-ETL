@@ -1075,6 +1075,7 @@ class ArrestsETL:
                                 logger.trace(f"  Both NULL for {db_field}, no update")
                     
                     # Only update if there are changes
+                    if update_fields:
                         update_query = f"""
                             UPDATE {ARRESTS_TABLE} SET
                                 {', '.join(update_fields)}
