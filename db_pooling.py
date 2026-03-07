@@ -72,6 +72,9 @@ class PostgreSQLConnectionPool:
         
         self.minconn = minconn
         self.maxconn = maxconn
+        # Legacy aliases still referenced by some ETL scripts.
+        self.min_conn = minconn
+        self.max_conn = maxconn
         self.pool = None
         self._initialize_pool()
         PostgreSQLConnectionPool._initialized = True
