@@ -299,7 +299,10 @@ def trgm_match_village_mandal(
             FROM geo_reference
             WHERE district_name %% %(dist)s
               AND (village_name_english %% %(loc)s OR sub_district_name %% %(loc)s)
-            ORDER BY GREATEST(sim_mandal, sim_village) DESC
+            ORDER BY GREATEST(
+                similarity(sub_district_name, %(loc)s),
+                similarity(village_name_english, %(loc)s)
+            ) DESC
             LIMIT 1;
         """
     else:
@@ -312,7 +315,10 @@ def trgm_match_village_mandal(
             FROM geo_reference
             WHERE village_name_english %% %(loc)s
                OR sub_district_name   %% %(loc)s
-            ORDER BY GREATEST(sim_mandal, sim_village) DESC
+            ORDER BY GREATEST(
+                similarity(sub_district_name, %(loc)s),
+                similarity(village_name_english, %(loc)s)
+            ) DESC
             LIMIT 1;
         """
 

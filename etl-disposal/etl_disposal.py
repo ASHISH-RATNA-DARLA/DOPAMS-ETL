@@ -278,7 +278,11 @@ class DisposalETL:
         if self.db_cursor:
             self.db_cursor.close()
         if self.db_conn:
-            self.db_pool.release_connection(self.db_conn)
+            # db_pooling exposes return_connection (not release_connection).
+            if hasattr(self.db_pool, 'return_connection'):
+                self.db_pool.return_connection(self.db_conn)
+            elif hasattr(self.db_pool, 'release_connection'):
+                self.db_pool.release_connection(self.db_conn)
         
         if self.db_pool:
             self.db_pool.close_all()
