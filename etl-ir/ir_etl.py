@@ -66,7 +66,8 @@ IR_SHELTER_TABLE = TABLE_CONFIG.get('ir_shelter', 'ir_shelter')
 IR_MEDIA_TABLE = TABLE_CONFIG.get('ir_media', 'ir_media')
 IR_INTERROGATION_REPORT_REFS_TABLE = TABLE_CONFIG.get('ir_interrogation_report_refs', 'ir_interrogation_report_refs')
 IR_DOPAMS_LINKS_TABLE = TABLE_CONFIG.get('ir_dopams_links', 'ir_dopams_links')
-
+CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
+PENDING_FK_TABLE = 'ir_pending_fk'
 
 def parse_iso_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string (with optional time component) to datetime."""
@@ -131,6 +132,7 @@ class InterrogationReportsETL:
     
     def __init__(self):
         self.db_pool = None
+        self.crime_ids = set()
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
         self.stats = {
@@ -140,6 +142,9 @@ class InterrogationReportsETL:
             'total_ir_updated': 0,
             'total_ir_no_change': 0,  # Records that exist but no changes needed (unchanged)
             'total_ir_failed': 0,  # Records that failed to process
+            'total_pending_fk': 0,
+            'total_retried_ok': 0,
+            'total_retried_still_missing': 0,
             'failed_api_calls': 0,
             'errors': []
         }
@@ -163,6 +168,134 @@ class InterrogationReportsETL:
         if self.db_pool:
             self.db_pool.close_all()
         logger.info("Database connection closed")
+
+    def ensure_pending_table(self):
+        """Create the pending FK retry table."""
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        CREATE TABLE IF NOT EXISTS {PENDING_FK_TABLE} (
+                            id SERIAL PRIMARY KEY,
+                            ir_id VARCHAR(50) NOT NULL,
+                            crime_id VARCHAR(50) NOT NULL,
+                            raw_data JSONB NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            retry_count INTEGER DEFAULT 0,
+                            last_retry_at TIMESTAMP,
+                            resolved BOOLEAN DEFAULT FALSE,
+                            resolved_at TIMESTAMP
+                        )
+                    """)
+                    cur.execute(f"""
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_fk_ir_id
+                        ON {PENDING_FK_TABLE}(ir_id) WHERE NOT resolved
+                    """)
+                    conn.commit()
+            logger.info(f"✅ Pending FK retry table ready: {PENDING_FK_TABLE}")
+        except Exception as e:
+            logger.error(f"❌ Failed to create pending FK table: {e}")
+            raise
+
+    def load_crime_ids(self) -> bool:
+        """Load all crime IDs into an in-memory set for O(1) lookups."""
+        logger.info("⏳ Loading crime IDs into memory...")
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id IS NOT NULL")
+                    rows = cur.fetchall()
+                    self.crime_ids = {row[0] for row in rows}
+                    logger.info(f"✅ Loaded {len(self.crime_ids)} crime IDs into memory.")
+                    return True
+        except Exception as e:
+            logger.error(f"❌ Failed to load crime IDs: {e}")
+            self.crime_ids = set()
+            return False
+
+    def queue_pending_fk(self, record_raw: Dict, crime_id: str, conn, cursor):
+        """Insert an IR record into the pending FK retry queue."""
+        ir_id = record_raw.get('INTERROGATION_REPORT_ID', 'unknown')
+        try:
+            cursor.execute(f"""
+                INSERT INTO {PENDING_FK_TABLE} (ir_id, crime_id, raw_data)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (ir_id) WHERE NOT resolved
+                DO UPDATE SET
+                    raw_data = EXCLUDED.raw_data,
+                    retry_count = {PENDING_FK_TABLE}.retry_count
+            """, (ir_id, crime_id, json.dumps(record_raw, default=str)))
+            conn.commit()
+            with self.stats_lock:
+                self.stats['total_pending_fk'] += 1
+            logger.debug(f"Queued IR {ir_id} (crime_id={crime_id}) for FK retry")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to queue pending FK for IR {ir_id}: {e}")
+
+    def retry_pending_fk(self):
+        """Retry all unresolved pending FK records."""
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🔄 Retrying pending FK records...")
+
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, ir_id, crime_id, raw_data, retry_count
+                        FROM {PENDING_FK_TABLE}
+                        WHERE resolved = FALSE
+                        ORDER BY created_at
+                    """)
+                    pending_rows = cur.fetchall()
+
+            if not pending_rows:
+                logger.info("ℹ️  No pending FK records to retry")
+                return
+
+            logger.info(f"📊 Found {len(pending_rows)} pending FK records to retry")
+
+            resolved_count = 0
+            still_missing = 0
+
+            for row_id, ir_id, crime_id, raw_data, retry_count in pending_rows:
+                try:
+                    with self.db_pool.get_connection_context() as conn:
+                        with conn.cursor() as cur:
+                            if crime_id in self.crime_ids:
+                                success = self.process_ir_record(raw_data, conn, cur)
+                                if success:
+                                    conn.commit()
+                                cur.execute(f"""
+                                    UPDATE {PENDING_FK_TABLE}
+                                    SET resolved = TRUE, resolved_at = CURRENT_TIMESTAMP,
+                                        last_retry_at = CURRENT_TIMESTAMP, retry_count = %s
+                                    WHERE id = %s
+                                """, (retry_count + 1, row_id))
+                                conn.commit()
+                                resolved_count += 1
+                                logger.debug(f"✅ Resolved pending IR {ir_id}")
+                            else:
+                                cur.execute(f"""
+                                    UPDATE {PENDING_FK_TABLE}
+                                    SET last_retry_at = CURRENT_TIMESTAMP, retry_count = %s
+                                    WHERE id = %s
+                                """, (retry_count + 1, row_id))
+                                conn.commit()
+                                still_missing += 1
+                except Exception as e:
+                    logger.error(f"Error retrying pending IR {ir_id}: {e}")
+                    still_missing += 1
+
+            with self.stats_lock:
+                self.stats['total_retried_ok'] = resolved_count
+                self.stats['total_retried_still_missing'] = still_missing
+
+            logger.info(f"🔄 Retry complete: {resolved_count} resolved, {still_missing} still missing crime_id")
+
+        except Exception as e:
+            logger.error(f"❌ Error during pending FK retry: {e}")
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
@@ -304,16 +437,6 @@ class InterrogationReportsETL:
     def generate_date_ranges(self, start_date: str, end_date: str, chunk_days: int = 5, overlap_days: int = 1) -> List[Tuple[str, str]]:
         """
         Generate date ranges in chunks with overlap to ensure no data is missed
-        OVERLAP: Each chunk overlaps with the previous chunk by overlap_days to catch boundary records
-    
-    Args:
-            start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format
-            chunk_days: Number of days per chunk
-            overlap_days: Number of days to overlap between chunks (default: 1 to ensure no data loss)
-    
-    Returns:
-            List of (from_date, to_date) tuples in ISO format (YYYY-MM-DDTHH:MM:SS)
         """
         date_ranges = []
         current_date = parse_iso_date(start_date).date()
@@ -324,26 +447,15 @@ class InterrogationReportsETL:
             if chunk_end > end:
                 chunk_end = end
             
-            # Convert to datetime with time
-            start_datetime = datetime.combine(current_date, datetime.min.time())  # 00:00:00
-            end_datetime = datetime.combine(chunk_end, datetime.max.time().replace(microsecond=0))  # 23:59:59
-            
-            # Format as ISO format
             date_ranges.append((
-                start_datetime.strftime('%Y-%m-%dT%H:%M:%S'),
-                end_datetime.strftime('%Y-%m-%dT%H:%M:%S')
+                current_date.strftime('%Y-%m-%d'),
+                chunk_end.strftime('%Y-%m-%d')
             ))
             
-            # If we've already reached or passed the end date, break
             if chunk_end >= end:
                 break
             
-            # Next chunk starts with overlap: current chunk end - overlap_days + 1
-            # For overlap_days=1: next_start = chunk_end (same day, creating 1-day overlap)
-            # This ensures: Last day of chunk N = First day of chunk N+1
             next_start = chunk_end - timedelta(days=overlap_days - 1)
-            
-            # Move to next chunk start
             current_date = next_start
     
         return date_ranges
@@ -989,6 +1101,11 @@ class InterrogationReportsETL:
             with self.stats_lock:
                 self.stats['total_ir_failed'] += 1
             return False
+
+        if crime_id and crime_id not in self.crime_ids:
+            self.queue_pending_fk(record, crime_id, conn, cursor)
+            logger.debug(f"⏳ IR {ir_id}: crime_id {crime_id} not in crimes table — queued for retry")
+            return False
         
         try:
             # Check if record exists
@@ -1223,6 +1340,12 @@ class InterrogationReportsETL:
             return False
         
         try:
+            # Ensure pending table exists
+            self.ensure_pending_table()
+            
+            # Load crime IDs into memory
+            self.load_crime_ids()
+
             # Get effective start date (check if table has data)
             effective_start_date = self.get_effective_start_date()
             logger.info(f"Effective Start Date: {effective_start_date}")
@@ -1253,17 +1376,19 @@ class InterrogationReportsETL:
                 self.process_date_range(from_date, to_date, table_columns)
                 time.sleep(1)  # Be nice to the API
             
+            # Retry pending FK records
+            self.retry_pending_fk()
+
             # Get database counts
             with self.db_pool.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"SELECT COUNT(*) FROM {IR_TABLE}")
                     db_ir_count = cur.fetchone()[0]
+                    cur.execute(f"SELECT COUNT(*) FROM {PENDING_FK_TABLE} WHERE resolved = FALSE")
+                    pending_count = cur.fetchone()[0]
             
             # Print final statistics
             logger.info("")
-            logger.info("=" * 80)
-            logger.info("📊 ETL STATISTICS")
-            logger.info("=" * 80)
             logger.info("=" * 80)
             logger.info("📊 FINAL STATISTICS")
             logger.info("=" * 80)
@@ -1280,6 +1405,12 @@ class InterrogationReportsETL:
             logger.info(f"  Total No Change:          {self.stats['total_ir_no_change']}")
             logger.info(f"  Total Failed:             {self.stats['total_ir_failed']}")
             logger.info(f"  Total in DB:              {db_ir_count}")
+            logger.info(f"")
+            logger.info(f"⏳ PENDING FK RETRY QUEUE:")
+            logger.info(f"  Queued (missing crime_id): {self.stats['total_pending_fk']}")
+            logger.info(f"  Retried → Resolved:        {self.stats['total_retried_ok']}")
+            logger.info(f"  Retried → Still Missing:   {self.stats['total_retried_still_missing']}")
+            logger.info(f"  Remaining in Queue:        {pending_count}")
             logger.info(f"")
             logger.info(f"📊 COVERAGE:")
             if self.stats['total_ir_fetched'] > 0:

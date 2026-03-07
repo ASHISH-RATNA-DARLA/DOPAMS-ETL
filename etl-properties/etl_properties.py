@@ -21,9 +21,11 @@ from datetime import timezone, timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
-    from db_pooling import PostgreSQLConnectionPool
+    from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 except ImportError:
     pass
+
+import json
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -47,8 +49,10 @@ logger = colorlog.getLogger()
 logger.addHandler(handler)
 logger.setLevel(LOG_CONFIG['level'])
 
-# Target table (allows redirecting ETL runs to test tables)
+# Target tables (allows redirecting ETL runs to test tables)
 PROPERTIES_TABLE = TABLE_CONFIG.get('properties', 'properties')
+CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
+PENDING_FK_TABLE = 'properties_pending_fk'
 
 
 def parse_iso_date(date_str: str) -> datetime:
@@ -71,6 +75,7 @@ class PropertiesETL:
     
     def __init__(self):
         self.db_pool = None
+        self.crime_ids = set()
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
         self.stats = {
@@ -80,6 +85,9 @@ class PropertiesETL:
             'total_properties_updated': 0,
             'total_properties_no_change': 0,  # Records that exist but no changes needed
             'total_properties_failed': 0,  # Records that failed to process
+            'total_pending_fk': 0,  # Records queued due to missing crime_id
+            'total_retried_ok': 0,  # Pending records resolved on retry
+            'total_retried_still_missing': 0,  # Pending records still missing crime_id after retry
             'failed_api_calls': 0,
             'errors': []
         }
@@ -105,6 +113,142 @@ class PropertiesETL:
             self.db_pool.close_all()
         logger.info("Database connection closed")
     
+    def ensure_pending_table(self):
+        """Create the properties_pending_fk table if it doesn't exist."""
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        CREATE TABLE IF NOT EXISTS {PENDING_FK_TABLE} (
+                            id SERIAL PRIMARY KEY,
+                            property_id VARCHAR(50) NOT NULL,
+                            crime_id VARCHAR(50) NOT NULL,
+                            raw_data JSONB NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            retry_count INTEGER DEFAULT 0,
+                            last_retry_at TIMESTAMP,
+                            resolved BOOLEAN DEFAULT FALSE,
+                            resolved_at TIMESTAMP
+                        )
+                    """)
+                    cur.execute(f"""
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_fk_property_id
+                        ON {PENDING_FK_TABLE}(property_id) WHERE NOT resolved
+                    """)
+                    conn.commit()
+            logger.info(f"✅ Pending FK retry table ready: {PENDING_FK_TABLE}")
+        except Exception as e:
+            logger.error(f"❌ Failed to create pending FK table: {e}")
+            raise
+
+    def load_crime_ids(self) -> bool:
+        """Load all crime IDs into an in-memory set for O(1) lookups."""
+        logger.info("⏳ Loading crime IDs into memory...")
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id IS NOT NULL")
+                    rows = cur.fetchall()
+                    self.crime_ids = {row[0] for row in rows}
+                    logger.info(f"✅ Loaded {len(self.crime_ids)} crime IDs into memory.")
+                    return True
+        except Exception as e:
+            logger.error(f"❌ Failed to load crime IDs: {e}")
+            self.crime_ids = set()
+            return False
+
+    def queue_pending_fk(self, property_raw: Dict, crime_id: str, conn, cursor):
+        """Insert a property record into the pending FK retry queue."""
+        property_id = property_raw.get('PROPERTY_ID', 'unknown')
+        try:
+            cursor.execute(f"""
+                INSERT INTO {PENDING_FK_TABLE} (property_id, crime_id, raw_data)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (property_id) WHERE NOT resolved
+                DO UPDATE SET
+                    raw_data = EXCLUDED.raw_data,
+                    retry_count = {PENDING_FK_TABLE}.retry_count  -- keep existing count
+            """, (property_id, crime_id, json.dumps(property_raw, default=str)))
+            conn.commit()
+            with self.stats_lock:
+                self.stats['total_pending_fk'] += 1
+            logger.debug(f"Queued property {property_id} (crime_id={crime_id}) for FK retry")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to queue pending FK for property {property_id}: {e}")
+
+    def retry_pending_fk(self):
+        """
+        Retry all unresolved pending FK records.
+        For each, check if crime_id now exists in crimes. If so, process normally.
+        """
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🔄 Retrying pending FK records...")
+
+        try:
+            # Fetch all unresolved pending records
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, property_id, crime_id, raw_data, retry_count
+                        FROM {PENDING_FK_TABLE}
+                        WHERE resolved = FALSE
+                        ORDER BY created_at
+                    """)
+                    pending_rows = cur.fetchall()
+
+            if not pending_rows:
+                logger.info("ℹ️  No pending FK records to retry")
+                return
+
+            logger.info(f"📊 Found {len(pending_rows)} pending FK records to retry")
+
+            resolved_count = 0
+            still_missing = 0
+
+            for row_id, property_id, crime_id, raw_data, retry_count in pending_rows:
+                try:
+                    with self.db_pool.get_connection_context() as conn:
+                        with conn.cursor() as cur:
+                            if crime_id in self.crime_ids:
+                                # Crime now exists — process the property
+                                prop = self.transform_property(raw_data)
+                                success = self.insert_property(prop, conn, cur)
+                                if success:
+                                    conn.commit()
+                                # Mark as resolved regardless (avoid infinite re-inserts on data issues)
+                                cur.execute(f"""
+                                    UPDATE {PENDING_FK_TABLE}
+                                    SET resolved = TRUE, resolved_at = CURRENT_TIMESTAMP,
+                                        last_retry_at = CURRENT_TIMESTAMP, retry_count = %s
+                                    WHERE id = %s
+                                """, (retry_count + 1, row_id))
+                                conn.commit()
+                                resolved_count += 1
+                                logger.debug(f"✅ Resolved pending property {property_id}")
+                            else:
+                                # Still missing — bump retry count
+                                cur.execute(f"""
+                                    UPDATE {PENDING_FK_TABLE}
+                                    SET last_retry_at = CURRENT_TIMESTAMP, retry_count = %s
+                                    WHERE id = %s
+                                """, (retry_count + 1, row_id))
+                                conn.commit()
+                                still_missing += 1
+                except Exception as e:
+                    logger.error(f"Error retrying pending property {property_id}: {e}")
+                    still_missing += 1
+
+            with self.stats_lock:
+                self.stats['total_retried_ok'] = resolved_count
+                self.stats['total_retried_still_missing'] = still_missing
+
+            logger.info(f"🔄 Retry complete: {resolved_count} resolved, {still_missing} still missing crime_id")
+
+        except Exception as e:
+            logger.error(f"❌ Error during pending FK retry: {e}")
+
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
@@ -626,21 +770,34 @@ class PropertiesETL:
         def process_prop(property_raw):
             try:
                 prop = self.transform_property(property_raw)
-                if prop['property_id']:
-                    with self.db_pool.get_connection_context() as conn:
-                        with conn.cursor() as cur:
-                            self.insert_property(prop, conn, cur)
-                            conn.commit()
-                else:
+                if not prop['property_id']:
                     logger.warning(f"⚠️  Property missing PROPERTY_ID, skipping")
                     with self.stats_lock:
                         self.stats['total_properties_failed'] += 1
+                    return
+
+                crime_id = prop.get('crime_id')
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cur:
+                        # Pre-validate: does crime_id exist in crimes table?
+                        if crime_id and crime_id not in self.crime_ids:
+                            # Queue for retry instead of letting FK blow up
+                            self.queue_pending_fk(property_raw, crime_id, conn, cur)
+                            logger.debug(
+                                f"⏳ Property {prop['property_id']}: crime_id {crime_id} "
+                                f"not in crimes table — queued for retry"
+                            )
+                            return
+
+                        self.insert_property(prop, conn, cur)
+                        conn.commit()
             except Exception as e:
                 logger.error(f"Error in process_prop: {e}")
                 with self.stats_lock:
                     self.stats['total_properties_failed'] += 1
         
-        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        max_workers = compute_safe_workers(self.db_pool, requested_workers)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             list(executor.map(process_prop, properties_raw))
         
@@ -677,6 +834,12 @@ class PropertiesETL:
             return False
         
         try:
+            # Ensure the pending FK retry queue table exists
+            self.ensure_pending_table()
+            
+            # Load crime IDs into memory
+            self.load_crime_ids()
+
             # Get effective start date (check if table has data)
             effective_start_date = self.get_effective_start_date()
             logger.info(f"Effective Start Date: {effective_start_date}")
@@ -707,11 +870,16 @@ class PropertiesETL:
                 self.process_date_range(from_date, to_date, table_columns)
                 time.sleep(1)  # Be nice to the API
             
+            # Retry pending FK records (crime_id may now exist after earlier ETLs)
+            self.retry_pending_fk()
+
             # Get database counts
             with self.db_pool.get_connection_context() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(f"SELECT COUNT(*) FROM {PROPERTIES_TABLE}")
                     db_properties_count = cursor.fetchone()[0]
+                    cursor.execute(f"SELECT COUNT(*) FROM {PENDING_FK_TABLE} WHERE resolved = FALSE")
+                    pending_count = cursor.fetchone()[0]
             
             # Print final statistics
             logger.info("")
@@ -731,6 +899,12 @@ class PropertiesETL:
             logger.info(f"  Total No Change:          {self.stats['total_properties_no_change']}")
             logger.info(f"  Total Failed:             {self.stats['total_properties_failed']}")
             logger.info(f"  Total in DB:              {db_properties_count}")
+            logger.info(f"")
+            logger.info(f"⏳ PENDING FK RETRY QUEUE:")
+            logger.info(f"  Queued (missing crime_id): {self.stats['total_pending_fk']}")
+            logger.info(f"  Retried → Resolved:        {self.stats['total_retried_ok']}")
+            logger.info(f"  Retried → Still Missing:   {self.stats['total_retried_still_missing']}")
+            logger.info(f"  Remaining in Queue:        {pending_count}")
             logger.info(f"")
             logger.info(f"📊 COVERAGE:")
             if self.stats['total_properties_fetched'] > 0:
