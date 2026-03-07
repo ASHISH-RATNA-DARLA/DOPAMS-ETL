@@ -87,8 +87,13 @@ class PropertiesETL:
     def connect_db(self):
         """Connect to PostgreSQL database using db_pool"""
         try:
-            self.db_pool = PostgreSQLConnectionPool()
-            logger.info(f"✅ Connected to connection pool")
+            pool_config = DB_CONFIG.copy()
+            max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            pool_config['minconn'] = 1
+            pool_config['maxconn'] = max_workers + 5
+            
+            self.db_pool = PostgreSQLConnectionPool(**pool_config)
+            logger.info(f"✅ Connected to connection pool (maxconn={pool_config['maxconn']})")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection pool failed: {e}")

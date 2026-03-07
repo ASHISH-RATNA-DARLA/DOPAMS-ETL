@@ -153,7 +153,14 @@ class HierarchyETL:
     def connect_db(self):
         """Connect to PostgreSQL database pool"""
         try:
-            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
+            import os
+            # Calculate required pool size based on max workers
+            if 'HIERARCHY_CHUNK_WORKERS' in os.environ and int(os.environ['HIERARCHY_CHUNK_WORKERS']) > 1:
+                max_workers = int(os.environ['HIERARCHY_CHUNK_WORKERS'])
+            else:
+                max_workers = ETL_CONFIG.get('max_workers', 5)
+                
+            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_workers + 5)
             logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']}")
             return True
         except Exception as e:
