@@ -1,47 +1,64 @@
 #!/usr/bin/env python3
 """
-Address State & Country Determination Script for DOPAMAS
+Geographic Address Standardization Script for DOPAMAS
+======================================================
 
-Pipeline (2 steps — no LLM required):
-  1.  pg_trgm MATCHING — Use the structured permanent_* columns
-      (locality_village, area_mandal, district) directly as candidates
-      and fuzzy-match against the geo_reference table.
-      If a match is found, any missing fields among permanent_district,
-      permanent_state_ut, and permanent_country are filled from the
-      geo_reference row (country = "India").
-  2.  FOREIGN FALLBACK — If pg_trgm finds no Indian match, fuzzy-match
-      against the geo_countries table (foreign countries/states).
+Standardizes permanent and present address fields in the `persons` table
+through a two-phase pipeline:
 
-Rules per record:
-  - District, state & country all set → skip
-  - Any of district/state/country missing → pg_trgm match → fill gaps
-  - All permanent_* fields NULL → set district, state & country to NULL
+PHASE 1 — Indian geo_reference matching
+----------------------------------------
+1. Permanent pass  — match permanent_state_ut / permanent_district /
+                     permanent_area_mandal (whichever are non-NULL).
+   → Write: permanent_state_ut, permanent_district,
+            permanent_area_mandal, permanent_country = 'India'
 
-Data sources:
-  - READ:  persons.permanent_* columns (already structured/mapped)
-  - MATCH: geo_reference table (pg_trgm GIN indexes) for Indian locations
-  - MATCH: geo_countries table (pg_trgm GIN indexes) for foreign locations
-  - WRITE: persons.permanent_district, permanent_state_ut, permanent_country
+2. Present pass    — only when ALL THREE permanent geo fields are NULL.
+   Match present_state_ut / present_district / present_area_mandal.
+   → Write: present_state_ut, present_district,
+            present_area_mandal, present_country = 'India'
+
+PHASE 2 — Foreign country fallback (geo_countries)
+----------------------------------------------------
+Triggered only for records where Phase 1 found NO match in geo_reference.
+Collects all non-null geo tokens from BOTH address sets and fuzzy-matches
+them against geo_countries.state_name and geo_countries.country_name.
+
+Matching preference: state_name first (state → resolve country), then
+country_name directly.  The highest similarity match above threshold wins.
+
+→ Write ONLY: permanent_country = resolved country_name
+  (district / mandal / state are left untouched — foreign records should
+   not be forced into Indian administrative hierarchy)
+
+Similarity thresholds (tunable via env-vars)
+--------------------------------------------
+GEO_SIM_STATE     default 0.85   (geo_reference state_name)
+GEO_SIM_DISTRICT  default 0.80   (geo_reference district_name)
+GEO_SIM_MANDAL    default 0.65   (geo_reference sub_district_name)
+GEO_SIM_FOREIGN   default 0.50   (geo_countries — lower for transliteration)
+
+Batch size: configurable via BATCH_SIZE env-var (default 500).
+Concurrency: MAX_WORKERS env-var (default: min(32, cpu*4)).
 """
 
 import argparse
 import logging
 import os
 import sys
-import time
-import re
-from dataclasses import dataclass
-from typing import Optional, Dict, List, Tuple
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from typing import Optional, List, Tuple
 
-import psycopg2
 from dotenv import load_dotenv
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
 
-# --- Logging Configuration ---
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -50,7 +67,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 load_dotenv()
 
 DB_DSN = os.environ.get(
@@ -61,927 +80,921 @@ DB_DSN = os.environ.get(
         f"password={os.environ.get('DB_PASSWORD')}",
         f"host={os.environ.get('DB_HOST', 'localhost')}",
         f"port={os.environ.get('DB_PORT', '5432')}",
-    ])
+    ]),
 )
 
-DEFAULT_TABLE_NAME = os.environ.get("TABLE_NAME", "persons")
-DEFAULT_ID_COLUMN = os.environ.get("ID_COLUMN", "person_id")
+TABLE_NAME   = os.environ.get("TABLE_NAME",   "persons")
+ID_COLUMN    = os.environ.get("ID_COLUMN",    "person_id")
+BATCH_SIZE   = int(os.environ.get("BATCH_SIZE",  "500"))
+MAX_WORKERS  = int(os.environ.get("MAX_WORKERS",  str(min(32, (os.cpu_count() or 1) * 4))))
 
-# pg_trgm similarity thresholds (tiered by field trust level)
-TRGM_THRESHOLD_STATE    = float(os.environ.get("TRGM_THRESHOLD_STATE",    "0.90"))  # States are a small finite list
-TRGM_THRESHOLD_DISTRICT = float(os.environ.get("TRGM_THRESHOLD_DISTRICT", "0.90"))  # Districts are finite, high confidence needed
-TRGM_THRESHOLD_MANDAL   = float(os.environ.get("TRGM_THRESHOLD_MANDAL",   "0.70"))  # Mandals have spelling variations
-TRGM_THRESHOLD_VILLAGE  = float(os.environ.get("TRGM_THRESHOLD_VILLAGE",  "0.65"))  # Villages have high noise, acceptable if district/mandal anchor
-TRGM_THRESHOLD_FOREIGN  = float(os.environ.get("TRGM_THRESHOLD_FOREIGN",  "0.50"))  # Foreign names need lower threshold for transliteration variations
+SIM_STATE    = float(os.environ.get("GEO_SIM_STATE",    "0.85"))
+SIM_DISTRICT = float(os.environ.get("GEO_SIM_DISTRICT", "0.80"))
+SIM_MANDAL   = float(os.environ.get("GEO_SIM_MANDAL",   "0.65"))
+SIM_FOREIGN  = float(os.environ.get("GEO_SIM_FOREIGN",  "0.50"))
 
-logger.info(f"Database: {os.environ.get('DB_NAME', 'dopamas')}@{os.environ.get('DB_HOST', 'localhost')}")
-logger.info(f"Default Table: {DEFAULT_TABLE_NAME}, ID Column: {DEFAULT_ID_COLUMN}")
-logger.info(f"pg_trgm thresholds: state={TRGM_THRESHOLD_STATE}, district={TRGM_THRESHOLD_DISTRICT}, mandal={TRGM_THRESHOLD_MANDAL}, village={TRGM_THRESHOLD_VILLAGE}, foreign={TRGM_THRESHOLD_FOREIGN}")
+logger.info("DB      : %s @ %s", os.environ.get("DB_NAME", "dopamas"), os.environ.get("DB_HOST", "localhost"))
+logger.info("Table   : %s  ID: %s", TABLE_NAME, ID_COLUMN)
+logger.info("Batch   : %s  Workers: %s", BATCH_SIZE, MAX_WORKERS)
+logger.info("Thresholds — state: %.2f  district: %.2f  mandal: %.2f  foreign: %.2f",
+            SIM_STATE, SIM_DISTRICT, SIM_MANDAL, SIM_FOREIGN)
 
 
-# ===================================================================
-#  DATA MODELS
-# ===================================================================
+# ---------------------------------------------------------------------------
+# Data models
+# ---------------------------------------------------------------------------
+
+def _val(v: Optional[str]) -> Optional[str]:
+    """Return stripped value or None for empty / whitespace-only strings."""
+    return v.strip() if v and v.strip() else None
+
 
 @dataclass
-class AddressRecord:
-    """One row from the persons table."""
-    record_id: int
-    # --- input fields (read-only) ---
-    permanent_house_no: Optional[str] = None
-    permanent_street_road_no: Optional[str] = None
-    permanent_ward_colony: Optional[str] = None
-    permanent_landmark_milestone: Optional[str] = None
-    permanent_locality_village: Optional[str] = None
-    permanent_area_mandal: Optional[str] = None
-    permanent_district: Optional[str] = None
-    # --- output fields (to be updated) ---
-    permanent_state_ut: Optional[str] = None
-    permanent_country: Optional[str] = None
+class PersonRecord:
+    person_id: str
 
-    def get_address_components(self) -> str:
-        """Formatted non-empty permanent_* values."""
-        parts = [
-            ("House No", self.permanent_house_no),
-            ("Street/Road", self.permanent_street_road_no),
-            ("Ward/Colony", self.permanent_ward_colony),
-            ("Landmark", self.permanent_landmark_milestone),
-            ("Locality/Village", self.permanent_locality_village),
-            ("Area/Mandal", self.permanent_area_mandal),
-            ("District", self.permanent_district),
-        ]
-        pieces = [f"{l}: {v.strip()}" for l, v in parts if v and v.strip()]
-        return ", ".join(pieces) if pieces else ""
+    # permanent
+    perm_state:    Optional[str] = None
+    perm_district: Optional[str] = None
+    perm_mandal:   Optional[str] = None
+    perm_country:  Optional[str] = None
 
-    # --- convenience flags ---
-    def needs_district(self) -> bool:
-        return not (self.permanent_district and self.permanent_district.strip())
+    # present
+    pres_state:    Optional[str] = None
+    pres_district: Optional[str] = None
+    pres_mandal:   Optional[str] = None
+    pres_country:  Optional[str] = None
 
-    def needs_state(self) -> bool:
-        return not (self.permanent_state_ut and self.permanent_state_ut.strip())
+    def permanent_has_any_geo(self) -> bool:
+        return any([_val(self.perm_state), _val(self.perm_district), _val(self.perm_mandal)])
 
-    def needs_country(self) -> bool:
-        return not (self.permanent_country and self.permanent_country.strip())
+    def permanent_is_complete(self) -> bool:
+        return all([_val(self.perm_state), _val(self.perm_district),
+                    _val(self.perm_mandal), _val(self.perm_country)])
 
-    def is_complete(self) -> bool:
-        return not self.needs_district() and not self.needs_state() and not self.needs_country()
+    def present_has_any_geo(self) -> bool:
+        return any([_val(self.pres_state), _val(self.pres_district), _val(self.pres_mandal)])
 
-    def has_any_address(self) -> bool:
-        return any(
-            f and f.strip()
-            for f in [
-                self.permanent_house_no, self.permanent_street_road_no,
-                self.permanent_ward_colony, self.permanent_landmark_milestone,
-                self.permanent_locality_village, self.permanent_area_mandal,
-                self.permanent_district,
-            ]
-        )
-
-    def get_extended_candidates(self) -> List[str]:
-        """Extract potential location tokens from ALL address fields (not just village/mandal)."""
-        all_fields = [
-            self.permanent_ward_colony, self.permanent_landmark_milestone,
-            self.permanent_street_road_no, self.permanent_house_no,
-            self.permanent_locality_village, self.permanent_area_mandal,
-        ]
-        tokens = []
-        for field in all_fields:
-            if field and field.strip():
-                tokens.extend(_extract_location_tokens(field))
-        seen = set()
-        result = []
-        for t in tokens:
-            norm = t.lower()
-            if norm not in seen:
-                seen.add(norm)
-                result.append(t)
-        return result
-
-    def get_full_address_text(self) -> str:
-        """Return all address field values concatenated."""
-        parts = [
-            self.permanent_house_no, self.permanent_street_road_no,
-            self.permanent_ward_colony, self.permanent_landmark_milestone,
-            self.permanent_locality_village, self.permanent_area_mandal,
-            self.permanent_district, self.permanent_state_ut,
-        ]
-        return " ".join(p.strip() for p in parts if p and p.strip())
+    def present_is_complete(self) -> bool:
+        return all([_val(self.pres_state), _val(self.pres_district),
+                    _val(self.pres_mandal), _val(self.pres_country)])
 
 
 @dataclass
 class GeoMatch:
-    """Result of a geo_reference pg_trgm lookup."""
-    village: Optional[str] = None
-    sub_district: Optional[str] = None
-    district: Optional[str] = None
-    state: Optional[str] = None
-    similarity: float = 0.0
-
-
-# ===================================================================
-#  STEP 1 — pg_trgm MATCHING against geo_reference
-#
-#  Hierarchy (highest trust first):
-#    1a. State exists, country missing → match state_name → get country.
-#    1b. District known → match district_name → get state.
-#    1c. Village/mandal known → match (scoped to district if known).
-#
-#  Tiered thresholds: state/district >= 90%, mandal >= 70%, village >= 65%.
-# ===================================================================
-
-def trgm_match_state(
-    state: str,
-    threshold: float = TRGM_THRESHOLD_STATE,
-) -> Optional[GeoMatch]:
-    """
-    Match a known state value directly against state_name in geo_reference.
-    Returns the best match or None. Used to confirm Indian state → set country.
-    """
-    query = """
-        SELECT DISTINCT state_name,
-               similarity(state_name, %(loc)s) AS sim
-        FROM geo_reference
-        WHERE state_name %% %(loc)s
-        ORDER BY sim DESC
-        LIMIT 1;
-    """
-    try:
-        pool = PostgreSQLConnectionPool()
-        with pool.get_connection_context() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
-                cur.execute(query, {"loc": state.strip()})
-                row = cur.fetchone()
-                if row and float(row[1]) >= threshold:
-                    match = GeoMatch(
-                        state=row[0], similarity=float(row[1]),
-                    )
-                    logger.info(
-                        f"  pg_trgm state match: state={match.state}, "
-                        f"sim={match.similarity:.3f}"
-                    )
-                    return match
-    except Exception as e:
-        logger.error(f"pg_trgm state lookup failed: {e}", exc_info=True)
-    return None
-
-
-def trgm_match_district(
-    district: str,
-    threshold: float = TRGM_THRESHOLD_DISTRICT,
-) -> Optional[GeoMatch]:
-    """
-    Match a known district value directly against district_name in geo_reference.
-    Returns the best match or None.
-    """
-    query = """
-        SELECT DISTINCT district_name, state_name,
-               similarity(district_name, %(loc)s) AS sim
-        FROM geo_reference
-        WHERE district_name %% %(loc)s
-        ORDER BY sim DESC
-        LIMIT 1;
-    """
-    try:
-        pool = PostgreSQLConnectionPool()
-        with pool.get_connection_context() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
-                cur.execute(query, {"loc": district.strip()})
-                row = cur.fetchone()
-                if row and float(row[2]) >= threshold:
-                    match = GeoMatch(
-                        district=row[0], state=row[1], similarity=float(row[2]),
-                    )
-                    logger.info(
-                        f"  pg_trgm district match: district={match.district}, "
-                        f"state={match.state}, sim={match.similarity:.3f}"
-                    )
-                    return match
-                elif row:
-                    logger.info(
-                        f"  pg_trgm district match rejected (sim={float(row[2]):.3f} < {threshold})"
-                    )
-    except Exception as e:
-        logger.error(f"pg_trgm district lookup failed: {e}", exc_info=True)
-    return None
-
-
-def trgm_match_village_mandal(
-    candidates: List[str],
-    within_district: Optional[str] = None,
-    mandal_threshold: float = TRGM_THRESHOLD_MANDAL,
-    village_threshold: float = TRGM_THRESHOLD_VILLAGE,
-) -> Optional[GeoMatch]:
-    """
-    Match village/mandal names against geo_reference.
-    Uses mandal_threshold (0.70) for sub_district matches and
-    village_threshold (0.65) for village matches.
-    If within_district is provided, results are scoped to that district only
-    (prevents cross-state jumps like Kotapalle/Mancherial → Chittoor).
-    """
-    if not candidates:
-        return None
-
-    best: Optional[GeoMatch] = None
-
-    # Use the lower threshold (village) for the pg_trgm operator so candidates
-    # are not filtered out prematurely. We apply the tiered check in Python.
-    pg_threshold = min(mandal_threshold, village_threshold)
-
-    if within_district:
-        # Scoped: only match within the known district
-        query = """
-            SELECT village_name_english, sub_district_name, district_name,
-                   state_name,
-                   similarity(sub_district_name,   %(loc)s) AS sim_mandal,
-                   similarity(village_name_english, %(loc)s) AS sim_village
-            FROM geo_reference
-            WHERE district_name %% %(dist)s
-              AND (village_name_english %% %(loc)s OR sub_district_name %% %(loc)s)
-            ORDER BY GREATEST(
-                similarity(sub_district_name, %(loc)s),
-                similarity(village_name_english, %(loc)s)
-            ) DESC
-            LIMIT 1;
-        """
-    else:
-        # Unscoped: search all districts
-        query = """
-            SELECT village_name_english, sub_district_name, district_name,
-                   state_name,
-                   similarity(sub_district_name,   %(loc)s) AS sim_mandal,
-                   similarity(village_name_english, %(loc)s) AS sim_village
-            FROM geo_reference
-            WHERE village_name_english %% %(loc)s
-               OR sub_district_name   %% %(loc)s
-            ORDER BY GREATEST(
-                similarity(sub_district_name, %(loc)s),
-                similarity(village_name_english, %(loc)s)
-            ) DESC
-            LIMIT 1;
-        """
-
-    try:
-        pool = PostgreSQLConnectionPool()
-        with pool.get_connection_context() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SET pg_trgm.similarity_threshold = {pg_threshold};")
-
-                for loc in candidates:
-                    loc_clean = loc.strip()
-                    if not loc_clean:
-                        continue
-                    params = {"loc": loc_clean}
-                    if within_district:
-                        params["dist"] = within_district
-                    cur.execute(query, params)
-                    row = cur.fetchone()
-                    if row:
-                        sim_mandal = float(row[4])
-                        sim_village = float(row[5])
-
-                        # Apply tiered threshold: mandal needs >= 0.70, village needs >= 0.65
-                        if sim_mandal >= mandal_threshold:
-                            best_sim = sim_mandal
-                            matched_via = "mandal"
-                        elif sim_village >= village_threshold:
-                            best_sim = sim_village
-                            matched_via = "village"
-                        else:
-                            logger.info(
-                                f"    Rejected '{loc_clean}': mandal_sim={sim_mandal:.3f} < {mandal_threshold}, "
-                                f"village_sim={sim_village:.3f} < {village_threshold}"
-                            )
-                            continue
-
-                        match = GeoMatch(
-                            village=row[0], sub_district=row[1],
-                            district=row[2], state=row[3],
-                            similarity=best_sim,
-                        )
-                        if best is None or match.similarity > best.similarity:
-                            best = match
-                            logger.info(f"    Accepted '{loc_clean}' via {matched_via}: sim={best_sim:.3f}")
-    except Exception as e:
-        logger.error(f"pg_trgm village/mandal lookup failed: {e}", exc_info=True)
-
-    if best:
-        logger.info(
-            f"  pg_trgm village/mandal best: district={best.district}, "
-            f"state={best.state}, sim={best.similarity:.3f}"
-            f"{' (scoped to ' + within_district + ')' if within_district else ''}"
-        )
-    return best
-
-
-# ===================================================================
-#  STEP 2 — FOREIGN MATCHING against geo_countries (pg_trgm)
-# ===================================================================
-
-def _norm(text: str) -> str:
-    return " ".join((text or "").lower().split())
-
-
-def _extract_location_tokens(text: str) -> List[str]:
-    """Extract potential location names from a free-text address field."""
-    if not text or not text.strip():
-        return []
-
-    tokens = []
-    text = text.strip()
-
-    # Pattern: "X Dist" or "X District"
-    for m in re.finditer(r'([\w][\w\s]*?)\s+Dist(?:rict|\.?)(?:\s|$|,)', text, re.IGNORECASE):
-        name = m.group(1).strip()
-        if name and len(name) >= 3:
-            tokens.append(name)
-
-    # Pattern: "X (V)" → village, "X (M)" → mandal
-    for m in re.finditer(r'([\w][\w\s]*?)\s*\([VMvm]\)', text):
-        name = m.group(1).strip()
-        if name and len(name) >= 3:
-            tokens.append(name)
-
-    # Split by comma and try each part
-    for part in re.split(r'[,;]', text):
-        part = part.strip()
-        if not part:
-            continue
-        # Skip obvious non-location patterns
-        if re.match(
-            r'^(H\.?\s*NO|House\s*No|Street|Road\s*no\.?\s*\d|Plot|Flat|Door\s*No'
-            r'|S/?O|D/?O|W/?O|C/?O|Near|Opp|Behind|Adjacent)',
-            part, re.IGNORECASE,
-        ):
-            continue
-        if re.match(r'^[\d\.\-/\s]+$', part):  # Pure numbers
-            continue
-        if len(part) < 3:
-            continue
-        # Clean up markers
-        part = re.sub(r'\s*\([VMvm]\)\s*', ' ', part).strip()
-        part = re.sub(r'\s+Dist(?:rict|\.?)$', '', part, flags=re.IGNORECASE).strip()
-        if part and len(part) >= 3:
-            tokens.append(part)
-
-    # Deduplicate preserving order
-    seen = set()
-    result = []
-    for t in tokens:
-        t_clean = t.strip()
-        t_norm = t_clean.lower()
-        if t_norm not in seen and len(t_clean) >= 3:
-            seen.add(t_norm)
-            result.append(t_clean)
-    return result
+    state:    str
+    district: str
+    mandal:   str
+    score:    float = 0.0
 
 
 @dataclass
 class ForeignMatch:
-    """Result of a geo_countries pg_trgm lookup."""
-    country: Optional[str] = None
-    state: Optional[str] = None
+    """Result of a geo_countries fuzzy lookup."""
+    country:    str
+    state:      Optional[str] = None   # the matched state_name (if matched via state)
     similarity: float = 0.0
+    matched_via: str = ""              # "state_name" | "country_name"
 
 
-def trgm_match_foreign_country(
+# ---------------------------------------------------------------------------
+# Phase 2: foreign country matching via geo_countries
+# ---------------------------------------------------------------------------
+
+def _collect_foreign_candidates(rec: "PersonRecord") -> List[str]:
+    """
+    Collect all distinct, non-empty geo token strings from both permanent
+    and present address fields of the record.
+
+    We pull from six source fields:
+        permanent_state_ut, permanent_district, permanent_area_mandal
+        present_state_ut,   present_district,   present_area_mandal
+
+    Each value is stripped and de-duplicated (case-insensitive).
+    Only values of 3+ characters are included to avoid noise.
+    """
+    raw = [
+        rec.perm_state,   rec.perm_district, rec.perm_mandal,
+        rec.pres_state,   rec.pres_district,  rec.pres_mandal,
+    ]
+    seen: set = set()
+    tokens: List[str] = []
+    for v in raw:
+        cleaned = _val(v)
+        if cleaned and len(cleaned) >= 3:
+            key = cleaned.lower()
+            if key not in seen:
+                seen.add(key)
+                tokens.append(cleaned)
+    return tokens
+
+
+def match_foreign_country(
     candidates: List[str],
-    threshold: float = TRGM_THRESHOLD_FOREIGN,
+    record_id:  str,
 ) -> Optional[ForeignMatch]:
     """
-    Fuzzy-match candidate strings against geo_countries.country_name.
-    Returns the best match (country + associated state if the candidate
-    also matches a state_name row for that country).
+    Phase 2: fuzzy-match candidate tokens against geo_countries.
+
+    Matching order (preference: state → country):
+      Step A — match each token against geo_countries.state_name.
+               If found, the country is resolved from that row.
+               Rationale: state names are more specific than country names
+               and uniquely identify the country, so a state hit is a
+               high-confidence country signal.
+
+      Step B — match each token against geo_countries.country_name directly.
+               Used when no state matched.
+
+    The best similarity across ALL candidates and BOTH columns wins,
+    subject to the SIM_FOREIGN threshold.
+
+    Returns ForeignMatch(country, state, similarity, matched_via) or None.
     """
     if not candidates:
         return None
 
+    pool = PostgreSQLConnectionPool()
     best: Optional[ForeignMatch] = None
 
-    # Match country_name directly
-    query_country = """
-        SELECT DISTINCT country_name,
-               similarity(country_name, %(loc)s) AS sim
+    # ------------------------------------------------------------------
+    # Step A: match against state_name → derive country
+    # ------------------------------------------------------------------
+    state_sql = """
+        SELECT
+            state_name,
+            country_name,
+            similarity(state_name, %(token)s) AS sim
         FROM geo_countries
-        WHERE country_name %% %(loc)s
+        WHERE state_name %% %(token)s
+          AND similarity(state_name, %(token)s) >= %(thr)s
         ORDER BY sim DESC
-        LIMIT 1;
+        LIMIT 1
+    """
+
+    # ------------------------------------------------------------------
+    # Step B: match against country_name directly
+    # ------------------------------------------------------------------
+    country_sql = """
+        SELECT
+            country_name,
+            similarity(country_name, %(token)s) AS sim
+        FROM geo_countries
+        WHERE country_name %% %(token)s
+          AND similarity(country_name, %(token)s) >= %(thr)s
+        ORDER BY sim DESC
+        LIMIT 1
     """
 
     try:
-        pool = PostgreSQLConnectionPool()
         with pool.get_connection_context() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
-                for loc in candidates:
-                    loc_clean = loc.strip()
-                    if not loc_clean or len(loc_clean) < 3:
-                        continue
-                    cur.execute(query_country, {"loc": loc_clean})
+                cur.execute(f"SET pg_trgm.similarity_threshold = {SIM_FOREIGN};")
+
+                for token in candidates:
+                    # --- Step A: state_name ---
+                    cur.execute(state_sql, {"token": token, "thr": SIM_FOREIGN})
                     row = cur.fetchone()
-                    if row and float(row[1]) >= threshold:
-                        match = ForeignMatch(
-                            country=row[0], similarity=float(row[1]),
-                        )
-                        if best is None or match.similarity > best.similarity:
-                            best = match
-                            logger.info(
-                                f"    pg_trgm foreign country match: '{loc_clean}' → "
-                                f"country={match.country}, sim={match.similarity:.3f}"
+                    if row:
+                        sim = float(row[2])
+                        if best is None or sim > best.similarity:
+                            best = ForeignMatch(
+                                country=row[1],
+                                state=row[0],
+                                similarity=sim,
+                                matched_via="state_name",
                             )
-    except Exception as e:
-        logger.error(f"pg_trgm foreign country lookup failed: {e}", exc_info=True)
+                            logger.info(
+                                "  [%s] foreign Phase2/A: token='%s' → state=%s "
+                                "country=%s sim=%.3f",
+                                record_id, token, row[0], row[1], sim,
+                            )
 
-    return best
+                    # --- Step B: country_name (only if no state match beat it) ---
+                    cur.execute(country_sql, {"token": token, "thr": SIM_FOREIGN})
+                    row = cur.fetchone()
+                    if row:
+                        sim = float(row[1])
+                        if best is None or (
+                            sim > best.similarity
+                            and best.matched_via == "country_name"
+                        ):
+                            # Only replace a country_name match with a better one;
+                            # never let a country_name match demote a state_name match.
+                            if best is None or best.matched_via != "state_name":
+                                best = ForeignMatch(
+                                    country=row[0],
+                                    state=None,
+                                    similarity=sim,
+                                    matched_via="country_name",
+                                )
+                                logger.info(
+                                    "  [%s] foreign Phase2/B: token='%s' → "
+                                    "country=%s sim=%.3f",
+                                    record_id, token, row[0], sim,
+                                )
 
-
-def trgm_match_foreign_state(
-    candidates: List[str],
-    within_country: Optional[str] = None,
-    threshold: float = TRGM_THRESHOLD_FOREIGN,
-) -> Optional[ForeignMatch]:
-    """
-    Fuzzy-match candidate strings against geo_countries.state_name.
-    If within_country is provided, scopes to that country.
-    Returns (state, country) or None.
-    """
-    if not candidates:
+    except Exception as exc:
+        logger.error("  [%s] foreign geo_countries lookup failed: %s",
+                     record_id, exc, exc_info=True)
         return None
 
-    best: Optional[ForeignMatch] = None
-
-    if within_country:
-        query = """
-            SELECT state_name, country_name,
-                   similarity(state_name, %(loc)s) AS sim
-            FROM geo_countries
-            WHERE country_name = %(country)s
-              AND state_name %% %(loc)s
-            ORDER BY sim DESC
-            LIMIT 1;
-        """
+    if best:
+        logger.info(
+            "  [%s] foreign best: country=%s (via %s, sim=%.3f)",
+            record_id, best.country, best.matched_via, best.similarity,
+        )
     else:
-        query = """
-            SELECT state_name, country_name,
-                   similarity(state_name, %(loc)s) AS sim
-            FROM geo_countries
-            WHERE state_name %% %(loc)s
-            ORDER BY sim DESC
-            LIMIT 1;
-        """
-
-    try:
-        pool = PostgreSQLConnectionPool()
-        with pool.get_connection_context() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SET pg_trgm.similarity_threshold = {threshold};")
-                for loc in candidates:
-                    loc_clean = loc.strip()
-                    if not loc_clean or len(loc_clean) < 3:
-                        continue
-                    params = {"loc": loc_clean}
-                    if within_country:
-                        params["country"] = within_country
-                    cur.execute(query, params)
-                    row = cur.fetchone()
-                    if row and float(row[2]) >= threshold:
-                        match = ForeignMatch(
-                            state=row[0], country=row[1],
-                            similarity=float(row[2]),
-                        )
-                        if best is None or match.similarity > best.similarity:
-                            best = match
-                            logger.info(
-                                f"    pg_trgm foreign state match: '{loc_clean}' → "
-                                f"state={match.state}, country={match.country}, "
-                                f"sim={match.similarity:.3f}"
-                            )
-    except Exception as e:
-        logger.error(f"pg_trgm foreign state lookup failed: {e}", exc_info=True)
+        logger.warning("  [%s] foreign Phase 2: no match above threshold %.2f",
+                       record_id, SIM_FOREIGN)
 
     return best
 
 
-def trgm_match_foreign_full(
-    candidates: List[str],
-    full_address_text: str,
-    existing_state: Optional[str] = None,
-    threshold: float = TRGM_THRESHOLD_FOREIGN,
-) -> Optional[Tuple[Optional[str], str]]:
+def apply_foreign_country(
+    table:      str,
+    id_col:     str,
+    person_id:  str,
+    country:    str,
+    dry_run:    bool,
+) -> bool:
     """
-    Combined foreign lookup: try country name first (both from candidates and
-    full address text), then state/city matching. Returns (state, country) or None.
+    Write only permanent_country (Phase 2 update).
+    district / mandal / state are deliberately left untouched.
     """
-    # 1. Try matching existing state against geo_countries.state_name
-    if existing_state and existing_state.strip():
-        fm = trgm_match_foreign_state([existing_state], threshold=threshold)
-        if fm:
-            return (existing_state, fm.country)
+    if dry_run:
+        logger.info("  [DRY-RUN] %s: would set permanent_country=%s", person_id, country)
+        return True
 
-    # 2. Direct country name match from candidates
-    fm_country = trgm_match_foreign_country(candidates, threshold=threshold)
-    if fm_country:
-        # Found country — try to find state within that country
-        fm_state = trgm_match_foreign_state(
-            candidates, within_country=fm_country.country, threshold=threshold
-        )
-        state_out = fm_state.state if fm_state else None
-        return (state_out, fm_country.country)
-
-    # 3. Try country name from full address text (word-by-word)
-    if full_address_text:
-        words = re.split(r'[,;\s]+', full_address_text)
-        # Try multi-word combinations (2-3 words) for countries like "Saudi Arabia"
-        text_candidates = []
-        for i in range(len(words)):
-            w = words[i].strip()
-            if w and len(w) >= 3:
-                text_candidates.append(w)
-            if i + 1 < len(words):
-                pair = f"{words[i]} {words[i+1]}".strip()
-                if len(pair) >= 5:
-                    text_candidates.append(pair)
-            if i + 2 < len(words):
-                triple = f"{words[i]} {words[i+1]} {words[i+2]}".strip()
-                if len(triple) >= 5:
-                    text_candidates.append(triple)
-
-        fm_country = trgm_match_foreign_country(text_candidates, threshold=threshold)
-        if fm_country:
-            fm_state = trgm_match_foreign_state(
-                candidates + text_candidates,
-                within_country=fm_country.country, threshold=threshold,
-            )
-            state_out = fm_state.state if fm_state else None
-            return (state_out, fm_country.country)
-
-    # 4. Try state/city match (no country anchor) — broader search
-    fm_state = trgm_match_foreign_state(candidates, threshold=threshold)
-    if fm_state:
-        return (fm_state.state, fm_state.country)
-
-    return None
-
-
-# ===================================================================
-#  DATABASE OPERATIONS
-# ===================================================================
-
-def fetch_records_needing_update(
-    table_name: str,
-    id_column: str,
-    limit: Optional[int] = None,
-) -> List[AddressRecord]:
-    """Fetch persons rows where district, state, or country is missing."""
-    where = (
-        "(permanent_district IS NULL OR permanent_district = '' "
-        "OR permanent_state_ut IS NULL OR permanent_state_ut = '' "
-        "OR permanent_country IS NULL OR permanent_country = '') "
-        "AND NOT (permanent_district IS NOT NULL AND permanent_district != '' "
-        "AND permanent_state_ut IS NOT NULL AND permanent_state_ut != '' "
-        "AND permanent_country IS NOT NULL AND permanent_country != '')"
-    )
-
-    sql = f"""
-        SELECT {id_column},
-               permanent_house_no, permanent_street_road_no,
-               permanent_ward_colony, permanent_landmark_milestone,
-               permanent_locality_village, permanent_area_mandal,
-               permanent_district,
-               permanent_state_ut, permanent_country
-        FROM {table_name}
-        WHERE {where}
-        ORDER BY {id_column}
-    """
-    params: tuple = ()
-    if limit is not None:
-        sql += " LIMIT %s"
-        params = (limit,)
-        logger.info(f"Fetching up to {limit} records from {table_name}")
-    else:
-        logger.info(f"Fetching ALL records from {table_name}")
-
+    sql = f"UPDATE {table} SET permanent_country = %s WHERE {id_col} = %s"
     pool = PostgreSQLConnectionPool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, params)
+            cur.execute(sql, (country, person_id))
+        conn.commit()
+    logger.info("  [WRITE] %s: permanent_country=%s", person_id, country)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Core: dynamic pg_trgm matcher
+# ---------------------------------------------------------------------------
+
+def _build_match_query(
+    state_val:    Optional[str],
+    district_val: Optional[str],
+    mandal_val:   Optional[str],
+) -> Tuple[Optional[str], dict]:
+    """
+    Build a dynamic SQL query that joins only the non-NULL input fields.
+
+    Strategy
+    --------
+    * For each available field we compute its similarity against the
+      corresponding geo_reference column.
+    * A candidate row must meet every supplied field's threshold.
+    * Rows are ranked by a weighted composite score:
+        district_weight=3, mandal_weight=2, state_weight=1
+      This ensures district anchors trump broader state matches.
+    * We use the pg_trgm '%' operator (threshold-filtered) in WHERE to
+      leverage GIN indexes, then re-check exact similarity in Python to
+      avoid cross-threshold contamination.
+
+    Returns (sql, params) or (None, {}) if no fields available.
+    """
+    fields = {}
+    if _val(state_val):
+        fields["state"] = _val(state_val)
+    if _val(district_val):
+        fields["district"] = _val(district_val)
+    if _val(mandal_val):
+        fields["mandal"] = _val(mandal_val)
+
+    if not fields:
+        return None, {}
+
+    # SELECT clause — always pull canonical names + per-field similarities
+    select_parts = [
+        "state_name",
+        "district_name",
+        "sub_district_name",
+    ]
+    sim_exprs = []
+    weight_expr_parts = []
+
+    if "state" in fields:
+        select_parts.append("similarity(state_name,    %(state)s)    AS sim_state")
+        sim_exprs.append("similarity(state_name,    %(state)s)    >= %(thr_state)s")
+        weight_expr_parts.append("similarity(state_name,    %(state)s)    * 1")
+    else:
+        select_parts.append("NULL::float AS sim_state")
+
+    if "district" in fields:
+        select_parts.append("similarity(district_name, %(district)s) AS sim_district")
+        sim_exprs.append("similarity(district_name, %(district)s) >= %(thr_district)s")
+        weight_expr_parts.append("similarity(district_name, %(district)s) * 3")
+    else:
+        select_parts.append("NULL::float AS sim_district")
+
+    if "mandal" in fields:
+        select_parts.append("similarity(sub_district_name, %(mandal)s) AS sim_mandal")
+        sim_exprs.append("similarity(sub_district_name, %(mandal)s) >= %(thr_mandal)s")
+        weight_expr_parts.append("similarity(sub_district_name, %(mandal)s) * 2")
+    else:
+        select_parts.append("NULL::float AS sim_mandal")
+
+    # WHERE: use pg_trgm '%' operator to benefit from GIN index,
+    # but scope to only available fields so we don't over-filter
+    where_parts = []
+    if "state" in fields:
+        where_parts.append("state_name %% %(state)s")
+    if "district" in fields:
+        where_parts.append("district_name %% %(district)s")
+    if "mandal" in fields:
+        where_parts.append("sub_district_name %% %(mandal)s")
+
+    # Combine WHERE with AND so ALL available fields must trgm-match
+    # (This scopes the result tightly when multiple fields are available,
+    # while still using each GIN index for its respective column.)
+    where_clause = " AND ".join(where_parts)
+
+    score_expr = " + ".join(weight_expr_parts) if weight_expr_parts else "0"
+
+    # HAVING: all supplied fields must individually clear their threshold
+    having_clause = " AND ".join(sim_exprs) if sim_exprs else "TRUE"
+
+    sql = f"""
+        SELECT
+            {", ".join(select_parts)},
+            ({score_expr}) AS weighted_score
+        FROM geo_reference
+        WHERE {where_clause}
+        HAVING {having_clause}
+        ORDER BY weighted_score DESC
+        LIMIT 1
+    """
+
+    params = {
+        "thr_state":    SIM_STATE,
+        "thr_district": SIM_DISTRICT,
+        "thr_mandal":   SIM_MANDAL,
+    }
+    params.update(fields)
+
+    return sql, params
+
+
+def match_geo(
+    state_val:    Optional[str],
+    district_val: Optional[str],
+    mandal_val:   Optional[str],
+    record_id:    str,
+    addr_label:   str,
+) -> Optional[GeoMatch]:
+    """
+    Run the dynamic pg_trgm query against geo_reference.
+
+    Falls back progressively if the full multi-field query returns nothing:
+      1. All available fields together (strictest — most precise)
+      2. District + state (drop mandal)
+      3. District alone
+      4. Mandal alone
+      5. State alone
+    Each fall-back step relaxes the anchor, never mixes mis-matched fields.
+    """
+
+    # Build candidate probe sets (ordered most-specific → least-specific)
+    probes: List[Tuple[Optional[str], Optional[str], Optional[str], str]] = []
+
+    s = _val(state_val)
+    d = _val(district_val)
+    m = _val(mandal_val)
+
+    available = sum([bool(s), bool(d), bool(m)])
+
+    if available == 3:
+        probes = [
+            (s, d, m, "state+district+mandal"),
+            (s, d, None, "state+district"),
+            (None, d, m, "district+mandal"),
+            (None, d, None, "district"),
+            (None, None, m, "mandal"),
+            (s, None, None, "state"),
+        ]
+    elif available == 2:
+        if s and d:
+            probes = [(s, d, None, "state+district"), (None, d, None, "district"), (s, None, None, "state")]
+        elif d and m:
+            probes = [(None, d, m, "district+mandal"), (None, d, None, "district"), (None, None, m, "mandal")]
+        elif s and m:
+            probes = [(s, None, m, "state+mandal"), (None, None, m, "mandal"), (s, None, None, "state")]
+    elif available == 1:
+        probes = [(s, d, m, ("state" if s else "district" if d else "mandal"))]
+
+    if not probes:
+        return None
+
+    pool = PostgreSQLConnectionPool()
+
+    for ps, pd, pm, label in probes:
+        sql, params = _build_match_query(ps, pd, pm)
+        if not sql:
+            continue
+        try:
+            with pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    # Set the lowest threshold so the '%' operator in WHERE
+                    # matches liberally; our HAVING clause enforces field-level
+                    # thresholds precisely.
+                    min_thr = min(SIM_STATE, SIM_DISTRICT, SIM_MANDAL)
+                    cur.execute(f"SET pg_trgm.similarity_threshold = {min_thr};")
+                    cur.execute(sql, params)
+                    row = cur.fetchone()
+                    if row:
+                        geo = GeoMatch(
+                            state=row[0],
+                            district=row[1],
+                            mandal=row[2],
+                            # weighted_score is the last column (index 6)
+                            score=float(row[6]),
+                        )
+                        logger.info(
+                            "  [%s] %s | probe=%s → state=%s district=%s mandal=%s score=%.3f",
+                            record_id, addr_label, label,
+                            geo.state, geo.district, geo.mandal, geo.score,
+                        )
+                        return geo
+                    else:
+                        logger.debug(
+                            "  [%s] %s | probe=%s → no match", record_id, addr_label, label
+                        )
+        except Exception as exc:
+            logger.error("  [%s] %s | probe=%s query failed: %s",
+                         record_id, addr_label, label, exc, exc_info=True)
+
+    logger.warning("  [%s] %s | all probes exhausted — unresolved", record_id, addr_label)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Database I/O
+# ---------------------------------------------------------------------------
+
+def fetch_batch(
+    table: str,
+    id_col: str,
+    offset: int,
+    limit: int,
+) -> List[PersonRecord]:
+    """
+    Fetch one batch of persons that need standardization on permanent
+    and/or present address fields.
+
+    A record is included when:
+      • Any of permanent_state_ut / permanent_district / permanent_area_mandal
+        is non-NULL/non-empty AND permanent address is not already fully complete
+      OR
+      • All permanent geo fields are NULL/empty AND any present geo field exists
+        AND present address is not already fully complete
+    """
+    sql = f"""
+        SELECT
+            {id_col},
+            TRIM(COALESCE(permanent_state_ut,    '')) AS perm_state,
+            TRIM(COALESCE(permanent_district,    '')) AS perm_district,
+            TRIM(COALESCE(permanent_area_mandal, '')) AS perm_mandal,
+            TRIM(COALESCE(permanent_country,     '')) AS perm_country,
+            TRIM(COALESCE(present_state_ut,      '')) AS pres_state,
+            TRIM(COALESCE(present_district,      '')) AS pres_district,
+            TRIM(COALESCE(present_area_mandal,   '')) AS pres_mandal,
+            TRIM(COALESCE(present_country,       '')) AS pres_country
+        FROM {table}
+        WHERE (
+            -- Phase 1A: permanent has at least one geo field but is incomplete
+            (
+                (
+                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_district,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
+                )
+                AND NOT (
+                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
+                    AND TRIM(COALESCE(permanent_district,    '')) <> ''
+                    AND TRIM(COALESCE(permanent_area_mandal, '')) <> ''
+                    AND TRIM(COALESCE(permanent_country,     '')) <> ''
+                )
+            )
+            OR
+            -- Phase 1B: all permanent geo empty, present has at least one
+            (
+                TRIM(COALESCE(permanent_state_ut,    '')) = ''
+                AND TRIM(COALESCE(permanent_district,    '')) = ''
+                AND TRIM(COALESCE(permanent_area_mandal, '')) = ''
+                AND (
+                    TRIM(COALESCE(present_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(present_district,    '')) <> ''
+                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                )
+                AND NOT (
+                    TRIM(COALESCE(present_state_ut,    '')) <> ''
+                    AND TRIM(COALESCE(present_district,    '')) <> ''
+                    AND TRIM(COALESCE(present_area_mandal, '')) <> ''
+                    AND TRIM(COALESCE(present_country,     '')) <> ''
+                )
+            )
+            OR
+            -- Phase 2: any geo token exists but permanent_country is still empty
+            -- (covers records where Phase 1 already ran but left country blank)
+            (
+                TRIM(COALESCE(permanent_country, '')) = ''
+                AND (
+                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_district,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
+                 OR TRIM(COALESCE(present_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(present_district,    '')) <> ''
+                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                )
+            )
+        )
+        ORDER BY {id_col}
+        OFFSET %s LIMIT %s
+    """
+    pool = PostgreSQLConnectionPool()
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (offset, limit))
             rows = cur.fetchall()
 
-    records = [
-        AddressRecord(
-            record_id=r[0],
-            permanent_house_no=r[1],
-            permanent_street_road_no=r[2],
-            permanent_ward_colony=r[3],
-            permanent_landmark_milestone=r[4],
-            permanent_locality_village=r[5],
-            permanent_area_mandal=r[6],
-            permanent_district=r[7],
-            permanent_state_ut=r[8],
-            permanent_country=r[9],
+    return [
+        PersonRecord(
+            person_id   = str(r[0]),
+            perm_state   = r[1] or None,
+            perm_district= r[2] or None,
+            perm_mandal  = r[3] or None,
+            perm_country = r[4] or None,
+            pres_state   = r[5] or None,
+            pres_district= r[6] or None,
+            pres_mandal  = r[7] or None,
+            pres_country = r[8] or None,
         )
         for r in rows
     ]
-    logger.info(f"Fetched {len(records)} records needing updates")
-    return records
 
 
-def update_location(
-    table_name: str,
-    id_column: str,
-    record_id: int,
-    district: Optional[str] = None,
-    state: Optional[str] = None,
-    country: Optional[str] = None,
-    update_district_field: bool = False,
-    update_state_field: bool = False,
-    update_country_field: bool = False,
-) -> None:
-    """Write permanent_district, permanent_state_ut, and/or permanent_country."""
-    updates, params = [], []
+def count_pending(table: str, id_col: str) -> int:
+    sql = f"""
+        SELECT COUNT(*)
+        FROM {table}
+        WHERE (
+            (
+                (
+                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_district,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
+                )
+                AND NOT (
+                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
+                    AND TRIM(COALESCE(permanent_district,    '')) <> ''
+                    AND TRIM(COALESCE(permanent_area_mandal, '')) <> ''
+                    AND TRIM(COALESCE(permanent_country,     '')) <> ''
+                )
+            )
+            OR
+            (
+                TRIM(COALESCE(permanent_state_ut,    '')) = ''
+                AND TRIM(COALESCE(permanent_district,    '')) = ''
+                AND TRIM(COALESCE(permanent_area_mandal, '')) = ''
+                AND (
+                    TRIM(COALESCE(present_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(present_district,    '')) <> ''
+                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                )
+                AND NOT (
+                    TRIM(COALESCE(present_state_ut,    '')) <> ''
+                    AND TRIM(COALESCE(present_district,    '')) <> ''
+                    AND TRIM(COALESCE(present_area_mandal, '')) <> ''
+                    AND TRIM(COALESCE(present_country,     '')) <> ''
+                )
+            )
+            OR
+            (
+                TRIM(COALESCE(permanent_country, '')) = ''
+                AND (
+                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_district,    '')) <> ''
+                 OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
+                 OR TRIM(COALESCE(present_state_ut,    '')) <> ''
+                 OR TRIM(COALESCE(present_district,    '')) <> ''
+                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                )
+            )
+        )
+    """
+    pool = PostgreSQLConnectionPool()
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            return cur.fetchone()[0]
 
-    if update_district_field:
-        val = district.strip() if district and district.strip() else None
-        if val is not None:
-            updates.append("permanent_district = %s"); params.append(val)
-        else:
-            updates.append("permanent_district = NULL")
 
-    if update_state_field:
-        val = state.strip() if state and state.strip() else None
-        if val is not None:
-            updates.append("permanent_state_ut = %s"); params.append(val)
-        else:
-            updates.append("permanent_state_ut = NULL")
+def apply_updates(
+    table:       str,
+    id_col:      str,
+    person_id:   str,
+    perm_geo:    Optional[GeoMatch],
+    pres_geo:    Optional[GeoMatch],
+    dry_run:     bool,
+) -> bool:
+    """
+    Write standardized values back to the persons row.
+    Only updates fields that the match resolved — never clears an existing value.
+    permanent_country / present_country are set to 'India' when a geo match
+    is found (geo_reference only covers India).
+    Returns True if any update was applied.
+    """
+    sets: List[str] = []
+    params: List = []
 
-    if update_country_field:
-        val = country.strip() if country and country.strip() else None
-        if val is not None:
-            updates.append("permanent_country = %s"); params.append(val)
-        else:
-            updates.append("permanent_country = NULL")
+    if perm_geo:
+        sets  += ["permanent_state_ut = %s", "permanent_district = %s",
+                  "permanent_area_mandal = %s", "permanent_country = %s"]
+        params += [perm_geo.state, perm_geo.district, perm_geo.mandal, "India"]
 
-    if not updates:
-        return
+    if pres_geo:
+        sets  += ["present_state_ut = %s", "present_district = %s",
+                  "present_area_mandal = %s", "present_country = %s"]
+        params += [pres_geo.state, pres_geo.district, pres_geo.mandal, "India"]
 
-    params.append(record_id)
-    sql = f"UPDATE {table_name} SET {', '.join(updates)} WHERE {id_column} = %s"
+    if not sets:
+        return False
+
+    if dry_run:
+        logger.info("  [DRY-RUN] %s: would set %s", person_id, dict(zip(sets, params)))
+        return True
+
+    params.append(person_id)
+    sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {id_col} = %s"
 
     pool = PostgreSQLConnectionPool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
         conn.commit()
-    logger.info(f"Updated {table_name}.{id_column}={record_id}: district={district}, state={state}, country={country}")
+
+    logger.info(
+        "  [WRITE] %s: perm=%s/%s/%s  pres=%s/%s/%s",
+        person_id,
+        perm_geo.state    if perm_geo else "-",
+        perm_geo.district if perm_geo else "-",
+        perm_geo.mandal   if perm_geo else "-",
+        pres_geo.state    if pres_geo else "-",
+        pres_geo.district if pres_geo else "-",
+        pres_geo.mandal   if pres_geo else "-",
+    )
+    return True
 
 
-# ===================================================================
-#  MAIN PIPELINE
-# ===================================================================
+# ---------------------------------------------------------------------------
+# Per-record processing
+# ---------------------------------------------------------------------------
 
-def process_records(
-    table_name: str,
-    id_column: str,
-    limit: Optional[int] = None,
-    dry_run: bool = False,
+def process_record(
+    rec:     PersonRecord,
+    table:   str,
+    id_col:  str,
+    idx:     int,
+    total:   int,
+    dry_run: bool,
+    stats:   dict,
+    lock:    threading.Lock,
 ) -> None:
-    logger.info("=" * 80)
-    logger.info("Address District/State/Country Pipeline  (pg_trgm: geo_reference + geo_countries)")
-    logger.info("=" * 80)
-    logger.info(f"Table: {table_name}  |  ID: {id_column}  |  Limit: {limit or 'ALL'}")
-    logger.info(f"Dry run: {dry_run}")
-    logger.info("=" * 80)
+    logger.info("[%d/%d] ID=%s", idx, total, rec.person_id)
 
-    # Fetch records
-    records = fetch_records_needing_update(table_name, id_column, limit)
-    if not records:
-        logger.info("No records need updates.")
+    perm_geo:     Optional[GeoMatch]     = None
+    pres_geo:     Optional[GeoMatch]     = None
+    foreign_match: Optional[ForeignMatch] = None
+
+    # ------------------------------------------------------------------
+    # PHASE 1A — Permanent address (geo_reference)
+    # ------------------------------------------------------------------
+    phase1_attempted = False
+
+    if rec.permanent_has_any_geo() and not rec.permanent_is_complete():
+        phase1_attempted = True
+        perm_geo = match_geo(
+            rec.perm_state, rec.perm_district, rec.perm_mandal,
+            rec.person_id, "permanent",
+        )
+        if perm_geo:
+            with lock:
+                stats["perm_matched"] += 1
+        else:
+            with lock:
+                stats["perm_unresolved"] += 1
+
+    # ------------------------------------------------------------------
+    # PHASE 1B — Present address fallback (geo_reference)
+    # (only when ALL three permanent geo fields are absent)
+    # ------------------------------------------------------------------
+    if (not rec.permanent_has_any_geo()
+            and rec.present_has_any_geo()
+            and not rec.present_is_complete()):
+        phase1_attempted = True
+        pres_geo = match_geo(
+            rec.pres_state, rec.pres_district, rec.pres_mandal,
+            rec.person_id, "present",
+        )
+        if pres_geo:
+            with lock:
+                stats["pres_matched"] += 1
+        else:
+            with lock:
+                stats["pres_unresolved"] += 1
+
+    # ------------------------------------------------------------------
+    # PHASE 2 — Foreign country fallback (geo_countries)
+    #
+    # Triggered when:
+    #   • Phase 1 was attempted but produced no match (perm_geo & pres_geo
+    #     are both None after Phase 1), OR
+    #   • permanent_country is still empty on a record that has any geo
+    #     token (i.e. Phase 1 ran in a prior execution and left country blank)
+    #
+    # Only permanent_country is written; other fields are left intact.
+    # ------------------------------------------------------------------
+    phase1_failed   = phase1_attempted and perm_geo is None and pres_geo is None
+    country_missing = not _val(rec.perm_country)
+    has_any_token   = rec.permanent_has_any_geo() or rec.present_has_any_geo()
+
+    if (phase1_failed or (country_missing and has_any_token and not phase1_attempted)):
+        logger.info("  [%s] Phase 1 unresolved → attempting Phase 2 (geo_countries)",
+                    rec.person_id)
+        candidates = _collect_foreign_candidates(rec)
+        if candidates:
+            foreign_match = match_foreign_country(candidates, rec.person_id)
+            if foreign_match:
+                with lock:
+                    stats["foreign_matched"] += 1
+            else:
+                with lock:
+                    stats["foreign_unresolved"] += 1
+        else:
+            logger.debug("  [%s] Phase 2: no candidate tokens", rec.person_id)
+            with lock:
+                stats["skipped"] += 1
+
+    # ------------------------------------------------------------------
+    # Nothing resolved at all
+    # ------------------------------------------------------------------
+    if perm_geo is None and pres_geo is None and foreign_match is None:
+        with lock:
+            stats["skipped"] += 1
         return
 
-    total = len(records)
-    
-    stats_lock = threading.Lock()
-    stats = {"ok": 0, "fail": 0, "skip": 0, "geo": 0, "ref": 0, "unresolved": 0, "null": 0}
+    # ------------------------------------------------------------------
+    # Write Phase 1 results (full geo standardization)
+    # ------------------------------------------------------------------
+    try:
+        if perm_geo is not None or pres_geo is not None:
+            written = apply_updates(table, id_col, rec.person_id,
+                                    perm_geo, pres_geo, dry_run)
+            if written:
+                with lock:
+                    stats["updated"] += 1
 
-    def process_single_record(idx, rec):
-        logger.info("-" * 80)
-        logger.info(f"[{idx}/{total}] ID={rec.record_id}  district={rec.permanent_district}  state={rec.permanent_state_ut}  country={rec.permanent_country}")
-        addr_text = rec.get_address_components()
-        logger.info(f"  Address: {addr_text or '(empty)'}")
+        # Write Phase 2 result (country only)
+        if foreign_match is not None:
+            apply_foreign_country(
+                table, id_col, rec.person_id,
+                foreign_match.country, dry_run,
+            )
+            with lock:
+                stats["foreign_written"] += 1
 
-        # --- already complete ---
-        if rec.is_complete():
-            logger.info("  Skip: district, state & country already set")
-            with stats_lock:
-                stats["skip"] += 1
-            return
+    except Exception as exc:
+        logger.error("  [%s] write failed: %s", rec.person_id, exc, exc_info=True)
+        with lock:
+            stats["failed"] += 1
 
-        try:
-            district_out: Optional[str] = None
-            state_out: Optional[str] = None
-            country_out: Optional[str] = None
-            source = "none"
 
-            # === RULE: all address fields NULL → set all to NULL ===
-            if not rec.has_any_address():
-                logger.info("  No address info → setting district, state & country to NULL")
-                district_out, state_out, country_out, source = None, None, None, "null"
-                with stats_lock:
-                    stats["null"] += 1
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
 
-            else:
-                geo: Optional[GeoMatch] = None
-
-                # --- Step 1a: State exists, country missing → match state (top priority) ---
-                if not rec.needs_state() and rec.needs_country():
-                    logger.info(f"  Step 1a: matching state '{rec.permanent_state_ut}' …")
-                    geo = trgm_match_state(rec.permanent_state_ut)
-                    if geo:
-                        state_out = rec.permanent_state_ut
-                        country_out = "India"
-                        source = "geo"
-                        with stats_lock:
-                            stats["geo"] += 1
-
-                # --- Step 1b: District matching (high trust) ---
-                if not geo and not rec.needs_district():
-                    logger.info(f"  Step 1b: matching district '{rec.permanent_district}' …")
-                    geo = trgm_match_district(rec.permanent_district)
-                    if geo:
-                        district_out = rec.permanent_district
-                        state_out = geo.state
-                        country_out = "India"
-                        source = "geo"
-                        with stats_lock:
-                            stats["geo"] += 1
-
-                # --- Step 1b2: District unknown → extract from address text ---
-                if not geo and rec.needs_district():
-                    ext_candidates = rec.get_extended_candidates()
-                    if ext_candidates:
-                        known_state = rec.permanent_state_ut.strip() if not rec.needs_state() else None
-                        logger.info(f"  Step 1b2: trying district from address text {ext_candidates[:5]} …")
-                        for cand in ext_candidates:
-                            geo = trgm_match_district(cand)
-                            if geo:
-                                # If state is known, verify the match is in same state
-                                if known_state and geo.state and _norm(geo.state) != _norm(known_state):
-                                    logger.info(f"    District '{cand}' → {geo.district}/{geo.state}, state mismatch with {known_state}")
-                                    geo = None
-                                    continue
-                                district_out = geo.district
-                                state_out = geo.state or known_state
-                                country_out = "India"
-                                source = "geo"
-                                with stats_lock:
-                                    stats["geo"] += 1
-                                break
-
-                # --- Step 1c: Village/Mandal matching (expanded candidates) ---
-                if not geo:
-                    vm_candidates = [
-                        rec.permanent_locality_village,
-                        rec.permanent_area_mandal,
-                    ]
-                    vm_candidates = list(
-                        dict.fromkeys(
-                            [c.strip() for c in vm_candidates if c and c.strip()]
-                        )
-                    )
-
-                    # If primary candidates are empty, use extended candidates from all fields
-                    if not vm_candidates:
-                        vm_candidates = rec.get_extended_candidates()
-
-                    if vm_candidates:
-                        # If district is known, scope the search to that district
-                        scope_district = rec.permanent_district.strip() if not rec.needs_district() else None
-                        logger.info(f"  Step 1c: matching village/mandal {vm_candidates}"
-                                    f"{' within ' + scope_district if scope_district else ''} …")
-                        geo = trgm_match_village_mandal(
-                            vm_candidates,
-                            within_district=scope_district,
-                        )
-                        if geo and geo.state:
-                            district_out = geo.district
-                            state_out = geo.state
-                            country_out = "India"
-                            source = "geo"
-                            with stats_lock:
-                                stats["geo"] += 1
-
-                # --- Step 2: foreign geo_countries pg_trgm fallback ---
-                if source == "none":
-                    # Use extended candidates from ALL address fields
-                    all_candidates = rec.get_extended_candidates()
-                    if not all_candidates:
-                        all_candidates = list(
-                            dict.fromkeys(
-                                [c.strip() for c in [
-                                    rec.permanent_locality_village,
-                                    rec.permanent_area_mandal,
-                                    rec.permanent_district,
-                                ] if c and c.strip()]
-                            )
-                        )
-                    full_text = rec.get_full_address_text()
-                    logger.info(f"  Step 2: foreign geo_countries lookup (candidates={all_candidates[:5]}) …")
-                    foreign = trgm_match_foreign_full(
-                        all_candidates, full_text,
-                        existing_state=rec.permanent_state_ut,
-                    )
-                    if foreign:
-                        state_out, country_out = foreign
-                        source = "ref"
-                        with stats_lock:
-                            stats["ref"] += 1
-                        logger.info(f"    Matched via geo_countries: state={state_out}, country={country_out}")
-                    else:
-                        logger.warning(f"  Unresolved: no geo or foreign match")
-                        with stats_lock:
-                            stats["unresolved"] += 1
-
-            # --- WRITE ---
-            logger.info(f"  Result ({source}): district={district_out}, state={state_out}, country={country_out}")
-
-            if dry_run:
-                logger.info("  [DRY RUN] — not writing")
-                with stats_lock:
-                    stats["ok"] += 1
-                return
-
-            # Only write fields that are currently missing
-            write_district = rec.needs_district() and (district_out is not None or not rec.has_any_address())
-            write_state = rec.needs_state() and (state_out is not None or not rec.has_any_address())
-            write_country = rec.needs_country() and (country_out is not None or not rec.has_any_address())
-
-            if write_district or write_state or write_country:
-                update_location(
-                    table_name, id_column, rec.record_id,
-                    district=district_out if write_district else None,
-                    state=state_out if write_state else None,
-                    country=country_out if write_country else None,
-                    update_district_field=write_district,
-                    update_state_field=write_state,
-                    update_country_field=write_country,
-                )
-                with stats_lock:
-                    stats["ok"] += 1
-            else:
-                logger.warning(f"  No updates applicable for ID={rec.record_id}")
-                with stats_lock:
-                    stats["skip"] += 1
-
-        except Exception as e:
-            logger.error(f"  FAILED ID={rec.record_id}: {e}", exc_info=True)
-            with stats_lock:
-                stats["fail"] += 1
-
-    pool = PostgreSQLConnectionPool() # ensure initialized
-    max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(process_single_record, idx, rec): rec for idx, rec in enumerate(records, 1)}
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                logger.error(f"Thread execution failed: {e}")
-
-    # --- Summary ---
+def run(
+    table:    str,
+    id_col:   str,
+    limit:    Optional[int],
+    dry_run:  bool,
+) -> None:
     logger.info("=" * 80)
-    logger.info("Pipeline Summary")
-    logger.info(f"  Total:         {total}")
-    logger.info(f"  Updated:       {stats['ok']}")
-    logger.info(f"  Skipped:       {stats['skip']}")
-    logger.info(f"  Failed:        {stats['fail']}")
-    logger.info(f"  via geo_ref:   {stats['geo']}")
-    logger.info(f"  via geo_countries: {stats['ref']}")
-    logger.info(f"  unresolved:    {stats['unresolved']}")
-    logger.info(f"  set to NULL:   {stats['null']}")
+    logger.info("Geo Address Standardization  (pg_trgm → geo_reference)")
+    logger.info("=" * 80)
+    logger.info("Table: %s  |  ID: %s  |  Limit: %s  |  Dry-run: %s",
+                table, id_col, limit or "ALL", dry_run)
+
+    # Ensure the pool is initialised before spawning threads
+    pool = PostgreSQLConnectionPool()
+
+    total_pending = count_pending(table, id_col)
+    effective_total = min(total_pending, limit) if limit else total_pending
+    logger.info("Pending records: %d  |  Will process: %d", total_pending, effective_total)
+
+    if effective_total == 0:
+        logger.info("Nothing to process — all records are already complete.")
+        return
+
+    lock  = threading.Lock()
+    stats = {
+        "updated":            0,
+        "skipped":            0,
+        "failed":             0,
+        "perm_matched":       0,
+        "perm_unresolved":    0,
+        "pres_matched":       0,
+        "pres_unresolved":    0,
+        "foreign_matched":    0,
+        "foreign_unresolved": 0,
+        "foreign_written":    0,
+    }
+
+    processed = 0
+    offset    = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        while processed < effective_total:
+            batch_size = min(BATCH_SIZE, effective_total - processed)
+            batch = fetch_batch(table, id_col, offset, batch_size)
+            if not batch:
+                break
+
+            logger.info("-" * 60)
+            logger.info("Batch offset=%d  size=%d", offset, len(batch))
+
+            futures = {
+                executor.submit(
+                    process_record,
+                    rec, table, id_col,
+                    processed + i + 1, effective_total,
+                    dry_run, stats, lock,
+                ): rec
+                for i, rec in enumerate(batch)
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.error("Thread error: %s", exc, exc_info=True)
+                    with lock:
+                        stats["failed"] += 1
+
+            processed += len(batch)
+            offset    += len(batch)
+
+    # ------------------------------------------------------------------
+    # Summary
+    # ------------------------------------------------------------------
+    logger.info("=" * 80)
+    logger.info("Pipeline complete")
+    logger.info("  Processed              : %d", processed)
+    logger.info("  Updated (Phase 1)      : %d", stats["updated"])
+    logger.info("  Skipped                : %d", stats["skipped"])
+    logger.info("  Failed                 : %d", stats["failed"])
+    logger.info("  --- Phase 1 (geo_reference) ---")
+    logger.info("  Perm matched           : %d", stats["perm_matched"])
+    logger.info("  Perm unresolved        : %d", stats["perm_unresolved"])
+    logger.info("  Pres matched           : %d", stats["pres_matched"])
+    logger.info("  Pres unresolved        : %d", stats["pres_unresolved"])
+    logger.info("  --- Phase 2 (geo_countries) ---")
+    logger.info("  Foreign matched        : %d", stats["foreign_matched"])
+    logger.info("  Foreign unresolved     : %d", stats["foreign_unresolved"])
+    logger.info("  Foreign country written: %d", stats["foreign_written"])
     logger.info("=" * 80)
 
 
-# ===================================================================
-#  CLI
-# ===================================================================
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Determine district/state/country from address via pg_trgm"
+        description=(
+            "Standardize persons geo-address fields via pg_trgm. "
+            "Phase 1: geo_reference (India). Phase 2: geo_countries (foreign fallback)."
+        )
     )
-    parser.add_argument("--table", default=DEFAULT_TABLE_NAME)
-    parser.add_argument("--id-column", default=DEFAULT_ID_COLUMN)
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Max records (default: all)")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--table",    default=TABLE_NAME,  help="Target table (default: persons)")
+    parser.add_argument("--id-column",default=ID_COLUMN,   help="Primary key column (default: person_id)")
+    parser.add_argument("--limit",    type=int, default=None, help="Max records to process (default: all)")
+    parser.add_argument("--dry-run",  action="store_true",  help="Match but do not write")
     args = parser.parse_args()
 
-    process_records(
-        table_name=args.table,
-        id_column=args.id_column,
-        limit=args.limit,
-        dry_run=args.dry_run,
+    run(
+        table   = args.table,
+        id_col  = args.id_column,
+        limit   = args.limit,
+        dry_run = args.dry_run,
     )
 
 
