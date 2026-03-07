@@ -19,6 +19,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
+# Add project root to Python path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
