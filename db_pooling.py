@@ -97,7 +97,7 @@ class PostgreSQLConnectionPool:
                 f"application_name='dopams-etl'"
             )
             
-            self.pool = psycopg2.pool.SimpleConnectionPool(
+            self.pool = psycopg2.pool.ThreadedConnectionPool(
                 self.minconn,
                 self.maxconn,
                 dsn,
