@@ -59,25 +59,86 @@ class PostgreSQLConnectionPool:
         return cls._instance
     
     def __init__(self, minconn: int = 5, maxconn: int = 20, **kwargs):
-        """Initialize pool (only once due to singleton pattern)"""
-        if PostgreSQLConnectionPool._initialized:
-            return
+        """
+        Initialize pool (singleton).
 
+        Important behavior:
+        - First initialization wins.
+        - If called again with a *larger* maxconn, we will attempt a safe reconfigure:
+          only when no connections are currently checked out.
+        """
         # Backward-compatible aliases used across ETL scripts.
         # Supports both minconn/maxconn and min_conn/max_conn.
         if 'min_conn' in kwargs:
             minconn = kwargs['min_conn']
         if 'max_conn' in kwargs:
             maxconn = kwargs['max_conn']
-        
-        self.minconn = minconn
-        self.maxconn = maxconn
-        # Legacy aliases still referenced by some ETL scripts.
-        self.min_conn = minconn
-        self.max_conn = maxconn
-        self.pool = None
+
+        # First init
+        if not PostgreSQLConnectionPool._initialized:
+            self.minconn = minconn
+            self.maxconn = maxconn
+            # Legacy aliases still referenced by some ETL scripts.
+            self.min_conn = minconn
+            self.max_conn = maxconn
+            self.pool = None
+            self._initialize_pool()
+            PostgreSQLConnectionPool._initialized = True
+            return
+
+        # Already initialized: possibly reconfigure if requested differs
+        if getattr(self, "pool", None) is None:
+            # Defensive: initialized flag set but no pool; rebuild.
+            self.minconn = minconn
+            self.maxconn = maxconn
+            self.min_conn = minconn
+            self.max_conn = maxconn
+            self._initialize_pool()
+            return
+
+        current_min = getattr(self, "minconn", None)
+        current_max = getattr(self, "maxconn", None)
+        if current_min == minconn and current_max == maxconn:
+            return
+
+        # Only attempt to grow the pool when safe.
+        requested_max = maxconn
+        requested_min = minconn
+        if current_max is not None and requested_max <= current_max:
+            logger.warning(
+                "PostgreSQLConnectionPool already initialized "
+                f"(minconn={current_min}, maxconn={current_max}); ignoring requested "
+                f"(minconn={requested_min}, maxconn={requested_max})."
+            )
+            return
+
+        used = None
+        try:
+            used = len(getattr(self.pool, "_used", {}))
+        except Exception:
+            used = None
+
+        if used not in (0, None):
+            logger.warning(
+                "PostgreSQLConnectionPool reconfigure requested but connections are in-use "
+                f"(in_use={used}). Keeping existing pool (minconn={current_min}, maxconn={current_max})."
+            )
+            return
+
+        logger.warning(
+            "Reconfiguring PostgreSQLConnectionPool "
+            f"from (minconn={current_min}, maxconn={current_max}) "
+            f"to (minconn={requested_min}, maxconn={requested_max})."
+        )
+        try:
+            self.pool.closeall()
+        except Exception:
+            pass
+        self.minconn = requested_min
+        self.maxconn = requested_max
+        self.min_conn = requested_min
+        self.max_conn = requested_max
         self._initialize_pool()
-        PostgreSQLConnectionPool._initialized = True
         
     def _initialize_pool(self):
         """Create the connection pool"""
@@ -119,8 +180,17 @@ class PostgreSQLConnectionPool:
         """Get a connection from the pool"""
         if not self.pool:
             raise RuntimeError("Connection pool not initialized")
-        
-        conn = self.pool.getconn()
+
+        try:
+            conn = self.pool.getconn()
+        except psycopg2.pool.PoolError as e:
+            stats = self.stats()
+            logger.error(
+                "Connection pool exhausted while acquiring connection. "
+                f"Pool stats={stats}. "
+                "This usually means worker concurrency > maxconn, or connections are not being returned."
+            )
+            raise
         
         # Verify connection is alive
         try:
@@ -164,11 +234,17 @@ class PostgreSQLConnectionPool:
         """Get pool statistics"""
         if self.pool:
             # Estimate from internals (if available)
-            return {
+            stats = {
                 'minconn': self.minconn,
                 'maxconn': self.maxconn,
                 'pool_size': self.pool.cursize if hasattr(self.pool, 'cursize') else 'N/A',
             }
+            try:
+                stats['in_use'] = len(getattr(self.pool, '_used', {}))
+                stats['available'] = len(getattr(self.pool, '_pool', []))
+            except Exception:
+                pass
+            return stats
         return {}
 
 
@@ -181,6 +257,69 @@ def get_db_connection() -> psycopg2.extensions.connection:
 def return_db_connection(conn: psycopg2.extensions.connection):
     """Return connection to pool"""
     PostgreSQLConnectionPool().return_connection(conn)
+
+
+# ============================================================================
+# WORKER SAFETY UTILITIES
+# ============================================================================
+
+def compute_safe_workers(pool, requested_workers: int, reserved: int = 5) -> int:
+    """
+    Compute safe number of ThreadPoolExecutor workers given the pool's maxconn.
+
+    Ensures workers never exceed (maxconn - reserved) so that schema queries,
+    health checks, and other non-worker operations always have connections
+    available.  Returns at least 1.
+
+    Args:
+        pool: PostgreSQLConnectionPool instance (reads pool.maxconn).
+        requested_workers: desired max_workers value.
+        reserved: number of connections to keep free (default 5).
+
+    Returns:
+        Safe max_workers value (>= 1).
+    """
+    pool_max = getattr(pool, 'maxconn', 20)
+    safe = max(1, min(requested_workers, pool_max - reserved))
+    if safe < requested_workers:
+        logger.warning(
+            f"Capping workers from {requested_workers} to {safe} "
+            f"(pool maxconn={pool_max}, reserved={reserved})"
+        )
+    return safe
+
+
+class ConnectionLimiter:
+    """
+    Semaphore-based wrapper that prevents more concurrent DB operations than
+    the pool can handle.  Use this to gate worker threads that need a DB
+    connection so that the pool is never exhausted.
+
+    Usage::
+
+        limiter = ConnectionLimiter(pool)
+
+        def worker(record):
+            with limiter.acquire() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(...)
+                conn.commit()
+    """
+
+    def __init__(self, pool, max_concurrent_db_ops: Optional[int] = None):
+        limit = max_concurrent_db_ops or max(1, getattr(pool, 'maxconn', 20) - 5)
+        self._semaphore = threading.Semaphore(limit)
+        self._pool = pool
+
+    @contextmanager
+    def acquire(self):
+        """Acquire a semaphore slot, then yield a pooled connection."""
+        self._semaphore.acquire()
+        try:
+            with self._pool.get_connection_context() as conn:
+                yield conn
+        finally:
+            self._semaphore.release()
 
 
 # ============================================================================

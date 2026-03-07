@@ -23,7 +23,7 @@ from datetime import timezone, timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
-    from db_pooling import PostgreSQLConnectionPool
+    from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 except ImportError:
     pass
 
@@ -147,8 +147,12 @@ class InterrogationReportsETL:
     def connect_db(self):
         """Connect to PostgreSQL database using connection pool"""
         try:
-            self.db_pool = PostgreSQLConnectionPool()
-            logger.info(f"✅ Connected to connection pool")
+            max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            self.db_pool = PostgreSQLConnectionPool(
+                minconn=5,
+                maxconn=max_workers + 5
+            )
+            logger.info(f"✅ Connected to connection pool (maxconn={max_workers + 5})")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection pool failed: {e}")
@@ -1181,7 +1185,8 @@ class InterrogationReportsETL:
                 with self.stats_lock:
                     self.stats['total_ir_failed'] += 1
         
-        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        max_workers = compute_safe_workers(self.db_pool, requested_workers)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             list(executor.map(process_record_worker, records))
         

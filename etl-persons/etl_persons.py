@@ -19,7 +19,7 @@ import colorlog
 from typing import Dict, Optional, List, Set
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db_pooling import PostgreSQLConnectionPool
+from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
 from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -67,9 +67,10 @@ class PersonsETL:
 
     def connect_db(self):
         try:
+            max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
             self.db_pool = PostgreSQLConnectionPool(
                 min_conn=1,
-                max_conn=min(32, (os.cpu_count() or 1) * 4), 
+                max_conn=max_workers + 5, 
                 **DB_CONFIG
             )
             logger.info(f"✅ Connected to database: {DB_CONFIG['database']} (Pool max: {self.db_pool.max_conn})")
@@ -890,7 +891,8 @@ class PersonsETL:
                     with self.stats_lock:
                         self.stats['no_data'] += 1
 
-            max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            max_workers = compute_safe_workers(self.db_pool, requested_workers)
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {executor.submit(process_person, pid, table_columns): pid for pid in person_ids}
                 

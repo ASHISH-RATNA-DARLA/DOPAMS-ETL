@@ -15,7 +15,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db_pooling import PostgreSQLConnectionPool
+from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
 # Configure logging
 logging.basicConfig(
@@ -81,7 +81,11 @@ CLASSIFICATION_INTERNATIONAL = "international"
 
 
 def get_db_connection():
-    """Create and return a database connection using credentials from .env file."""
+    """
+    DEPRECATED: Use PostgreSQLConnectionPool.get_connection_context() instead.
+    Retained for backward compatibility with main() schema-check step.
+    """
+    logger.warning("get_db_connection() is deprecated — prefer pool.get_connection_context()")
     try:
         connection = psycopg2.connect(
             host=os.getenv('DB_HOST'),
@@ -213,7 +217,8 @@ def classify_domicile(
 def process_persons(cursor=None):
     """Process all persons and classify their domicile using parallel batch processing."""
     try:
-        pool = PostgreSQLConnectionPool()
+        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_workers + 5)
         
         # Fetch all persons with relevant data
         logger.info("Fetching persons data...")
@@ -277,8 +282,9 @@ def process_persons(cursor=None):
         batch_size = 1000
         batches = [persons[i:i + batch_size] for i in range(0, total_persons, batch_size)]
         
-        max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        safe_workers = compute_safe_workers(pool, requested_workers)
+        with ThreadPoolExecutor(max_workers=safe_workers) as executor:
             futures = {executor.submit(process_batch, batch): i for i, batch in enumerate(batches)}
             for i, future in enumerate(as_completed(futures), 1):
                 try:

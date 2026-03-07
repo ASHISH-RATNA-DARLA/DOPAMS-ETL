@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
-from db_pooling import PostgreSQLConnectionPool
+from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
@@ -145,9 +145,6 @@ class ArrestsETL:
     """ETL Pipeline for Arrests API"""
     
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
-        
         # Thread safety locks
         self.stats_lock = threading.Lock()
         self.log_lock = threading.Lock()
@@ -160,10 +157,10 @@ class ArrestsETL:
         try:
             self.db_pool = PostgreSQLConnectionPool(
                 minconn=1,
-                maxconn=self.max_workers + 2,
+                maxconn=self.max_workers + 5,
                 **DB_CONFIG
             )
-            logger.info(f"✅ Created connection pool with max {self.max_workers + 2} connections")
+            logger.info(f"✅ Created connection pool with max {self.max_workers + 5} connections")
         except Exception as e:
             logger.error(f"❌ Failed to create connection pool: {e}")
             raise
@@ -287,13 +284,9 @@ class ArrestsETL:
             if not hasattr(self, 'db_pool'):
                 self.db_pool = PostgreSQLConnectionPool(
                     minconn=1,
-                    maxconn=self.max_workers + 2,
+                    maxconn=self.max_workers + 5,
                     **DB_CONFIG
                 )
-            
-            # Keep a persistent connection for schema/single-thread ops
-            self.db_conn = self.db_pool.get_connection()
-            self.db_cursor = self.db_conn.cursor()
             logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
             return True
         except Exception as e:
@@ -301,11 +294,7 @@ class ArrestsETL:
             return False
     
     def close_db(self):
-        """Close database connection and pool"""
-        if hasattr(self, 'db_cursor') and self.db_cursor:
-            self.db_cursor.close()
-        if hasattr(self, 'db_conn') and self.db_conn:
-            self.db_pool.release_connection(self.db_conn)
+        """Close database connection pool"""
         if hasattr(self, 'db_pool') and self.db_pool:
             self.db_pool.close_all()
         logger.info("Database connection closed")
@@ -1366,7 +1355,8 @@ class ArrestsETL:
         }
         
         logger.trace(f"Starting parallel processing for chunk: {chunk_range}")
-        max_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
+        requested_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
+        max_workers = compute_safe_workers(self.db_pool, requested_workers)
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             total_records = len(arrests_raw)
