@@ -429,7 +429,7 @@ def _build_match_query(
             ({score_expr}) AS weighted_score
         FROM geo_reference
         WHERE {where_clause}
-        HAVING {having_clause}
+          AND ({having_clause})
         ORDER BY weighted_score DESC
         LIMIT 1
     """
