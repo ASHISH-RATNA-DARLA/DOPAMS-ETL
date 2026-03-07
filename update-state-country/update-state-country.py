@@ -173,10 +173,11 @@ def _collect_foreign_candidates(rec: "PersonRecord") -> List[str]:
     Each value is stripped and de-duplicated (case-insensitive).
     Only values of 3+ characters are included to avoid noise.
     """
-    raw = [
-        rec.perm_state,   rec.perm_district, rec.perm_mandal,
-        rec.pres_state,   rec.pres_district,  rec.pres_mandal,
-    ]
+    raw = []
+    if not rec.permanent_is_complete():
+        raw.extend([rec.perm_state, rec.perm_district, rec.perm_mandal])
+    if not rec.present_is_complete():
+        raw.extend([rec.pres_state, rec.pres_district, rec.pres_mandal])
     seen: set = set()
     tokens: List[str] = []
     for v in raw:
@@ -603,7 +604,7 @@ def fetch_batch(
                 )
             )
             OR
-            -- Phase 2: any geo token exists but permanent_country is still empty
+            -- Phase 2: any unresolved geo token exists but permanent_country is still empty
             -- (covers records where Phase 1 already ran but left country blank)
             (
                 TRIM(COALESCE(permanent_country, '')) = ''
@@ -611,9 +612,14 @@ def fetch_batch(
                     TRIM(COALESCE(permanent_state_ut,    '')) <> ''
                  OR TRIM(COALESCE(permanent_district,    '')) <> ''
                  OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
-                 OR TRIM(COALESCE(present_state_ut,    '')) <> ''
-                 OR TRIM(COALESCE(present_district,    '')) <> ''
-                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                 OR (
+                     TRIM(COALESCE(present_country, '')) = ''
+                     AND (
+                         TRIM(COALESCE(present_state_ut,    '')) <> ''
+                      OR TRIM(COALESCE(present_district,    '')) <> ''
+                      OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                     )
+                 )
                 )
             )
         )
@@ -684,9 +690,14 @@ def count_pending(table: str, id_col: str) -> int:
                     TRIM(COALESCE(permanent_state_ut,    '')) <> ''
                  OR TRIM(COALESCE(permanent_district,    '')) <> ''
                  OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
-                 OR TRIM(COALESCE(present_state_ut,    '')) <> ''
-                 OR TRIM(COALESCE(present_district,    '')) <> ''
-                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                 OR (
+                     TRIM(COALESCE(present_country, '')) = ''
+                     AND (
+                         TRIM(COALESCE(present_state_ut,    '')) <> ''
+                      OR TRIM(COALESCE(present_district,    '')) <> ''
+                      OR TRIM(COALESCE(present_area_mandal, '')) <> ''
+                     )
+                 )
                 )
             )
         )
@@ -825,9 +836,14 @@ def process_record(
     # ------------------------------------------------------------------
     phase1_failed   = phase1_attempted and perm_geo is None and pres_geo is None
     country_missing = not _val(rec.perm_country)
-    has_any_token   = rec.permanent_has_any_geo() or rec.present_has_any_geo()
+    
+    unresolved_has_token = False
+    if rec.permanent_has_any_geo() and not rec.permanent_is_complete():
+        unresolved_has_token = True
+    if rec.present_has_any_geo() and not rec.present_is_complete():
+        unresolved_has_token = True
 
-    if (phase1_failed or (country_missing and has_any_token and not phase1_attempted)):
+    if (phase1_failed or (country_missing and unresolved_has_token and not phase1_attempted)):
         logger.info("  [%s] Phase 1 unresolved → attempting Phase 2 (geo_countries)",
                     rec.person_id)
         candidates = _collect_foreign_candidates(rec)

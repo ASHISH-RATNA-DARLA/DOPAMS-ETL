@@ -161,43 +161,53 @@ def normalize_text(text: Optional[str]) -> Optional[str]:
     return text.strip().lower()
 
 
-def classify_domicile(permanent_state_ut: Optional[str], permanent_country: Optional[str]) -> Optional[str]:
+def classify_domicile(
+    perm_state: Optional[str], perm_country: Optional[str],
+    pres_state: Optional[str], pres_country: Optional[str]
+) -> Optional[str]:
     """
-    Classify domicile based on permanent_state_ut and permanent_country.
+    Classify domicile intelligently combining permanent and present address fields.
     
     Logic:
-    1. If state/country is NULL, empty, or 'default' -> return NULL
-    2. If permanent_country != "India" -> "international"
-    3. If permanent_state_ut == "Telangana" -> "native state"
-    4. If permanent_state_ut is in Indian states/UTs list -> "inter state"
-    5. Otherwise -> "international"
+    1. International: If EITHER permanent_country or present_country explicitly indicates 
+       a non-Indian country.
+    2. Fallback: Combine available data, preferring permanent over present if both exist.
+    3. Native/Inter State: Only assigned if both a valid state and valid country='india' are available.
+       Otherwise, returns None.
     """
     # Normalize inputs
-    state = normalize_text(permanent_state_ut)
-    country = normalize_text(permanent_country)
+    perm_st = normalize_text(perm_state)
+    perm_co = normalize_text(perm_country)
+    pres_st = normalize_text(pres_state)
+    pres_co = normalize_text(pres_country)
     
-    # If both are NULL/empty/default, return NULL
-    if state is None and country is None:
-        return None
+    # International Classification Threshold:
+    # A record should be classified as international when permanent_country or present_country 
+    # is explicitly not equal to "India". NULL values are not automatically interpreted as "not India".
+    is_perm_intl = (perm_co is not None and perm_co != "india")
+    is_pres_intl = (pres_co is not None and pres_co != "india")
     
-    # If country is explicitly not India, it's international
-    if country is not None and country != "india":
+    if is_perm_intl or is_pres_intl:
         return CLASSIFICATION_INTERNATIONAL
+        
+    # Handling Partial Data & Fallback Logic:
+    # Combine available data (permanent takes precedence over present)
+    effective_state = perm_st if perm_st is not None else pres_st
+    effective_country = perm_co if perm_co is not None else pres_co
     
-    # If state is NULL/empty/default, return NULL
-    if state is None:
+    # Native State / Inter State classifications require BOTH attributes
+    if effective_state is None or effective_country is None:
         return None
-    
-    # Check if it's Telangana (native state)
-    if state == NATIVE_STATE:
-        return CLASSIFICATION_NATIVE
-    
-    # Check if it's another Indian state/UT
-    if state in INDIAN_STATES:
-        return CLASSIFICATION_INTER
-    
-    # If state is not in Indian states list, it's international
-    return CLASSIFICATION_INTERNATIONAL
+        
+    # Check valid country (India) and valid state
+    if effective_country == "india":
+        if effective_state == NATIVE_STATE:
+            return CLASSIFICATION_NATIVE
+        if effective_state in INDIAN_STATES:
+            return CLASSIFICATION_INTER
+            
+    # In all other cases (e.g., unrecognized state but country is India), we do not assign Native/Inter/International.
+    return None
 
 
 def process_persons(cursor=None):
@@ -210,7 +220,7 @@ def process_persons(cursor=None):
         with pool.get_connection_context() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT person_id, permanent_state_ut, permanent_country 
+                    SELECT person_id, permanent_state_ut, permanent_country, present_state_ut, present_country 
                     FROM persons
                     ORDER BY person_id;
                 """)
@@ -233,11 +243,13 @@ def process_persons(cursor=None):
             local_stats = {CLASSIFICATION_NATIVE: 0, CLASSIFICATION_INTER: 0, CLASSIFICATION_INTERNATIONAL: 0, 'null': 0}
             for person in batch:
                 person_id = person['person_id']
-                state = person['permanent_state_ut']
-                country = person['permanent_country']
+                perm_state = person['permanent_state_ut']
+                perm_country = person['permanent_country']
+                pres_state = person['present_state_ut']
+                pres_country = person['present_country']
                 
                 # Classify
-                classification = classify_domicile(state, country)
+                classification = classify_domicile(perm_state, perm_country, pres_state, pres_country)
                 
                 # Update statistics
                 if classification is None:
