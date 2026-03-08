@@ -33,14 +33,20 @@ class APIConfig:
             content = f.read()
         
         # Extract API1 base URL (port 3000) - from crimes/persons/property/interrogation APIs
-        api1_pattern = r"http://([\d\.]+):3000/api/DOPAMS"
+        api1_pattern = r"http://([\w\.\-]+):3000/api/DOPAMS"
         api1_match = re.search(api1_pattern, content)
         if api1_match:
             host = api1_match.group(1)
             self.base_url = f"http://{host}:3000/api/DOPAMS"
         
+        # Fallback to env var for API1
+        if not self.base_url:
+            api1_env = os.getenv('DOPAMAS_API_URL')
+            if api1_env:
+                self.base_url = api1_env.rstrip('/')
+        
         # Extract API2 base URL (port 3001) - from mo_seizures/chargesheets/fsl_case_property APIs
-        api2_pattern = r"http://([\d\.]+):3001/api/DOPAMS"
+        api2_pattern = r"http://([\w\.\-]+):3001/api/DOPAMS"
         api2_match = re.search(api2_pattern, content)
         if api2_match:
             host = api2_match.group(1)
@@ -49,7 +55,8 @@ class APIConfig:
             # Fallback to env vars if not found in file
             api2_host = os.getenv('API2_URL')
             api2_port = os.getenv('API2_PORT')
-            self.api2_base_url = f"http://{api2_host}:{api2_port}/api/DOPAMS"
+            if api2_host and api2_port:
+                self.api2_base_url = f"http://{api2_host}:{api2_port}/api/DOPAMS"
         
         # Extract API key
         api_key_pattern = r"x-api-key:\s*([a-f0-9\-]+)"

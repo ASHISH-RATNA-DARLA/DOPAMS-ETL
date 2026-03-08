@@ -135,6 +135,7 @@ def run_standardization():
         for row in records:
             stats["processed"] += 1
             try:
+                cur.execute("SAVEPOINT row_sp")
                 standard = get_standard_name(cur, row["raw_drug_name"])
 
                 if standard is None:
@@ -152,8 +153,10 @@ def run_standardization():
                     """,
                     (standard, row["id"]),
                 )
+                cur.execute("RELEASE SAVEPOINT row_sp")
 
             except Exception as row_err:
+                cur.execute("ROLLBACK TO SAVEPOINT row_sp")
                 stats["errors"] += 1
                 logger.error(f"  [!] Error on id={row['id']}: {row_err}")
 
