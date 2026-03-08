@@ -25,91 +25,76 @@ class APIConfig:
         self._parse_config()
     
     def _parse_config(self):
-        """Parse api-ref.txt file"""
-        if not self.config_file.exists():
-            raise FileNotFoundError(f"API config file not found: {self.config_file}")
+        """Load configuration primarily from .env and use api-ref.txt as a fallback mapping"""
+        # Ensure .env is loaded (traverse up if necessary)
+        try:
+            from dotenv import load_dotenv, find_dotenv
+            load_dotenv(find_dotenv(), override=True)
+        except ImportError:
+            pass
+
+        # Primary Configuration: Environment Variables
+        self.api_key = os.getenv('DOPAMAS_API_KEY') or os.getenv('API_KEY')
         
-        with open(self.config_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+        # Load Base URLs from env (fallback to default ports on localhost if completely missing)
+        env_api1 = os.getenv('DOPAMAS_API_URL')
+        self.base_url = env_api1.rstrip('/') if env_api1 else "http://YOUR_API_HOST:3000/api/DOPAMS"
         
-        # Extract API1 base URL (port 3000) - from crimes/persons/property/interrogation APIs
-        api1_pattern = r"http://([\w\.\-]+):3000/api/DOPAMS"
-        api1_match = re.search(api1_pattern, content)
-        if api1_match:
-            host = api1_match.group(1)
-            self.base_url = f"http://{host}:3000/api/DOPAMS"
-        
-        # Fallback to env var for API1
-        if not self.base_url:
-            api1_env = os.getenv('DOPAMAS_API_URL')
-            if api1_env:
-                self.base_url = api1_env.rstrip('/')
-        
-        # Extract API2 base URL (port 3001) - from mo_seizures/chargesheets/fsl_case_property APIs
-        api2_pattern = r"http://([\w\.\-]+):3001/api/DOPAMS"
-        api2_match = re.search(api2_pattern, content)
-        if api2_match:
-            host = api2_match.group(1)
-            self.api2_base_url = f"http://{host}:3001/api/DOPAMS"
+        api2_host = os.getenv('API2_URL')
+        api2_port = os.getenv('API2_PORT')
+        if api2_host and api2_port:
+            self.api2_base_url = f"http://{api2_host}:{api2_port}/api/DOPAMS"
         else:
-            # Fallback to env vars if not found in file
-            api2_host = os.getenv('API2_URL')
-            api2_port = os.getenv('API2_PORT')
-            if api2_host and api2_port:
-                self.api2_base_url = f"http://{api2_host}:{api2_port}/api/DOPAMS"
+            self.api2_base_url = "http://YOUR_API_HOST:3001/api/DOPAMS"
+            
+        # Hardcode the known endpoints since they are standard
+        self.endpoints = {
+            'crimes': '/crimes',
+            'persons': '/person-details',
+            'property': '/property-details',
+            'interrogation': '/interrogation-reports/v1/',
+            'mo_seizures': '/mo-seizures',
+            'chargesheets': '/chargesheets',
+            'fsl_case_property': '/case-property'
+        }
         
-        # Extract API key
-        api_key_pattern = r"x-api-key:\s*([a-f0-9\-]+)"
-        api_key_match = re.search(api_key_pattern, content)
-        if api_key_match:
-            self.api_key = api_key_match.group(1)
-        
-        # Extract endpoints - API1 (port 3000)
-        # Crimes API
-        if 'crimes api:' in content.lower():
-            self.endpoints['crimes'] = '/crimes'
-            self.endpoint_api_map['crimes'] = 1
-        
-        # Persons API
-        if 'persons api:' in content.lower() or 'person-details' in content:
-            self.endpoints['persons'] = '/person-details'
-            self.endpoint_api_map['persons'] = 1
-        
-        # Property API
-        if 'property api:' in content.lower() or 'property-details' in content:
-            self.endpoints['property'] = '/property-details'
-            self.endpoint_api_map['property'] = 1
-        
-        # Interrogation API
-        if 'interrogation api:' in content.lower() or 'interrogation-reports' in content:
-            self.endpoints['interrogation'] = '/interrogation-reports/v1/'
-            self.endpoint_api_map['interrogation'] = 1
-        
-        # Extract endpoints - API2 (port 3001)
-        # MO Seizures API
-        if 'mo_seizures api:' in content.lower() or 'mo-seizures' in content:
-            self.endpoints['mo_seizures'] = '/mo-seizures'
-            self.endpoint_api_map['mo_seizures'] = 2
-        
-        # Chargesheets API
-        if 'chargesheets' in content.lower():
-            self.endpoints['chargesheets'] = '/chargesheets'
-            self.endpoint_api_map['chargesheets'] = 2
-        
-        # FSL Case Property API
-        if 'fsl_case_property' in content.lower() or 'case-property' in content:
-            self.endpoints['fsl_case_property'] = '/case-property'
-            self.endpoint_api_map['fsl_case_property'] = 2
-        
-        # Validate
-        if not self.base_url:
-            raise ValueError("Could not extract API1 base URL from api-ref.txt")
-        if not self.api2_base_url:
-            raise ValueError("Could not extract API2 base URL from api-ref.txt or env vars")
+        self.endpoint_api_map = {
+            'crimes': 1,
+            'persons': 1,
+            'property': 1,
+            'interrogation': 1,
+            'mo_seizures': 2,
+            'chargesheets': 2,
+            'fsl_case_property': 2
+        }
+
+        # Try to extract hosts from api-ref.txt if environment variables were NOT set
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # If the env var was empty, try api-ref.txt
+                if not os.getenv('DOPAMAS_API_URL'):
+                    api1_match = re.search(r"http://([\w\.\-]+):3000/api/DOPAMS", content)
+                    if api1_match:
+                        self.base_url = f"http://{api1_match.group(1)}:3000/api/DOPAMS"
+
+                if not (api2_host and api2_port):
+                    api2_match = re.search(r"http://([\w\.\-]+):3001/api/DOPAMS", content)
+                    if api2_match:
+                        self.api2_base_url = f"http://{api2_match.group(1)}:3001/api/DOPAMS"
+
+                if not self.api_key:
+                    api_key_match = re.search(r"x-api-key:\s*([\w\-]+)", content)
+                    if api_key_match and api_key_match.group(1) != 'YOUR_API_KEY_HERE':
+                        self.api_key = api_key_match.group(1)
+            except Exception:
+                pass
+                
+        # Final validation
         if not self.api_key:
-            raise ValueError("Could not extract API key from api-ref.txt")
-        if not self.endpoints:
-            raise ValueError("Could not extract API endpoints from api-ref.txt")
+            raise ValueError("Could not find DOPAMAS_API_KEY in .env file or api-ref.txt")
     
     def get_url(self, endpoint_name, **params):
         """
