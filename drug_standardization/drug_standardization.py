@@ -123,10 +123,10 @@ def run_standardization():
 
         cur.execute(
             """
-            SELECT id, drug_name
+            SELECT id, raw_drug_name
             FROM   public.brief_facts_drug
-            WHERE  drug_name IS NOT NULL
-              AND  drug_name <> ''
+            WHERE  raw_drug_name IS NOT NULL
+              AND  raw_drug_name <> ''
             """
         )
         records = cur.fetchall()
@@ -135,11 +135,11 @@ def run_standardization():
         for row in records:
             stats["processed"] += 1
             try:
-                standard = get_standard_name(cur, row["drug_name"])
+                standard = get_standard_name(cur, row["raw_drug_name"])
 
                 if standard is None:
                     stats["ignored"] += 1
-                elif standard.lower() == row["drug_name"].lower():
+                elif standard.lower() == row["raw_drug_name"].lower():
                     stats["perfect_match"] += 1  # e.g. Ganja -> Ganja
                 else:
                     stats["cleaned"] += 1         # e.g. Heroinn -> Heroin
