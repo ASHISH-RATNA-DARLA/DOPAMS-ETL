@@ -3,7 +3,7 @@ import sys
 import logging
 from fuzzywuzzy import fuzz
 from db import get_db_connection, fetch_crimes_by_ids, insert_accused_facts, fetch_unprocessed_crimes, fetch_existing_accused_for_crime
-from extractor import extract_accused_info
+from extractor import extract_accused_info, detect_gender
 
 # Configure logging
 logging.basicConfig(
@@ -93,7 +93,7 @@ def main():
     except KeyboardInterrupt:
         logging.info("Process interrupted by user.")
     except Exception as e:
-        logging.error(f"Unexpected error in main loop: {e}")
+        logging.error(f"Unexpected error in main loop: {e}", exc_info=True)
     finally:
         conn.close()
         logging.info("Database connection closed.")
@@ -101,72 +101,72 @@ def main():
 def process_crimes(conn, crimes):
     for crime in crimes:
         crime_id = crime['crime_id']
-        facts_text = crime['brief_facts'] or ""
-        
+        facts_text = (crime['brief_facts'] or "").strip()
+
         logging.info(f"Processing Crime ID: {crime_id}")
-        
-        # 3. Extract Info
+
         try:
             extractions = extract_accused_info(facts_text)
-        except Exception as e:
-            logging.error(f"Extraction failed for Crime {crime_id}: {e}")
-            continue
+            if extractions is None:
+                logging.error(
+                    f"Extraction failed for Crime {crime_id}. Skipping without marking it processed."
+                )
+                conn.rollback()
+                continue
 
-        # 4. Fetch Existing Accused for Matching
-        existing_records = fetch_existing_accused_for_crime(conn, crime_id)
-        
-        # 5. Process & Insert
-        count = 0
-        if not extractions:
-             logging.info(f"No accused found for Crime {crime_id} (Extraction returned empty).")
-             # We should probably insert a placeholder so it doesn't get picked up again
-             # Creating a placeholder "Processed" entry
-             placeholder = {
-                "crime_id": crime_id,
-                "full_name": "NO_ACCUSED_FOUND",
-                "existing_accused": False
-             }
-             insert_accused_facts(conn, placeholder)
-        
-        for accused in extractions:
-            data = accused.model_dump()
-            data['crime_id'] = crime_id
-            
-            # --- Matching Logic ---
-            match = find_best_match(accused.full_name, existing_records)
-            
-            if match:
-                data['person_id'] = match['person_id']
-                data['accused_id'] = match['accused_id']
-                data['existing_accused'] = True
-                
-                # --- ENRICHMENT LOGIC ---
-                # Fill missing details from existing person record
-                # Fields to enrich: age, gender, occupation, address, phone_numbers
-                # Rule: Only fill if extracted is None/Null.
-                
-                enrichable_fields = ['age', 'gender', 'occupation', 'address', 'phone_numbers']
-                for field in enrichable_fields:
-                    if not data.get(field) and match.get(field):
-                        data[field] = match[field]
-                        
-                # CRITICAL: Do NOT overwrite 'accused_type'. 
-                # User Rule: "accused type must be llm provided one only"
-                # So we keep data['accused_type'] as extracted.
-                
+            existing_records = fetch_existing_accused_for_crime(conn, crime_id)
+            count = 0
+
+            if not extractions:
+                logging.info(f"No accused found for Crime {crime_id} (Extraction returned empty).")
+                placeholder = {
+                    "crime_id": crime_id,
+                    "full_name": "NO_ACCUSED_FOUND",
+                    "existing_accused": False
+                }
+                insert_accused_facts(conn, placeholder)
+                count = 1
             else:
-                data['existing_accused'] = False
-            
-            # SANITIZATION: Handle 'unknown' type for DB Constraint
-            # DB Check: accused_type IN ('peddler', ...) OR NULL
-            if data.get('accused_type') == 'unknown':
-                data['accused_type'] = None
-                
-            insert_accused_facts(conn, data)
-            count += 1
-            
-        logging.info(f"Completed processing for Crime {crime_id}. inserted_count={count}")
+                for accused in extractions:
+                    data = accused.model_dump()
+                    data['crime_id'] = crime_id
+
+                    # --- Matching Logic ---
+                    match = find_best_match(accused.full_name, existing_records)
+
+                    if match:
+                        data['person_id'] = match['person_id']
+                        data['accused_id'] = match['accused_id']
+                        data['existing_accused'] = True
+
+                        # Fill missing person fields only when extraction did not return them.
+                        enrichable_fields = ['age', 'gender', 'occupation', 'address', 'phone_numbers']
+                        for field in enrichable_fields:
+                            if not data.get(field) and match.get(field):
+                                data[field] = match[field]
+                    else:
+                        data['existing_accused'] = False
+
+                    data['gender'] = detect_gender(facts_text, accused.full_name, data.get('gender'))
+
+                    # DB check allows NULL, but not the literal fallback string.
+                    if data.get('accused_type') == 'unknown':
+                        data['accused_type'] = None
+
+                    insert_accused_facts(conn, data)
+                    count += 1
+
+            conn.commit()
+            logging.info(f"Completed processing for Crime {crime_id}. inserted_count={count}")
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Failed processing Crime {crime_id}: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 

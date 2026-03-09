@@ -1,8 +1,8 @@
-
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import config
+
 
 def get_db_connection():
     """Establishes a connection to the PostgreSQL database."""
@@ -19,17 +19,19 @@ def get_db_connection():
         print(f"Error connecting to database: {e}")
         raise
 
+
 def fetch_crimes_by_ids(conn, crime_ids):
     """
     Fetches specific crimes based on a list of IDs.
     """
     if not crime_ids:
         return []
-        
+
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = "SELECT crime_id, brief_facts FROM crimes WHERE crime_id = ANY(%s)"
         cur.execute(query, (crime_ids,))
         return cur.fetchall()
+
 
 def fetch_unprocessed_crimes(conn, limit=100):
     """
@@ -44,9 +46,10 @@ def fetch_unprocessed_crimes(conn, limit=100):
             ORDER BY c.date_created DESC, c.date_modified DESC
             LIMIT %s
         """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
-        
+
         cur.execute(query, (limit,))
         return cur.fetchall()
+
 
 def fetch_existing_accused_for_crime(conn, crime_id):
     """
@@ -54,8 +57,6 @@ def fetch_existing_accused_for_crime(conn, crime_id):
     Used for matching extracted entities to database records.
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        # Join accused and persons to get the full name for matching
-        # Note: We prioritize the person's real full_name from persons table
         query = """
             SELECT 
                 a.accused_id,
@@ -82,6 +83,7 @@ def fetch_existing_accused_for_crime(conn, crime_id):
         cur.execute(query, (crime_id,))
         return cur.fetchall()
 
+
 def truncate_varchar(value, max_length=255):
     """Truncate string values to fit VARCHAR constraints."""
     if value is None:
@@ -90,6 +92,7 @@ def truncate_varchar(value, max_length=255):
         return value[:max_length]
     return value
 
+
 def validate_age(age_value):
     """
     Validate and sanitize age values for database insertion.
@@ -97,28 +100,24 @@ def validate_age(age_value):
     """
     if age_value is None:
         return None
-    
-    # Convert string to int if possible
+
     try:
         if isinstance(age_value, str):
-            # Extract first number from string (e.g., "25 years" -> 25)
             import re
             match = re.search(r'\d+', str(age_value))
             if match:
                 age_value = int(match.group())
             else:
                 return None
-        
+
         age_int = int(age_value)
-        
-        # Validate reasonable age range (0-150)
         if age_int < 0 or age_int > 150:
             return None
-        
+
         return age_int
     except (ValueError, TypeError, OverflowError):
-        # If conversion fails or value is out of range, return None
         return None
+
 
 def insert_accused_facts(conn, item_data):
     """Inserts extracted accused information into the database."""
@@ -139,48 +138,41 @@ def insert_accused_facts(conn, item_data):
                 %s, %s, %s, %s, %s,
                 %s, %s, %s
             )
-            ON CONFLICT (crime_id, accused_id) DO NOTHING
         """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
-        
+
         import json
         import uuid
-        
-        # Generate ID if not present (though we usually generate it here)
+
         bf_id = str(uuid.uuid4())
-        
-        # Truncate VARCHAR fields to prevent constraint violations
+
+        # Guard constrained columns before the per-crime transaction commits.
+        full_name = truncate_varchar(item_data.get('full_name'), 500)
         alias_name = truncate_varchar(item_data.get('alias_name'), 255)
         occupation = truncate_varchar(item_data.get('occupation'), 255)
         phone_numbers = truncate_varchar(item_data.get('phone_numbers'), 255)
-        gender = truncate_varchar(item_data.get('gender'), 20)  # VARCHAR(20) constraint
-        
-        # Validate age field to prevent integer out of range errors
+        gender = truncate_varchar(item_data.get('gender'), 20)
+        status = truncate_varchar(item_data.get('status'), 40)
         age = validate_age(item_data.get('age'))
-        
+
         cur.execute(query, (
             bf_id,
             item_data.get('crime_id'),
-            item_data.get('accused_id'), # Nullable
-            item_data.get('person_id'),  # Nullable
+            item_data.get('accused_id'),
+            item_data.get('person_id'),
             item_data.get('existing_accused', False),
-            
-            item_data.get('full_name'),
+            full_name,
             alias_name,
-            age,  # Use validated age
+            age,
             gender,
             occupation,
             item_data.get('address'),
             phone_numbers,
-            
             item_data.get('role_in_crime'),
             item_data.get('key_details'),
             item_data.get('accused_type'),
-            item_data.get('status'),
+            status,
             item_data.get('is_ccl', False),
-            
             json.dumps(item_data.get('source_person_fields', {})),
             json.dumps(item_data.get('source_accused_fields', {})),
             json.dumps(item_data.get('source_summary_fields', {}))
         ))
-    conn.commit()
-

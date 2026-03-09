@@ -76,7 +76,7 @@ def get_standard_name(cursor, raw_input: str):
     )
     if cursor.fetchone():
         logger.info(f"  [-] Ignored  : {raw_input}")
-        return None
+        return "Unknown"
 
     # STEP 2 -- Brain (fuzzy match via pg_trgm <-> operator)
     cursor.execute(

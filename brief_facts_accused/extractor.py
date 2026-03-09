@@ -44,6 +44,41 @@ class AccusedNamesResponse(BaseModel):
 # Pass 2 Intermediate Model
 import re
 
+EXPLICIT_GENDER_MAP = {
+    "male": "Male",
+    "man": "Male",
+    "boy": "Male",
+    "female": "Female",
+    "woman": "Female",
+    "girl": "Female",
+    "transgender": "Transgender",
+    "trans gender": "Transgender",
+    "trans": "Transgender",
+    "third gender": "Transgender",
+}
+
+COMMON_INDIAN_MALE_NAMES = {
+    "abhishek", "akhil", "ali", "amit", "anil", "aravind", "arjun", "ashok",
+    "bhanu", "charan", "dileep", "dinesh", "ganesh", "gopal", "harish",
+    "imran", "jeeban", "jadhav", "karthik", "khasim", "kiran", "kishore",
+    "kota", "kumar", "laxman", "mahesh", "mallappa", "manoj", "mohd",
+    "mohammed", "mukarram", "muneeruddin", "naresh", "naveen", "nikhil",
+    "om", "poshetty", "pradeep", "pramod", "rahul", "rajesh", "ramu",
+    "ravinder", "rehan", "sairam", "santosh", "satkruth", "shahid", "shankar",
+    "shiva", "srikant", "srinivas", "suresh", "teja", "uday", "vamshi",
+    "venkatesh", "vijay", "vinod", "vishal",
+}
+
+COMMON_INDIAN_FEMALE_NAMES = {
+    "anitha", "anjali", "banitha", "bhavani", "deepa", "divya", "gita",
+    "hema", "kavitha", "lakshmi", "laxmi", "madhavi", "padma", "pooja",
+    "radha", "rani", "sandhya", "savitri", "shanthi", "sita", "sunitha",
+    "swathi", "uma", "vani",
+}
+
+FEMALE_NAME_SUFFIXES = ("amma", "bai", "begum", "devi", "kumari", "laxmi", "lakshmi")
+MALE_NAME_SUFFIXES = ("anna", "appa", "kumar", "rao", "reddy", "singh")
+
 # Pass 2 Intermediate Model
 class AccusedDetails(BaseModel):
     full_name: str = Field(description="Name of the accused")
@@ -64,7 +99,7 @@ def clean_accused_name(name: str) -> str:
         return ""
     
     # 1. Remove Prefix like "A-1", "1.", "A1)"
-    name = re.sub(r'^(A-?\d+|[0-9]+)[\)\.\:\s]+', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'^(?:A[\.\-]?\d+|[0-9]+)[\)/\.\:\s-]*', '', name, flags=re.IGNORECASE)
     
     # 2. Split at common separators causing metadata leak
     # Split at @ (alias)
@@ -362,16 +397,83 @@ def classify_accused_type(role_text: str) -> str:
     ]):
         return "peddler"
 
-def detect_gender(text_snippet: str, full_name: str) -> Optional[str]:
-    """
-    Detects gender based on honorifics and relational terms near the name.
-    """
-    s = full_name.lower()
-    if "s/o" in s or "son of" in s or "h/o" in s or "husband of" in s or "father of" in s or "b/o" in s:
-        return "Male"
-    if "d/o" in s or "daughter of" in s or "w/o" in s or "wife of" in s:
-        return "Female"
+def normalize_gender_value(raw_gender: Optional[str]) -> Optional[str]:
+    if raw_gender is None:
+        return None
+
+    value = str(raw_gender).strip().lower()
+    if not value:
+        return None
+
+    value = re.sub(r'[^a-z\s]', ' ', value)
+    value = re.sub(r'\s+', ' ', value).strip()
+
+    if value in EXPLICIT_GENDER_MAP:
+        return EXPLICIT_GENDER_MAP[value]
+
+    for key, normalized in EXPLICIT_GENDER_MAP.items():
+        if re.search(rf'\b{re.escape(key)}\b', value):
+            return normalized
+
     return None
+
+
+def infer_gender_from_indian_name(full_name: str) -> Optional[str]:
+    tokens = [token for token in re.findall(r"[A-Za-z]+", full_name.lower()) if len(token) > 1]
+    for token in tokens:
+        if token in COMMON_INDIAN_FEMALE_NAMES:
+            return "Female"
+        if token in COMMON_INDIAN_MALE_NAMES:
+            return "Male"
+
+    for token in tokens:
+        if any(token.endswith(suffix) for suffix in FEMALE_NAME_SUFFIXES):
+            return "Female"
+        if any(token.endswith(suffix) for suffix in MALE_NAME_SUFFIXES):
+            return "Male"
+
+    return None
+
+
+def detect_gender(text_snippet: str, full_name: str, raw_gender: Optional[str] = None) -> Optional[str]:
+    """
+    Detect gender with a strict priority order:
+    1. Explicit male/female/transgender values
+    2. Relational markers near this specific name
+    3. Strong Indian-name heuristics from the accused name itself
+    """
+    explicit_gender = normalize_gender_value(raw_gender)
+    if explicit_gender:
+        return explicit_gender
+
+    name_text = full_name.lower()
+    if "s/o" in name_text or "son of" in name_text or "h/o" in name_text or "husband of" in name_text or "father of" in name_text or "b/o" in name_text:
+        return "Male"
+    if "d/o" in name_text or "daughter of" in name_text or "w/o" in name_text or "wife of" in name_text:
+        return "Female"
+
+    lowered_text = (text_snippet or "").lower()
+    candidates = [full_name.lower(), clean_accused_name(full_name).lower()]
+    context_windows = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        idx = lowered_text.find(candidate)
+        if idx >= 0:
+            start = max(0, idx - 80)
+            end = min(len(lowered_text), idx + len(candidate) + 80)
+            context_windows.append(lowered_text[start:end])
+
+    for window in context_windows:
+        if any(marker in window for marker in ["s/o", "son of", "h/o", "husband of", "father of", "b/o", " mr ", " sri ", " shri "]):
+            return "Male"
+        if any(marker in window for marker in ["d/o", "daughter of", "w/o", "wife of", " mrs ", " ms ", " smt ", " kumari ", " begum "]):
+            return "Female"
+        normalized_window_gender = normalize_gender_value(window)
+        if normalized_window_gender:
+            return normalized_window_gender
+
+    return infer_gender_from_indian_name(full_name)
 
 def detect_status(text: str, full_name: str) -> str:
     """
@@ -394,17 +496,16 @@ def get_llm_chain(prompt_template, parser):
     prompt = ChatPromptTemplate.from_template(prompt_template)
     return prompt | llm | parser
 
-def extract_accused_names_pass1(text: str) -> List[str]:
+def extract_accused_names_pass1(text: str) -> Optional[List[str]]:
     parser = JsonOutputParser(pydantic_object=AccusedNamesResponse)
     chain = get_llm_chain(PASS1_PROMPT, parser)
-    
+
     try:
         import time
         start_time = time.time()
         logger.info(f"Pass 1: Invoking LLM with model {config.LLM_MODEL}...")
         logger.info(f"Pass 1 Prompt Length: {len(text)} chars")
-        
-        # Use our new retry wrapper
+
         response = invoke_extraction_with_retry(
             chain,
             {
@@ -413,34 +514,37 @@ def extract_accused_names_pass1(text: str) -> List[str]:
             },
             max_retries=1
         )
-        
+
         duration = time.time() - start_time
         logger.info(f"Pass 1: LLM responded in {duration:.2f} seconds.")
         logger.info(f"Pass 1 Raw LLM Parsed Response: {response}")
-        
-        # Handle variations
+
+        if response in ({}, None):
+            logger.error("Pass 1 returned an empty response after retries.")
+            return None
         if isinstance(response, dict) and "accused_names" in response:
             return response["accused_names"]
         if isinstance(response, list):
             return response
-        return []
+
+        logger.error(f"Pass 1 returned unusable response shape: {response}")
+        return None
     except Exception as e:
         logger.error(f"Pass 1 Verification Error: {e}", exc_info=True)
-        return []
+        return None
 
-def extract_details_pass2(text: str, accused_names: List[str]) -> List[AccusedDetails]:
+def extract_details_pass2(text: str, accused_names: List[str]) -> Optional[List[AccusedDetails]]:
     if not accused_names:
         return []
-        
+
     parser = JsonOutputParser(pydantic_object=AccusedDetailsResponse)
     chain = get_llm_chain(PASS2_PROMPT, parser)
-    
+
     try:
-        # Pass 2 is often faster as the list is short, but text is same long text.
         import time
         start_time = time.time()
         logger.info("Pass 2: Invoking LLM for details...")
-        
+
         response = invoke_extraction_with_retry(
             chain,
             {
@@ -450,62 +554,70 @@ def extract_details_pass2(text: str, accused_names: List[str]) -> List[AccusedDe
             },
             max_retries=1
         )
-        
+
         duration = time.time() - start_time
         logger.info(f"Pass 2: LLM responded in {duration:.2f} seconds.")
-        
+
+        if response in ({}, None):
+            logger.error("Pass 2 returned an empty response after retries.")
+            return None
+
         details_list = []
         raw_list = []
-        
+
         if isinstance(response, dict):
             raw_list = response.get("accused_details", [])
         elif isinstance(response, list):
             raw_list = response
-            
+        else:
+            logger.error(f"Pass 2 returned unusable response shape: {response}")
+            return None
+
         for r in raw_list:
-            # Flexible dict parsing
-            if isinstance(r, dict):
-                # Ensure full_name is present
-                if not r.get('full_name'):
-                    continue
-                
-                # Normalize phone_numbers: convert list to comma-separated string
-                phone_nums = r.get('phone_numbers')
-                if isinstance(phone_nums, list):
-                    phone_nums = ', '.join(str(p) for p in phone_nums if p)
-                elif phone_nums is None:
-                    phone_nums = None
-                else:
-                    phone_nums = str(phone_nums)
-                
-                # Update the dict with normalized phone_numbers
-                r_normalized = r.copy()
-                r_normalized['phone_numbers'] = phone_nums
-                
+            if not isinstance(r, dict):
+                continue
+            if not r.get('full_name'):
+                continue
+
+            phone_nums = r.get('phone_numbers')
+            if isinstance(phone_nums, list):
+                phone_nums = ', '.join(str(p) for p in phone_nums if p)
+            elif phone_nums is None:
+                phone_nums = None
+            else:
+                phone_nums = str(phone_nums)
+
+            r_normalized = r.copy()
+            r_normalized['phone_numbers'] = phone_nums
+
+            try:
+                details_list.append(AccusedDetails(**r_normalized))
+            except Exception as val_err:
+                logger.warning(f"Validation error for {r}: {val_err}")
+                safe_age = r_normalized.get('age') if isinstance(r_normalized.get('age'), int) else None
                 try:
-                    details_list.append(AccusedDetails(**r_normalized))
-                except Exception as val_err:
-                    logger.warning(f"Validation error for {r}: {val_err}")
-                    # Try best effort
                     details_list.append(AccusedDetails(
-                        full_name=r_normalized.get('full_name'),
-                        role_in_crime=r_normalized.get('role_in_crime', 'Role not clearly stated'),
+                        full_name=str(r_normalized.get('full_name')),
+                        role_in_crime=r_normalized.get('role_in_crime') or 'Role not clearly stated',
                         alias_name=r_normalized.get('alias_name'),
-                        age=r_normalized.get('age'),
-                        gender=r_normalized.get('gender'),
-                        occupation=r_normalized.get('occupation'),
-                        address=r_normalized.get('address'),
+                        age=safe_age,
+                        gender=r_normalized.get('gender') if isinstance(r_normalized.get('gender'), str) else None,
+                        occupation=r_normalized.get('occupation') if isinstance(r_normalized.get('occupation'), str) else None,
+                        address=r_normalized.get('address') if isinstance(r_normalized.get('address'), str) else None,
                         phone_numbers=phone_nums
                     ))
-                
+                except Exception as fallback_err:
+                    logger.warning(f"Skipping invalid Pass 2 record after fallback: {fallback_err}")
+
         return details_list
     except Exception as e:
-        logger.error(f"Pass 2 Error: {e}")
-        return []
+        logger.error(f"Pass 2 Error: {e}", exc_info=True)
+        return None
 
-def extract_accused_info(text: str) -> List[AccusedExtraction]:
+def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
     """
     Orchestrates the 2-pass extraction process.
+    Returns None when the LLM/parsing flow failed, and [] only for a valid no-accused result.
     """
     if not text:
         return []
@@ -513,39 +625,37 @@ def extract_accused_info(text: str) -> List[AccusedExtraction]:
     logger.info("Starting Pass 1: Name Identification")
     names = extract_accused_names_pass1(text)
     logger.info(f"Pass 1 found: {names}")
-    
+
+    if names is None:
+        return None
     if not names:
         return []
 
     logger.info("Starting Pass 2: Details Extraction")
     details = extract_details_pass2(text, names)
+    if details is None:
+        return None
     logger.info(f"Pass 2 found details entries: {len(details)}")
-    
+
     final_accused = []
-    
-    # Create map for finding details by name
+
     detail_map = {d.full_name.lower().strip(): d for d in details}
-    
+
     for name in names:
         raw_name = name.strip()
         clean_name = clean_accused_name(raw_name)
-        
-        # Use simple lower key for map lookup, but try both raw and clean
-        # Sometimes Pass 2 returns raw name, sometimes clean.
+
         name_key_clean = clean_name.lower()
         name_key_raw = raw_name.lower()
-        
-        # Look for details
+
         d_obj = detail_map.get(name_key_raw) or detail_map.get(name_key_clean)
-        
-        # Fuzzy / Partial fallback
+
         if not d_obj:
             for k, v in detail_map.items():
                 if k in name_key_raw or name_key_raw in k or k in name_key_clean or name_key_clean in k:
                     d_obj = v
                     break
-        
-        # Default empty details if missing
+
         role_desc = "Role not clearly stated"
         alias = None
         age = None
@@ -553,7 +663,7 @@ def extract_accused_info(text: str) -> List[AccusedExtraction]:
         occupation = None
         address = None
         phone = None
-        
+
         if d_obj:
             role_desc = d_obj.role_in_crime or role_desc
             alias = d_obj.alias_name
@@ -562,22 +672,20 @@ def extract_accused_info(text: str) -> List[AccusedExtraction]:
             occupation = d_obj.occupation
             address = d_obj.address
             phone = d_obj.phone_numbers
-        
-        # Apply Logic Rules
+
         accused_type = classify_accused_type(role_desc)
         is_ccl = detect_ccl(clean_name, role_desc)
-        
-        # Helper for Gender (Logic > Extraction > None)
-        logic_gender = detect_gender(text, clean_name)
+
+        # Gender cues usually live in the raw extracted name before cleanup strips relations.
+        logic_gender = detect_gender(text, raw_name, gender)
         final_gender = logic_gender if logic_gender else gender
-        
-        # Status detection
+
         status = "unknown"
         if "absconding" in role_desc.lower() or "absconding" in clean_name.lower():
             status = "absconding"
         elif "arrested" in role_desc.lower() or "caught" in role_desc.lower() or "apprehended" in role_desc.lower():
             status = "arrested"
-            
+
         obj = AccusedExtraction(
             full_name=clean_name,
             alias_name=alias,
@@ -592,7 +700,7 @@ def extract_accused_info(text: str) -> List[AccusedExtraction]:
             is_ccl=is_ccl
         )
         final_accused.append(obj)
-        
+
     return final_accused
 
 if __name__ == "__main__":
@@ -602,4 +710,9 @@ if __name__ == "__main__":
     results = extract_accused_info(test_text)
     for r in results:
         print(r.model_dump_json(indent=2))
+
+
+
+
+
 
