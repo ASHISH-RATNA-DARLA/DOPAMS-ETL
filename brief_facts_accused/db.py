@@ -1,7 +1,21 @@
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
+import re
+import logging
 import config
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Column Length Constants (match DB-schema.sql)
+# ---------------------------------------------------------------------------
+MAX_FULL_NAME_LEN = 500
+MAX_ALIAS_LEN     = 255
+MAX_OCCUPATION_LEN = 255
+MAX_PHONE_LEN     = 255
+MAX_GENDER_LEN    = 20
+MAX_STATUS_LEN    = 40
 
 
 def get_db_connection():
@@ -14,9 +28,10 @@ def get_db_connection():
             host=config.DB_HOST,
             port=config.DB_PORT
         )
+        conn.autocommit = False  # Explicit transaction control
         return conn
     except Exception as e:
-        print(f"Error connecting to database: {e}")
+        logger.error(f"Error connecting to database: {e}")
         raise
 
 
@@ -36,13 +51,17 @@ def fetch_crimes_by_ids(conn, crime_ids):
 def fetch_unprocessed_crimes(conn, limit=100):
     """
     Fetches crimes that do NOT yet have an entry in the configured accused table.
+    Uses NOT EXISTS (faster and safer than LEFT JOIN for existence checks).
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = sql.SQL("""
-            SELECT c.crime_id, c.brief_facts 
+            SELECT c.crime_id, c.brief_facts
             FROM crimes c
-            LEFT JOIN {table} d ON c.crime_id = d.crime_id
-            WHERE d.crime_id IS NULL
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM {table} d
+                WHERE d.crime_id = c.crime_id
+            )
             ORDER BY c.date_created DESC, c.date_modified DESC
             LIMIT %s
         """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
@@ -62,7 +81,7 @@ def fetch_existing_accused_for_crime(conn, crime_id):
     Column mapping to brief_facts_accused output:
       persons.alias        → alias_name
       persons.phone_number → phone_numbers
-      CONCAT(present_*)   → address  (single string, NULL if all parts empty)
+      CONCAT(present_*)    → address  (single string, NULL if all parts empty)
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = """
@@ -85,7 +104,8 @@ def fetch_existing_accused_for_crime(conn, crime_id):
                     NULLIF(TRIM(p.present_locality_village), ''),
                     NULLIF(TRIM(p.present_area_mandal), ''),
                     NULLIF(TRIM(p.present_district), ''),
-                    NULLIF(TRIM(p.present_state_ut), '')
+                    NULLIF(TRIM(p.present_state_ut), ''),
+                    NULLIF(TRIM(p.present_country), '')
                 )), '') AS address
             FROM accused a
             LEFT JOIN persons p ON a.person_id = p.person_id
@@ -99,17 +119,17 @@ def fetch_existing_accused_for_crime(conn, crime_id):
 # Status Normalisation
 # ---------------------------------------------------------------------------
 
-_ARRESTED_KEYWORDS = frozenset([
-    "arrested", "caught", "apprehended", "detained", "nabbed", "held",
-    "taken into custody", "remanded", "produced before court",
-    "surrendered", "confessed", "confession",
-])
-
-_ABSCONDING_KEYWORDS = frozenset([
+_ABSCONDING_KEYWORDS = [
     "absconding", "absconder", "evading", "fled", "on the run",
     "not traceable", "not found", "missing", "could not be traced",
     "yet to be arrested", "failed to appear", "escaped",
-])
+]
+
+_ARRESTED_KEYWORDS = [
+    "arrested", "caught", "apprehended", "detained", "nabbed", "held",
+    "taken into custody", "remanded", "produced before court",
+    "surrendered", "confessed", "confession",
+]
 
 
 def normalize_accused_status(raw_status):
@@ -117,7 +137,8 @@ def normalize_accused_status(raw_status):
     Normalises the free-text accused.accused_status field from the API into
     one of: 'arrested' | 'absconding' | None.
 
-    Handles NULL, empty-string, and mixed-case variants gracefully.
+    Priority: absconding checked first (legally, a person is absconding
+    until proven arrested — "absconding but later arrested" edge case).
     """
     if not raw_status:
         return None
@@ -126,15 +147,37 @@ def normalize_accused_status(raw_status):
     if not lowered:
         return None
 
-    for kw in _ARRESTED_KEYWORDS:
-        if kw in lowered:
-            return "arrested"
-
+    # Absconding has higher legal priority
     for kw in _ABSCONDING_KEYWORDS:
         if kw in lowered:
             return "absconding"
 
+    for kw in _ARRESTED_KEYWORDS:
+        if kw in lowered:
+            return "arrested"
+
     return None
+
+
+# ---------------------------------------------------------------------------
+# Phone Number Normalisation
+# ---------------------------------------------------------------------------
+
+def normalize_phone_numbers(raw_phone):
+    """
+    Extracts 10-digit Indian phone numbers from free-text.
+    Input: 'Ph: 9347584387, Cell: 9989478322' or '9347584387, 9989478322'
+    Output: '9347584387, 9989478322' or None
+    """
+    if not raw_phone:
+        return None
+    raw = str(raw_phone)
+    numbers = re.findall(r'\d{10}', raw)
+    if numbers:
+        return ', '.join(numbers)
+    # Fallback: return raw if it looks phone-like but doesn't match 10-digit
+    stripped = raw.strip()
+    return stripped if stripped else None
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +203,6 @@ def validate_age(age_value):
 
     try:
         if isinstance(age_value, str):
-            import re
             match = re.search(r'\d+', str(age_value))
             if match:
                 age_value = int(match.group())
@@ -177,7 +219,11 @@ def validate_age(age_value):
 
 
 def insert_accused_facts(conn, item_data):
-    """Inserts extracted accused information into the database."""
+    """
+    Inserts extracted accused information into the database.
+    Uses ON CONFLICT to prevent duplicates on re-runs.
+    Catches DB errors per-row so a single bad row doesn't abort the batch.
+    """
     with conn.cursor() as cur:
         query = sql.SQL("""
             INSERT INTO {table} 
@@ -189,7 +235,7 @@ def insert_accused_facts(conn, item_data):
                 source_person_fields, source_accused_fields, source_summary_fields
             )
             VALUES (
-                %s, %s, 
+                gen_random_uuid(), %s, 
                 %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
@@ -198,38 +244,44 @@ def insert_accused_facts(conn, item_data):
         """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
 
         import json
-        import uuid
-
-        bf_id = str(uuid.uuid4())
 
         # Guard constrained columns before the per-crime transaction commits.
-        full_name    = truncate_varchar(item_data.get('full_name'), 500)
-        alias_name   = truncate_varchar(item_data.get('alias_name'), 255)
-        occupation   = truncate_varchar(item_data.get('occupation'), 255)
-        phone_numbers = truncate_varchar(item_data.get('phone_numbers'), 255)
-        gender       = truncate_varchar(item_data.get('gender'), 20)
-        status       = truncate_varchar(item_data.get('status'), 40)
-        age          = validate_age(item_data.get('age'))
+        full_name     = truncate_varchar(item_data.get('full_name'), MAX_FULL_NAME_LEN)
+        alias_name    = truncate_varchar(item_data.get('alias_name'), MAX_ALIAS_LEN)
+        occupation    = truncate_varchar(item_data.get('occupation'), MAX_OCCUPATION_LEN)
+        phone_numbers = truncate_varchar(
+            normalize_phone_numbers(item_data.get('phone_numbers')),
+            MAX_PHONE_LEN
+        )
+        gender        = truncate_varchar(item_data.get('gender'), MAX_GENDER_LEN)
+        status        = truncate_varchar(item_data.get('status'), MAX_STATUS_LEN)
+        age           = validate_age(item_data.get('age'))
 
-        cur.execute(query, (
-            bf_id,
-            item_data.get('crime_id'),
-            item_data.get('accused_id'),
-            item_data.get('person_id'),
-            item_data.get('existing_accused', False),
-            full_name,
-            alias_name,
-            age,
-            gender,
-            occupation,
-            item_data.get('address'),
-            phone_numbers,
-            item_data.get('role_in_crime'),
-            item_data.get('key_details'),
-            item_data.get('accused_type'),
-            status,
-            item_data.get('is_ccl', False),
-            json.dumps(item_data.get('source_person_fields', {})),
-            json.dumps(item_data.get('source_accused_fields', {})),
-            json.dumps(item_data.get('source_summary_fields', {}))
-        ))
+        try:
+            cur.execute(query, (
+                item_data.get('crime_id'),
+                item_data.get('accused_id'),
+                item_data.get('person_id'),
+                item_data.get('existing_accused', False),
+                full_name,
+                alias_name,
+                age,
+                gender,
+                occupation,
+                item_data.get('address'),
+                phone_numbers,
+                item_data.get('role_in_crime'),
+                item_data.get('key_details'),
+                item_data.get('accused_type'),
+                status,
+                item_data.get('is_ccl', False),
+                json.dumps(item_data.get('source_person_fields', {})),
+                json.dumps(item_data.get('source_accused_fields', {})),
+                json.dumps(item_data.get('source_summary_fields', {}))
+            ))
+        except psycopg2.Error as e:
+            logger.error(
+                f"DB insert failed for crime={item_data.get('crime_id')} "
+                f"name={full_name}: {e}"
+            )
+            raise

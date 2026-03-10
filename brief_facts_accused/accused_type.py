@@ -75,19 +75,30 @@ def _pair_role_to_accused(accused_code, roles_by_code):
     return {}
 
 
+# ---------------------------------------------------------------------------
+# Branch B: Accused-code pairing by text context
+# ---------------------------------------------------------------------------
+
+import re
+
+# Pre-compiled regex: matches accused codes like A-1, A.2, A1, A 3 etc.
+_ACCUSED_CODE_RE = re.compile(r'A[-.\s]?\d+', re.IGNORECASE)
+
+
 def _pair_accused_id_from_db(extracted_clean_name, facts_text, db_accused_rows):
     """
     Branch B helper: tries to match an LLM-extracted clean name to a DB accused
-    row by searching for the DB accused_code (A-1, A-2…) near the clean name
-    in the original brief_facts text.
+    row by searching for the DB accused_code near the clean name in the
+    original brief_facts text.
 
     Why not search the extracted name directly?
       extract_accused_info() returns clean_name (e.g. "Rahul Singh") — the prefix
       "A-1" is stripped by clean_accused_name(). So we search the source text.
 
-    e.g. Text contains "A-1 Rahul Singh S/o Baldev", LLM extracts "Rahul Singh".
-         We find "Rahul Singh" in text, look ±30 chars around it, find "A-1",
-         match to DB row with accused_code='A-1'.
+    Approach:
+      1. Find the longest-matching token sequence of extracted_clean_name in text
+      2. Look ±30 chars around it for an accused_code pattern (A-1, A.2, etc.)
+      3. Match found code against DB rows
 
     Returns (accused_id, accused_code, is_ccl, accused_status) or (None, None, False, None)
     """
@@ -97,51 +108,59 @@ def _pair_accused_id_from_db(extracted_clean_name, facts_text, db_accused_rows):
     text_lower = facts_text.lower()
     name_lower = extracted_clean_name.lower().strip()
 
-    # Find where this clean name appears in the text
+    # Find name in text — try full name first, then longest token prefix
     idx = text_lower.find(name_lower)
     if idx < 0:
-        # Try token-based partial match (first two tokens)
+        # Try longest token sequence (fixes "Rahul Singh" vs "Rahul Kumar" ambiguity)
         tokens = name_lower.split()
-        if len(tokens) >= 2:
-            idx = text_lower.find(tokens[0] + " " + tokens[1])
-        elif tokens:
-            idx = text_lower.find(tokens[0])
+        for length in range(len(tokens), 0, -1):
+            partial = ' '.join(tokens[:length])
+            idx = text_lower.find(partial)
+            if idx >= 0:
+                name_lower = partial  # Update for window sizing
+                break
 
     if idx < 0:
         return None, None, False, None
 
-    # Extract a context window around the name in the original text
+    # Context window ±30 chars around name occurrence
     window_start = max(0, idx - 30)
-    window_end = min(len(text_lower), idx + len(name_lower) + 30)
-    context_window = facts_text[window_start:window_end].upper()
+    window_end = min(len(facts_text), idx + len(name_lower) + 30)
+    context_window = facts_text[window_start:window_end]
+
+    # Find all accused codes in the context window using regex
+    found_codes = _ACCUSED_CODE_RE.findall(context_window)
+    if not found_codes:
+        return None, None, False, None
 
     def _norm(s):
         return (s or '').upper().replace(' ', '').replace('-', '').replace('.', '')
 
-    # Check which DB accused_code appears in the context window
-    for row in db_accused_rows:
-        raw_code = (row.get('accused_code') or '').strip()
-        if not raw_code:
-            continue
-        # Try original code, then normalised (e.g. 'A-1' in text near name)
-        if raw_code.upper() in context_window or raw_code.upper().replace('-','').replace('.','') in context_window.replace('-','').replace('.',''):
-            return (
-                row.get('accused_id'),
-                row.get('accused_code'),
-                row.get('is_ccl', False),
-                row.get('accused_status'),
-            )
+    # Match found codes against DB rows
+    for code_in_text in found_codes:
+        code_norm = _norm(code_in_text)
+        for row in db_accused_rows:
+            db_code = _norm(row.get('accused_code') or '')
+            if db_code and db_code == code_norm:
+                return (
+                    row.get('accused_id'),
+                    row.get('accused_code'),
+                    row.get('is_ccl', False),
+                    row.get('accused_status'),
+                )
 
     return None, None, False, None
 
 
 # ---------------------------------------------------------------------------
-# Status helper (DB-first, text keyword fallback)
+# Status helper (DB-first, LOCAL text keyword fallback)
 # ---------------------------------------------------------------------------
 
 def _resolve_status(db_status_raw, text, name_hint):
     """
-    Resolves final 'status' using DB value first, then keyword scan fallback.
+    Resolves final 'status' using DB value first, then keyword scan on
+    LOCAL context window only (±120 chars around the name, to avoid
+    misclassifying one accused with another's status).
     """
     db_status = normalize_accused_status(db_status_raw)
     if db_status:
@@ -164,12 +183,16 @@ def _resolve_status(db_status_raw, text, name_hint):
     if candidate:
         idx = text_lower.find(candidate)
         if idx >= 0:
-            start = max(0, idx - 200)
-            end = min(len(text_lower), idx + len(candidate) + 200)
+            start = max(0, idx - 120)
+            end = min(len(text_lower), idx + len(candidate) + 120)
             combined = text_lower[start:end]
 
-    combined += " " + text_lower  # also scan full text as second pass
+    # No full-text fallback — only scan the local context window
+    # This prevents cross-contamination between accused statuses
+    if not combined:
+        return None
 
+    # Absconding checked first (legal priority: absconding until confirmed arrested)
     if any(k in combined for k in _absconding_kw):
         return "absconding"
     if any(k in combined for k in _arrested_kw):
@@ -234,6 +257,9 @@ def main():
 # ---------------------------------------------------------------------------
 
 def process_crimes(conn, crimes):
+    """Processes a batch of crimes. Commits once per batch, not per crime."""
+    success_count = 0
+
     for crime in crimes:
         crime_id = crime['crime_id']
         facts_text = (crime['brief_facts'] or "").strip()
@@ -255,9 +281,19 @@ def process_crimes(conn, crimes):
             else:
                 _process_branch_c(conn, crime_id, facts_text)
 
+            success_count += 1
+
         except Exception as e:
             conn.rollback()
             logging.error(f"Failed processing Crime {crime_id}: {e}", exc_info=True)
+
+    # Batch-level commit (Issue 7: commit per batch, not per crime)
+    try:
+        conn.commit()
+        logging.info(f"Batch committed. {success_count}/{len(crimes)} crimes succeeded.")
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Batch commit failed: {e}", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -294,21 +330,25 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
 
         # LLM role for this accused_code
         role_data     = _pair_role_to_accused(accused_code, roles_by_code)
-        role_in_crime = role_data.get('role_in_crime') or "Role not clearly stated"
+        role_in_crime = role_data.get('role_in_crime')
         key_details   = role_data.get('key_details')
 
-        # Status: DB first, keyword scan fallback
+        # Status: DB first, LOCAL keyword scan fallback
         status = _resolve_status(row.get('accused_status'), facts_text, full_name or accused_code)
 
-        # Classification
-        accused_type = classify_accused_type(role_in_crime + (" " + key_details if key_details else ""))
+        # Classification — only if role was extracted
+        if role_in_crime:
+            classification_text = role_in_crime + (" " + key_details if key_details else "")
+            accused_type = classify_accused_type(classification_text)
+        else:
+            accused_type = None
 
-        # Gender fallback if not in persons
+        # Gender fallback if not in persons — use local context
         if not gender:
             gender = detect_gender(facts_text, full_name or accused_code)
 
         # CCL: DB boolean first, text cross-check as safety net
-        is_ccl = bool(is_ccl_db) or detect_ccl(full_name or '', role_in_crime)
+        is_ccl = bool(is_ccl_db) or detect_ccl(full_name or '', role_in_crime or '')
 
         # Normalise sentinels
         if accused_type == 'unknown':
@@ -339,8 +379,7 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
         })
         count += 1
 
-    conn.commit()
-    logging.info(f"Branch A completed Crime {crime_id}. inserted_count={count}")
+    logging.info(f"Branch A processed Crime {crime_id}. row_count={count}")
 
 
 # ---------------------------------------------------------------------------
@@ -355,10 +394,8 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
 def _process_branch_b(conn, crime_id, facts_text, db_accused):
     """
     All accused rows in DB have no person_id.
-    We run the full LLM pipeline (same as Branch C), but additionally try to
-    recover the accused_id from the DB row by matching accused_code found in
-    the extracted name string (e.g. "A-1 Rahul" → accused_code 'A-1' → accused_id).
-    person_id is always NULL here — no source has it.
+    Run full LLM pipeline, then pair accused_id from DB by text context matching.
+    person_id is always NULL here.
     """
     logging.info(
         f"Branch B: crime {crime_id} has {len(db_accused)} stub accused rows "
@@ -368,21 +405,33 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
     extractions = extract_accused_info(facts_text)
 
     if extractions is None:
+        # Issue 5: Insert failure marker instead of silently skipping
         logging.error(
             f"Branch B: LLM extraction failed for Crime {crime_id}. "
-            "Skipping without marking processed."
+            "Inserting failure marker."
         )
-        conn.rollback()
+        insert_accused_facts(conn, {
+            'crime_id'        : crime_id,
+            'full_name'       : None,
+            'accused_type'    : None,
+            'status'          : None,
+            'existing_accused': False,
+            'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
+        })
         return
 
     count = 0
 
     if not extractions:
+        # Issue 6: Use NULL full_name instead of "NO_ACCUSED_FOUND" sentinel
         logging.info(f"Branch B: No accused found by LLM for Crime {crime_id}.")
         insert_accused_facts(conn, {
             'crime_id'        : crime_id,
-            'full_name'       : "NO_ACCUSED_FOUND",
+            'full_name'       : None,
+            'accused_type'    : None,
+            'status'          : None,
             'existing_accused': False,
+            'role_in_crime'   : 'NO_ACCUSED_IN_TEXT',
         })
         count = 1
     else:
@@ -391,10 +440,7 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             data['crime_id']  = crime_id
             data['person_id'] = None   # always NULL — no source has it
 
-            # Try to pair accused_id from DB by finding accused_code near
-            # the extracted name in the original brief_facts text.
-            # accused.full_name is already cleaned (A-code prefix stripped),
-            # so we search the original text for the code near the name.
+            # Pair accused_id from DB by finding accused_code near the name in text
             accused_id, matched_code, is_ccl_db, accused_status_raw = \
                 _pair_accused_id_from_db(accused.full_name, facts_text, db_accused)
 
@@ -422,8 +468,7 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             insert_accused_facts(conn, data)
             count += 1
 
-    conn.commit()
-    logging.info(f"Branch B completed Crime {crime_id}. inserted_count={count}")
+    logging.info(f"Branch B processed Crime {crime_id}. row_count={count}")
 
 
 # ---------------------------------------------------------------------------
@@ -439,21 +484,33 @@ def _process_branch_c(conn, crime_id, facts_text):
     extractions = extract_accused_info(facts_text)
 
     if extractions is None:
+        # Issue 5: Insert failure marker so it doesn't retry infinitely
         logging.error(
             f"Branch C: Extraction failed for Crime {crime_id}. "
-            "Skipping without marking processed."
+            "Inserting failure marker."
         )
-        conn.rollback()
+        insert_accused_facts(conn, {
+            'crime_id'        : crime_id,
+            'full_name'       : None,
+            'accused_type'    : None,
+            'status'          : None,
+            'existing_accused': False,
+            'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
+        })
         return
 
     count = 0
 
     if not extractions:
+        # Issue 6: Use NULL full_name, mark in role_in_crime for traceability
         logging.info(f"Branch C: No accused found for Crime {crime_id}.")
         insert_accused_facts(conn, {
             'crime_id'        : crime_id,
-            'full_name'       : "NO_ACCUSED_FOUND",
+            'full_name'       : None,
+            'accused_type'    : None,
+            'status'          : None,
             'existing_accused': False,
+            'role_in_crime'   : 'NO_ACCUSED_IN_TEXT',
         })
         count = 1
     else:
@@ -473,8 +530,7 @@ def _process_branch_c(conn, crime_id, facts_text):
             insert_accused_facts(conn, data)
             count += 1
 
-    conn.commit()
-    logging.info(f"Branch C completed Crime {crime_id}. inserted_count={count}")
+    logging.info(f"Branch C processed Crime {crime_id}. row_count={count}")
 
 
 if __name__ == "__main__":

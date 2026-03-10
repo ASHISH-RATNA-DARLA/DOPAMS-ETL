@@ -685,10 +685,19 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
         d_obj = detail_map.get(name_key_raw) or detail_map.get(name_key_clean)
 
         if not d_obj:
+            # Improved matching: require at least 2 token overlap to avoid
+            # 'Rahul Singh' matching 'Rahul Kumar' (audit fix)
+            name_tokens_raw   = set(name_key_raw.split())
+            name_tokens_clean = set(name_key_clean.split())
+            best_match = None
+            best_overlap = 0
             for k, v in detail_map.items():
-                if k in name_key_raw or name_key_raw in k or k in name_key_clean or name_key_clean in k:
-                    d_obj = v
-                    break
+                k_tokens = set(k.split())
+                overlap = max(len(k_tokens & name_tokens_raw), len(k_tokens & name_tokens_clean))
+                if overlap >= 2 and overlap > best_overlap:
+                    best_overlap = overlap
+                    best_match = v
+            d_obj = best_match
 
         role_desc = "Role not clearly stated"
         alias = None
@@ -727,8 +736,8 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
                 continue
             _idx = _text_lower.find(_candidate)
             if _idx >= 0:
-                _start = max(0, _idx - 200)
-                _end = min(len(_text_lower), _idx + len(_candidate) + 200)
+                _start = max(0, _idx - 120)
+                _end = min(len(_text_lower), _idx + len(_candidate) + 120)
                 _combined += " " + _text_lower[_start:_end]
                 break
 
