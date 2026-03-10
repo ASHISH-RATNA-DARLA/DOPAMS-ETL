@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
 Domicile Classification Script
-Classifies persons based on their permanent_state_ut and permanent_country values.
+Classifies persons based on address information using primary-first hierarchy:
+1. Use permanent_country first, if not available then present_country
+2. If country is non-India: Classify as 'international'
+3. If country is India: Check state (permanent_state_ut first, then present_state_ut)
+   - 'telangana': 'native state'
+   - Other Indian states/UTs: 'inter state'
+   - Unrecognized: None
+4. Outputs: 'native state' (Telangana only), 'inter state', 'international', or None
 """
 
 import os
@@ -170,14 +177,16 @@ def classify_domicile(
     pres_state: Optional[str], pres_country: Optional[str]
 ) -> Optional[str]:
     """
-    Classify domicile intelligently combining permanent and present address fields.
+    Classify domicile based on country and state information hierarchy.
     
     Logic:
-    1. International: If EITHER permanent_country or present_country explicitly indicates 
-       a non-Indian country.
-    2. Fallback: Combine available data, preferring permanent over present if both exist.
-    3. Native/Inter State: Only assigned if both a valid state and valid country='india' are available.
-       Otherwise, returns None.
+    1. Determine effective country: permanent_country first, if not available then present_country
+    2. If effective country is non-India (non-null and != 'india'): Return 'international'
+    3. If effective country is India: Check state (permanent_state_ut first, then present_state_ut)
+       - If state is 'telangana' (native state): Return 'native state'
+       - If state is any other Indian state/UT: Return 'inter state'
+       - Otherwise: Return None
+    4. If no effective country available: Return None
     """
     # Normalize inputs
     perm_st = normalize_text(perm_state)
@@ -185,32 +194,31 @@ def classify_domicile(
     pres_st = normalize_text(pres_state)
     pres_co = normalize_text(pres_country)
     
-    # International Classification Threshold:
-    # A record should be classified as international when permanent_country or present_country 
-    # is explicitly not equal to "India". NULL values are not automatically interpreted as "not India".
-    is_perm_intl = (perm_co is not None and perm_co != "india")
-    is_pres_intl = (pres_co is not None and pres_co != "india")
-    
-    if is_perm_intl or is_pres_intl:
-        return CLASSIFICATION_INTERNATIONAL
-        
-    # Handling Partial Data & Fallback Logic:
-    # Combine available data (permanent takes precedence over present)
-    effective_state = perm_st if perm_st is not None else pres_st
+    # Step 1: Determine effective country (permanent first, then present)
     effective_country = perm_co if perm_co is not None else pres_co
     
-    # Native State / Inter State classifications require BOTH attributes
-    if effective_state is None or effective_country is None:
+    # If no country information available, cannot classify
+    if effective_country is None:
         return None
-        
-    # Check valid country (India) and valid state
-    if effective_country == "india":
-        if effective_state == NATIVE_STATE:
-            return CLASSIFICATION_NATIVE
-        if effective_state in INDIAN_STATES:
-            return CLASSIFICATION_INTER
-            
-    # In all other cases (e.g., unrecognized state but country is India), we do not assign Native/Inter/International.
+    
+    # Step 2: Check if international (country is explicitly not India)
+    if effective_country != "india":
+        return CLASSIFICATION_INTERNATIONAL
+    
+    # Step 3: Country is India - determine effective state (permanent first, then present)
+    effective_state = perm_st if perm_st is not None else pres_st
+    
+    # If no state information available, cannot classify as native/inter state
+    if effective_state is None:
+        return None
+    
+    # Step 4: Classify based on state
+    if effective_state == NATIVE_STATE:
+        return CLASSIFICATION_NATIVE
+    if effective_state in INDIAN_STATES:
+        return CLASSIFICATION_INTER
+    
+    # Unrecognized state (but country is India)
     return None
 
 
@@ -279,7 +287,7 @@ def process_persons(cursor=None):
                         """, updates)
                     conn.commit()
 
-        batch_size = 1000
+        batch_size = 2500
         batches = [persons[i:i + batch_size] for i in range(0, total_persons, batch_size)]
         
         requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
