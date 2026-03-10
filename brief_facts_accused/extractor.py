@@ -284,6 +284,7 @@ def classify_accused_type(role_text: str) -> str:
         "drug user",
         "under influence",
         "for own use",
+        "for consumption",
     ]):
         return "consumer"
 
@@ -331,6 +332,7 @@ def classify_accused_type(role_text: str) -> str:
         "dispatch",
         "shipment",
         "transit",
+        "source of",
     ]):
         return "supplier"
 
@@ -707,7 +709,8 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             phone = d_obj.phone_numbers
             key_details = d_obj.key_details
 
-        accused_type = classify_accused_type(role_desc)
+        classification_text = role_desc + (" " + key_details if key_details else "")
+        accused_type = classify_accused_type(classification_text)
         is_ccl = detect_ccl(clean_name, role_desc)
 
         # Gender cues usually live in the raw extracted name before cleanup strips relations.
@@ -717,6 +720,17 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
         _role_lower = role_desc.lower()
         _name_lower = clean_name.lower()
         _combined = _role_lower + " " + _name_lower
+
+        _text_lower = (text or "").lower()
+        for _candidate in [clean_name.lower(), raw_name.lower()]:
+            if not _candidate:
+                continue
+            _idx = _text_lower.find(_candidate)
+            if _idx >= 0:
+                _start = max(0, _idx - 200)
+                _end = min(len(_text_lower), _idx + len(_candidate) + 200)
+                _combined += " " + _text_lower[_start:_end]
+                break
 
         _absconding_keywords = [
             "absconding", "evading", "fled", "on the run", "not traceable",

@@ -19,6 +19,7 @@ import colorlog
 from typing import List, Dict, Optional, Tuple, Set
 import json
 import os
+import re
 
 # Import PostgreSQLConnectionPool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,6 +76,8 @@ else:
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 ACCUSED_TABLE = TABLE_CONFIG.get('accused', 'accused')
 PERSONS_TABLE = TABLE_CONFIG.get('persons', 'persons')
+ARRESTS_TABLE = TABLE_CONFIG.get('arrests', 'arrests')
+BRIEF_FACTS_ACCUSED_TABLE = TABLE_CONFIG.get('brief_facts_accused', 'brief_facts_accused')
 
 
 def parse_iso_date(date_str: str) -> datetime:
@@ -102,15 +105,15 @@ class AccusedETL:
             'total_accused_fetched': 0,
             'total_accused_inserted': 0,
             'total_accused_updated': 0,
-            'total_accused_no_change': 0,  # Records that exist but no changes needed
-            'total_accused_failed': 0,  # Records that failed to insert/update
-            'total_duplicates': 0,  # Duplicate accused_ids found within chunks
+            'total_accused_no_change': 0,
+            'total_accused_failed': 0,
+            'total_duplicates': 0,
             'stub_persons_created': 0,
             'failed_api_calls': 0,
-            'accused_without_crime': 0,  # Accused failed due to crime not found
-            'accused_without_person': 0,  # Accused failed due to person not found
-            'crimes_inserted_from_accused': 0,  # Crimes inserted via fallback when processing accused
-            'crimes_updated_from_accused': 0,  # Crimes updated via fallback when processing accused
+            'accused_without_crime': 0,
+            'accused_without_person': 0,
+            'crimes_inserted_from_accused': 0,
+            'crimes_updated_from_accused': 0,
             'errors': []
         }
         
@@ -175,7 +178,95 @@ class AccusedETL:
         logger.info(f"📝 Failed records log: {self.failed_log_file}")
         logger.info(f"📝 Fallback failures log: {self.fallback_failure_file}")
         logger.info(f"📝 API response details log: {self.api_response_file}")
-    
+
+    def parse_accused_status(self, status_str: str) -> Dict:
+        """
+        Parse ACCUSED_STATUS field from JSON.
+        """
+        if not status_str:
+            return {}
+
+        result = {}
+        status_lower = status_str.lower()
+
+        if "41a" in status_lower and "issued" in status_lower:
+            result["is_41a_crpc"] = True
+            date_match = re.search(r'(\d{2})/(\d{2})/(\d{4})', status_str)
+            if date_match:
+                day, month, year = date_match.groups()
+                result["date_of_issue_41a"] = f"{year}-{month}-{day}"
+
+        if "pending" in status_lower:
+            result["is_41a_pending"] = True
+
+        if "arrest" in status_lower:
+            result["is_arrested"] = True
+
+        if "abscond" in status_lower:
+            result["is_absconding"] = True
+
+        return result
+
+    def route_accused_status(self, accused: Dict, cursor):
+        """
+        Route ACCUSED_STATUS field to arrests and brief_facts_accused tables.
+        """
+        accused_status = accused.get('accused_status')
+        if not accused_status:
+            return
+
+        accused_id = accused.get('accused_id')
+        crime_id = accused.get('crime_id')
+        seq_num = accused.get('seq_num')
+        person_id = accused.get('person_id')
+
+        # 1. Update brief_facts_accused status
+        if accused_id:
+            try:
+                cursor.execute(f"""
+                    UPDATE {BRIEF_FACTS_ACCUSED_TABLE}
+                    SET status = %s
+                    WHERE accused_id = %s
+                """, (accused_status, accused_id))
+                logger.trace(f"Updated status in {BRIEF_FACTS_ACCUSED_TABLE} for accused_id {accused_id}")
+            except Exception as e:
+                logger.error(f"Error updating {BRIEF_FACTS_ACCUSED_TABLE} status: {e}")
+
+        # 2. Update arrests table with parsed 41A info
+        parsed_status = self.parse_accused_status(accused_status)
+        if parsed_status and crime_id and seq_num:
+            update_fields = []
+            update_values = []
+            
+            if 'is_41a_crpc' in parsed_status:
+                update_fields.append("is_41a_crpc = %s")
+                update_values.append(parsed_status['is_41a_crpc'])
+            
+            if 'date_of_issue_41a' in parsed_status:
+                update_fields.append("date_of_issue_41a = %s")
+                update_values.append(parsed_status['date_of_issue_41a'])
+            
+            if 'is_arrested' in parsed_status:
+                update_fields.append("is_arrested = %s")
+                update_values.append(parsed_status['is_arrested'])
+                
+            if 'is_absconding' in parsed_status:
+                update_fields.append("is_absconding = %s")
+                update_values.append(parsed_status['is_absconding'])
+
+            if update_fields:
+                try:
+                    update_query = f"""
+                        UPDATE {ARRESTS_TABLE}
+                        SET {', '.join(update_fields)}
+                        WHERE crime_id = %s AND accused_seq_no = %s
+                    """
+                    update_values.extend([crime_id, str(seq_num)])
+                    cursor.execute(update_query, tuple(update_values))
+                    logger.trace(f"Updated 41A info in {ARRESTS_TABLE} for crime_id {crime_id}, seq_num {seq_num}")
+                except Exception as e:
+                    logger.error(f"Error updating {ARRESTS_TABLE} info: {e}")
+
     def close_chunk_loggers(self):
         """Close chunk log files"""
         if hasattr(self, 'api_log') and self.api_log:
@@ -295,6 +386,7 @@ class AccusedETL:
             'TYPE': 'type',
             'SEQ_NUM': 'seq_num',
             'IS_CCL': 'is_ccl',
+            'ACCUSED_STATUS': 'accused_status',
             'DATE_CREATED': 'date_created',
             'DATE_MODIFIED': 'date_modified'
         }
@@ -768,6 +860,7 @@ class AccusedETL:
             'mustache': pf.get('MUSTACHE'),
             'nose': pf.get('NOSE'),
             'teeth': pf.get('TEETH'),
+            'accused_status': row.get('ACCUSED_STATUS'),
             'date_created': date_created,  # From API if available
             'date_modified': date_modified  # From API if available
         }
@@ -778,6 +871,7 @@ class AccusedETL:
             SELECT accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
                    beard, build, color, ear, eyes, face, hair, height,
                    leucoderma, mole, mustache, nose, teeth,
+                   accused_status,
                    date_created, date_modified
             FROM {ACCUSED_TABLE}
             WHERE accused_id = %s
@@ -805,8 +899,9 @@ class AccusedETL:
                 'mustache': row[17],
                 'nose': row[18],
                 'teeth': row[19],
-                'date_created': row[20],
-                'date_modified': row[21]
+                'accused_status': row[20],
+                'date_created': row[21],
+                'date_modified': row[22]
             }
         return None
     
@@ -910,8 +1005,8 @@ class AccusedETL:
                         ('beard', 'beard'), ('build', 'build'), ('color', 'color'), ('ear', 'ear'),
                         ('eyes', 'eyes'), ('face', 'face'), ('hair', 'hair'), ('height', 'height'),
                         ('leucoderma', 'leucoderma'), ('mole', 'mole'), ('mustache', 'mustache'),
-                        ('nose', 'nose'), ('teeth', 'teeth'), ('date_created', 'date_created'),
-                        ('date_modified', 'date_modified')
+                        ('nose', 'nose'), ('teeth', 'teeth'), ('accused_status', 'accused_status'),
+                        ('date_created', 'date_created'), ('date_modified', 'date_modified')
                     ]
                     
                     for new_key, db_key in fields_to_check:
@@ -937,6 +1032,8 @@ class AccusedETL:
                             f"UPDATE {ACCUSED_TABLE} SET {', '.join(update_fields)}, date_modified = %s WHERE accused_id = %s",
                             update_values + [date_modified, accused_id]
                         )
+                        # Route ACCUSED_STATUS to other tables
+                        self.route_accused_status(accused, cursor)
                         conn.commit()
                         with self.stats_lock:
                             self.stats['total_accused_updated'] += 1
@@ -959,12 +1056,12 @@ class AccusedETL:
                     INSERT INTO {ACCUSED_TABLE} (
                         accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
                         beard, build, color, ear, eyes, face, hair, height,
-                        leucoderma, mole, mustache, nose, teeth,
+                        leucoderma, mole, mustache, nose, teeth, accused_status,
                         date_created, date_modified
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
                         %s, %s
                     )
                     """,
@@ -975,9 +1072,11 @@ class AccusedETL:
                         accused.get('ear'), accused.get('eyes'), accused.get('face'),
                         accused.get('hair'), accused.get('height'), accused.get('leucoderma'),
                         accused.get('mole'), accused.get('mustache'), accused.get('nose'),
-                        accused.get('teeth'), date_created, date_modified
+                        accused.get('teeth'), accused.get('accused_status'), date_created, date_modified
                     )
                 )
+                # Route ACCUSED_STATUS to other tables
+                self.route_accused_status(accused, cursor)
                 conn.commit()
                 with self.stats_lock:
                     self.stats['total_accused_inserted'] += 1
@@ -1140,6 +1239,7 @@ class AccusedETL:
                         ('mustache', 'mustache'),
                         ('nose', 'nose'),
                         ('teeth', 'teeth'),
+                        ('accused_status', 'accused_status'),
                         ('date_created', 'date_created'),  # Always from API/crime
                         ('date_modified', 'date_modified')  # Always from API/crime
                     ]
@@ -1198,11 +1298,15 @@ class AccusedETL:
                             self.stats['total_accused_updated'] += 1
                         logger.debug(f"Updated accused: {accused_id} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
+                        # Route ACCUSED_STATUS to other tables
+                        self.route_accused_status(accused, cursor)
                         conn.commit()
                         logger.trace(f"Transaction committed for updated ACCUSED_ID: {accused_id}")
                         return True, 'updated'
                     else:
-                        # No changes needed
+                        # No changes needed for ACCUSED_TABLE, but might need to route ACCUSED_STATUS
+                        self.route_accused_status(accused, cursor)
+                        conn.commit()
                         with self.stats_lock:
                             self.stats['total_accused_no_change'] += 1
                         logger.trace(f"No changes needed for ACCUSED_ID: {accused_id} (all fields match or preserved)")
@@ -1216,10 +1320,10 @@ class AccusedETL:
                     INSERT INTO {ACCUSED_TABLE} (
                         accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
                         beard, build, color, ear, eyes, face, hair, height,
-                        leucoderma, mole, mustache, nose, teeth,
+                        leucoderma, mole, mustache, nose, teeth, accused_status,
                         date_created, date_modified
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     ON CONFLICT (accused_id) 
                     DO UPDATE SET
@@ -1242,6 +1346,7 @@ class AccusedETL:
                         mustache = EXCLUDED.mustache,
                         nose = EXCLUDED.nose,
                         teeth = EXCLUDED.teeth,
+                        accused_status = EXCLUDED.accused_status,
                         date_created = EXCLUDED.date_created,
                         date_modified = EXCLUDED.date_modified
                 """
@@ -1271,6 +1376,7 @@ class AccusedETL:
                         accused['mustache'],
                         accused['nose'],
                         accused['teeth'],
+                        accused['accused_status'],
                         accused['date_created'],  # From API/crime (or NULL)
                         accused['date_modified']  # From API/crime (or NULL)
                     ))
@@ -1282,11 +1388,15 @@ class AccusedETL:
                             with self.stats_lock:
                                 self.stats['total_accused_no_change'] += 1
                             logger.trace(f"No change for ACCUSED_ID: {accused_id} (already exists with same data)")
+                            # Route ACCUSED_STATUS to other tables
+                            self.route_accused_status(accused, cursor)
                             conn.commit()
                             return True, 'no_change'
                         else:
                             # This shouldn't happen, but handle it
                             logger.warning(f"⚠️  Row count is 0 but accused_id {accused_id} doesn't exist")
+                            # Route ACCUSED_STATUS to other tables
+                            self.route_accused_status(accused, cursor)
                             conn.commit()
                             return False, 'insert_failed'
                     else:
@@ -1303,6 +1413,8 @@ class AccusedETL:
                             logger.debug(f"Inserted accused: {accused_id}")
                     
                     logger.trace(f"Insert/Update query executed for ACCUSED_ID: {accused_id}")
+                    # Route ACCUSED_STATUS to other tables
+                    self.route_accused_status(accused, cursor)
                     conn.commit()
                     logger.trace(f"Transaction committed for ACCUSED_ID: {accused_id}")
                     return True, 'inserted' if not existing_before else 'updated'
@@ -1776,6 +1888,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-

@@ -144,6 +144,15 @@ Three sub-changes:
 
 ---
 
+### [x] Step: Final Verification — CSV Audit (Run 1)
+
+Bugs found and fixed from `brief_facts_accused.csv`:
+
+- **[x] Bug 1**: `Ashok Naidu` `accused_type=NULL` — `"source of"` added to supplier keywords
+- **[x] Bug 2**: `Kota Vijay Kumar` `accused_type=peddler` (should be `consumer`) — `"for consumption"` added to consumer keywords
+- **[x] Bug 3**: `accused_type` classification now uses `role_in_crime + key_details` combined text — catches "Supplied" in key_details when role says "Source of ganja"
+- **[x] Bug 4**: `status=NULL` on clearly arrested records — status detection now includes a 200-char context window from full FIR text around accused name
+
 ### [ ] Step: Final Verification
 
 After all tasks complete:
