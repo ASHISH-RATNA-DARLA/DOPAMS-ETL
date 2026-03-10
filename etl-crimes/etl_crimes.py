@@ -667,105 +667,89 @@ class CrimesETL:
             else:
                 return False, 'missing_ps_code'
 
-            # 2. Transaction Management
-            # We use a sub-transaction (savepoint) to allow recovery from single-row errors
-            try:
-                cursor.execute("SAVEPOINT smart_upsert_sp")
+            # 2. Perform insert or update
+            if self.crime_exists(crime_id, cursor):
+                existing = self.get_existing_crime(crime_id, cursor)
                 
-                if self.crime_exists(crime_id, cursor):
-                    existing = self.get_existing_crime(crime_id, cursor)
-                    
-                    # Calculate which fields have changed
-                    update_fields = []
-                    update_values = []
-                    
-                    fields_to_check = [
-                        ('ps_code', 'ps_code'),
-                        ('fir_num', 'fir_num'),
-                        ('fir_reg_num', 'fir_reg_num'),
-                        ('fir_type', 'fir_type'),
-                        ('acts_sections', 'acts_sections'),
-                        ('fir_date', 'fir_date'),
-                        ('case_status', 'case_status'),
-                        ('major_head', 'major_head'),
-                        ('minor_head', 'minor_head'),
-                        ('crime_type', 'crime_type'),
-                        ('io_name', 'io_name'),
-                        ('io_rank', 'io_rank'),
-                        ('brief_facts', 'brief_facts'),
-                        ('fir_copy', 'fir_copy'),
-                        ('additional_json_data', 'additional_json_data'),
-                        ('date_modified', 'date_modified')
-                    ]
-                    
-                    for crime_key, db_key in fields_to_check:
-                        if crime.get(crime_key) != existing.get(db_key):
-                            update_fields.append(f"{db_key} = %s")
-                            if crime_key == 'additional_json_data':
-                                update_values.append(Json(crime[crime_key]) if crime[crime_key] else None)
-                            else:
-                                update_values.append(crime.get(crime_key))
-                    
-                    if update_fields:
-                        update_query = f"UPDATE {CRIMES_TABLE} SET {', '.join(update_fields)} WHERE crime_id = %s"
-                        update_values.append(crime_id)
-                        cursor.execute(update_query, tuple(update_values))
-                        with self.stats_lock:
-                            self.stats['total_crimes_updated'] += 1
-                        operation = 'updated'
-                    else:
-                        with self.stats_lock:
-                            self.stats['total_crimes_no_change'] += 1
-                        operation = 'no_change'
-                else:
-                    insert_query = f"""
-                        INSERT INTO {CRIMES_TABLE} (
-                            crime_id, ps_code, fir_num, fir_reg_num, fir_type,
-                            acts_sections, fir_date, case_status, major_head, minor_head,
-                            crime_type, io_name, io_rank, brief_facts, fir_copy,
-                            additional_json_data, date_created, date_modified
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    cursor.execute(insert_query, (
-                        crime['crime_id'], crime['ps_code'], crime['fir_num'],
-                        crime['fir_reg_num'], crime['fir_type'], crime['acts_sections'],
-                        crime['fir_date'], crime['case_status'], crime['major_head'],
-                        crime['minor_head'], crime['crime_type'], crime['io_name'],
-                        crime['io_rank'], crime['brief_facts'], crime['fir_copy'],
-                        Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
-                        crime['date_created'], crime['date_modified']
-                    ))
+                # Calculate which fields have changed
+                update_fields = []
+                update_values = []
+                
+                fields_to_check = [
+                    ('ps_code', 'ps_code'),
+                    ('fir_num', 'fir_num'),
+                    ('fir_reg_num', 'fir_reg_num'),
+                    ('fir_type', 'fir_type'),
+                    ('acts_sections', 'acts_sections'),
+                    ('fir_date', 'fir_date'),
+                    ('case_status', 'case_status'),
+                    ('major_head', 'major_head'),
+                    ('minor_head', 'minor_head'),
+                    ('crime_type', 'crime_type'),
+                    ('io_name', 'io_name'),
+                    ('io_rank', 'io_rank'),
+                    ('brief_facts', 'brief_facts'),
+                    ('fir_copy', 'fir_copy'),
+                    ('additional_json_data', 'additional_json_data'),
+                    ('date_modified', 'date_modified')
+                ]
+                
+                for crime_key, db_key in fields_to_check:
+                    if crime.get(crime_key) != existing.get(db_key):
+                        update_fields.append(f"{db_key} = %s")
+                        if crime_key == 'additional_json_data':
+                            update_values.append(Json(crime[crime_key]) if crime[crime_key] else None)
+                        else:
+                            update_values.append(crime.get(crime_key))
+                
+                if update_fields:
+                    update_query = f"UPDATE {CRIMES_TABLE} SET {', '.join(update_fields)} WHERE crime_id = %s"
+                    update_values.append(crime_id)
+                    cursor.execute(update_query, tuple(update_values))
                     with self.stats_lock:
-                        self.stats['total_crimes_inserted'] += 1
-                    operation = 'inserted'
+                        self.stats['total_crimes_updated'] += 1
+                    operation = 'updated'
+                else:
+                    with self.stats_lock:
+                        self.stats['total_crimes_no_change'] += 1
+                    operation = 'no_change'
+            else:
+                insert_query = f"""
+                    INSERT INTO {CRIMES_TABLE} (
+                        crime_id, ps_code, fir_num, fir_reg_num, fir_type,
+                        acts_sections, fir_date, case_status, major_head, minor_head,
+                        crime_type, io_name, io_rank, brief_facts, fir_copy,
+                        additional_json_data, date_created, date_modified
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                cursor.execute(insert_query, (
+                    crime['crime_id'], crime['ps_code'], crime['fir_num'],
+                    crime['fir_reg_num'], crime['fir_type'], crime['acts_sections'],
+                    crime['fir_date'], crime['case_status'], crime['major_head'],
+                    crime['minor_head'], crime['crime_type'], crime['io_name'],
+                    crime['io_rank'], crime['brief_facts'], crime['fir_copy'],
+                    Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
+                    crime['date_created'], crime['date_modified']
+                ))
+                with self.stats_lock:
+                    self.stats['total_crimes_inserted'] += 1
+                operation = 'inserted'
 
-                cursor.execute("RELEASE SAVEPOINT smart_upsert_sp")
-                # Commit the individual record success
-                conn.commit() 
-                return True, operation
-
-            except Exception as e:
-                # This is the critical fix: If the insert/update fails, 
-                # we MUST rollback the savepoint to keep the connection "clean"
-                try:
-                    cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert_sp")
-                except:
-                    # If savepoint rollback fails, just rollback the whole transaction
-                    try:
-                        conn.rollback()
-                    except:
-                        pass
-                logger.error(f"Row error for {crime_id}: {e}")
-                return False, 'error'
+            # Commit the individual record success
+            conn.commit()
+            return True, operation
 
         except Exception as e:
-            # If the hierarchy check or outer logic fails
+            # On any error, rollback the transaction and return failure
             try:
                 conn.rollback()
             except:
+                # Connection might already be closed or in bad state
                 pass
-            logger.error(f"Critical error for {crime_id}: {e}")
-            return False, 'critical_error'
+            logger.error(f"Row error for {crime_id}: {e}")
+            with self.stats_lock:
+                self.stats['total_crimes_failed'] += 1
+            return False, 'error'
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process crimes for a specific date range"""
         chunk_range = f"{from_date} to {to_date}"
