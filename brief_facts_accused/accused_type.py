@@ -11,7 +11,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-def find_best_match(extracted_name, existing_records, threshold=85):
+def find_best_match(extracted_name, existing_records, threshold=75):
     """
     Finds the best matching person from existing records using fuzzy matching on name/alias.
     """
@@ -152,6 +152,8 @@ def process_crimes(conn, crimes):
                     # DB check allows NULL, but not the literal fallback string.
                     if data.get('accused_type') == 'unknown':
                         data['accused_type'] = None
+                    if data.get('status') == 'unknown':
+                        data['status'] = None
 
                     insert_accused_facts(conn, data)
                     count += 1

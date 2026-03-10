@@ -1,0 +1,38 @@
+name: Rohith GPU
+version: 1.0.0
+schema: v1
+
+# Define which models can be used
+# https://docs.continue.dev/customization/models
+models:
+  - name: Qwen 2.5 Coder (14b)
+    provider: ollama
+    model: qwen2.5-coder:14b
+    apiBase: http://192.168.102.21:11434
+    capabilities:
+      - tool_use
+
+  - name: DeepSeek Coder v2 (16b)
+    provider: ollama
+    model: deepseek-coder-v2:16b
+    apiBase: http://192.168.102.21:11434
+    capabilities:
+      - tool_use
+
+  - name: Llama 3.1 (8b)
+    provider: ollama
+    model: llama3.1:8b
+    apiBase: http://192.168.102.21:11434
+    capabilities:
+      - tool_use
+
+# MCP Servers that Continue can access
+# https://docs.continue.dev/customization/mcp-tools
+mcpServers:
+  - name: Memory
+    command: cmd.exe
+    args:
+      - "/c"
+      - "npx"
+      - "-y"
+      - "@modelcontextprotocol/server-memory"

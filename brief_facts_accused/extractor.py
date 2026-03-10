@@ -31,8 +31,8 @@ class AccusedExtraction(BaseModel):
     key_details: Optional[str] = Field(default=None, description="Important context or facts regarding this person")
     
     accused_type: Optional[str] = Field(
-        default="unknown", 
-        description="One of: peddler, consumer, supplier, harbourer, organizer_kingpin, processor, financier, manufacturer, transporter, producer, unknown"
+        default="unknown",
+        description="One of: peddler, consumer, supplier, harbourer, organizer_kingpin, processor, financier, manufacturer, unknown"
     )
     status: Optional[str] = Field(default="unknown", description="arrested, absconding, or unknown")
     is_ccl: bool = Field(default=False, description="Is Child in Conflict with Law (Juvenile)")
@@ -89,6 +89,7 @@ class AccusedDetails(BaseModel):
     address: Optional[str] = Field(description="Full address or residence")
     phone_numbers: Optional[str] = Field(description="Phone numbers")
     role_in_crime: Optional[str] = Field(default=None, description="Factual action or role description")
+    key_details: Optional[str] = Field(default=None, description="Quantities seized, substance type, vehicle used, or other specific investigative facts")
 
 def clean_accused_name(name: str) -> str:
     """
@@ -215,6 +216,7 @@ STRICT RULES
 - Extract strictly from the text. Do not guess.
 - Address: Extract full available address (H.No, Village, Mandal, State).
 - Role: Describe what they did AND their INTENT if stated (e.g. "Caught with 5kg ganja for selling", "Purchased for personal consumption", "Caught with phone", "Transporting drugs in car", "Cultivating ganja plants").
+- Key Details: Note any quantities of substances, type of drugs, vehicle used, items seized, or other specific investigative facts unique to this accused. Be concise (e.g. "5kg ganja, seized in a red bag", "two mobile phones seized", "drove a blue Activa").
 
 Accused List:
 {accused_names}
@@ -230,6 +232,7 @@ Input Text:
 def classify_accused_type(role_text: str) -> str:
     """
     Deterministically determines accused type based on role text keywords.
+    Returns one of the 8 schema-valid categories or "unknown".
     """
     if not role_text:
         return "unknown"
@@ -250,21 +253,15 @@ def classify_accused_type(role_text: str) -> str:
         "business",
         "intending to sell",
         "to sell",
-        "distributing"
+        "distributing",
+        "pushing",
+        "hawking",
+        "street sale",
+        "spot sale",
+        "trafficking",
+        "peddling",
     ]):
         return "peddler"
-
-    # ------------------
-    # TRANSPORTER
-    # ------------------
-    if any(k in t for k in [
-        "transporting",
-        "carrying",
-        "delivering",
-        "driver",
-        "courier"
-    ]):
-        return "transporter"
 
     # ------------------
     # CONSUMER (Priority over Possession)
@@ -280,7 +277,13 @@ def classify_accused_type(role_text: str) -> str:
         "addicted",
         "purchased for consumption",
         "bought for consumption",
-        "buy for consumption"
+        "buy for consumption",
+        "personal consumption",
+        "consumed",
+        "using drugs",
+        "drug user",
+        "under influence",
+        "for own use",
     ]):
         return "consumer"
 
@@ -295,12 +298,19 @@ def classify_accused_type(role_text: str) -> str:
         "network leader",
         "head of",
         "directed",
-        "controlled"
+        "controlled",
+        "ringleader",
+        "boss",
+        "gang leader",
+        "in-charge",
+        "overseeing",
+        "coordinating",
+        "managing the operation",
     ]):
         return "organizer_kingpin"
 
     # ------------------
-    # SUPPLIER (Distributor/Wholesaler)
+    # SUPPLIER (Distributor/Wholesaler/Transporter - all supply-chain roles)
     # ------------------
     if any(k in t for k in [
         "supplied",
@@ -312,33 +322,36 @@ def classify_accused_type(role_text: str) -> str:
         "provided drugs to",
         "source of supply",
         "procured from",
-        "procured" 
+        "procured",
+        "transporting",
+        "carrying",
+        "delivering",
+        "courier",
+        "driver",
+        "dispatch",
+        "shipment",
+        "transit",
     ]):
         return "supplier"
 
     # ------------------
-    # MANUFACTURER (Producer/Cultivator)
+    # MANUFACTURER (Producer/Cultivator - all production roles)
     # ------------------
     if any(k in t for k in [
         "manufactured",
-        "production of"
-    ]):
-        return "manufacturer"
-
-    # ------------------
-    # PRODUCER
-    # ------------------
-    if any(k in t for k in [
+        "production of",
         "producing",
-        "producer",
         "growing",
         "cultivator",
         "farming",
         "cultivated",
         "grown",
-        "grower"
+        "grower",
+        "farm",
+        "cultivation",
+        "producer",
     ]):
-        return "producer"
+        return "manufacturer"
 
     # ------------------
     # HARBOURER
@@ -350,7 +363,14 @@ def classify_accused_type(role_text: str) -> str:
         "rented room",
         "harboured",
         "concealed",
-        "premises used"
+        "premises used",
+        "hiding",
+        "hiding place",
+        "stash house",
+        "storing at",
+        "stored at",
+        "kept at",
+        "concealing",
     ]):
         return "harbourer"
 
@@ -365,10 +385,15 @@ def classify_accused_type(role_text: str) -> str:
         "investor",
         "invested",
         "money launder",
-        "provided capital"
+        "provided capital",
+        "backer",
+        "sponsored",
+        "money for purchase",
+        "provided money",
+        "lender",
     ]):
         return "financier"
-        
+
     # ------------------
     # PROCESSOR
     # ------------------
@@ -377,7 +402,14 @@ def classify_accused_type(role_text: str) -> str:
         "converted",
         "refined",
         "chemical processing",
-        "lab"
+        "lab",
+        "processing",
+        "packaging",
+        "packed",
+        "repacked",
+        "mixing",
+        "adulteration",
+        "weighing and packing",
     ]):
         return "processor"
 
@@ -385,15 +417,15 @@ def classify_accused_type(role_text: str) -> str:
     # PASSIVE PEDDLER (Possession/Catch-all) - Lowest Priority
     # ------------------
     if any(k in t for k in [
-        "caught with", 
+        "caught with",
         "possession",
         "possession of",
         "found in possession",
-        "purchasing", 
+        "purchasing",
         "purchased",
         "bought",
         "buy",
-        "small scale"
+        "small scale",
     ]):
         return "peddler"
 
@@ -663,6 +695,7 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
         occupation = None
         address = None
         phone = None
+        key_details = None
 
         if d_obj:
             role_desc = d_obj.role_in_crime or role_desc
@@ -672,6 +705,7 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             occupation = d_obj.occupation
             address = d_obj.address
             phone = d_obj.phone_numbers
+            key_details = d_obj.key_details
 
         accused_type = classify_accused_type(role_desc)
         is_ccl = detect_ccl(clean_name, role_desc)
@@ -680,10 +714,25 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
         logic_gender = detect_gender(text, raw_name, gender)
         final_gender = logic_gender if logic_gender else gender
 
+        _role_lower = role_desc.lower()
+        _name_lower = clean_name.lower()
+        _combined = _role_lower + " " + _name_lower
+
+        _absconding_keywords = [
+            "absconding", "evading", "fled", "on the run", "not traceable",
+            "not found", "missing", "could not be traced", "yet to be arrested",
+            "failed to appear", "escaped",
+        ]
+        _arrested_keywords = [
+            "arrested", "caught", "apprehended", "detained", "nabbed", "held",
+            "taken into custody", "remanded", "produced before court", "surrendered",
+            "confessed", "confession",
+        ]
+
         status = "unknown"
-        if "absconding" in role_desc.lower() or "absconding" in clean_name.lower():
+        if any(k in _combined for k in _absconding_keywords):
             status = "absconding"
-        elif "arrested" in role_desc.lower() or "caught" in role_desc.lower() or "apprehended" in role_desc.lower():
+        elif any(k in _combined for k in _arrested_keywords):
             status = "arrested"
 
         obj = AccusedExtraction(
@@ -695,6 +744,7 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             address=address,
             phone_numbers=phone,
             role_in_crime=role_desc,
+            key_details=key_details,
             accused_type=accused_type,
             status=status,
             is_ccl=is_ccl
