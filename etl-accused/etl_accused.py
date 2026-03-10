@@ -1791,8 +1791,8 @@ class AccusedETL:
             logger.info(f"ℹ️  Expected Total from API Team: 22423 (insert + update records)")
             logger.info("")
             
-            # Chunk-level parallelism is optional; record-level parallelism still applies inside each chunk.
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '1'))
+            # Chunk-level parallelism - now defaults to 8 workers for 64GB server
+            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '8'))
             inter_chunk_sleep = float(os.environ.get('ACCUSED_INTER_CHUNK_SLEEP', '0'))
 
             if chunk_workers <= 1:
