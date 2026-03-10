@@ -25,6 +25,8 @@ import os
 import sys
 import logging
 import threading
+import unicodedata
+import re
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,10 +45,15 @@ from db_pooling import PostgreSQLConnectionPool
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    stream=sys.stdout
+    stream=sys.stdout,
+    force=True
 )
 
 logger = logging.getLogger(__name__)
+
+# Force unbuffered output for nohup
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 1)
+sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', 1)
 
 
 # ------------------------------------------------------------------
@@ -105,7 +112,13 @@ class GeoReferenceCache:
 
     def find_mandal(self, tokens: str, district: Optional[str], 
                     state: Optional[str], sim_threshold: float) -> Optional[str]:
-        """Find best matching mandal using local similarity."""
+        """Find best matching mandal using multi-strategy matching.
+        
+        Strategies (in order):
+        1. Exact substring match (highest confidence)
+        2. SequenceMatcher similarity (difflib)
+        3. Token overlap scoring (words present in both)
+        """
         if not tokens:
             return None
 
@@ -119,16 +132,51 @@ class GeoReferenceCache:
         if not candidates:
             return None
 
+        tokens_normalized = normalize_text(tokens)
+        tokens_set = set(tokens_normalized.split())
+        
         best_match = None
         best_score = 0.0
+        match_strategy = None
 
         for mandal in candidates:
-            score = SequenceMatcher(None, tokens.lower(), mandal.lower()).ratio()
+            mandal_normalized = normalize_text(mandal)
+            mandal_set = set(mandal_normalized.split())
+            
+            score = 0.0
+            strategy = None
+            
+            # Strategy 1: Exact substring (highest confidence)
+            if mandal_normalized in tokens_normalized or tokens_normalized in mandal_normalized:
+                score = 1.0
+                strategy = "exact_substring"
+            
+            # Strategy 2: SequenceMatcher (good for close matches)
+            else:
+                seq_score = SequenceMatcher(None, tokens_normalized, mandal_normalized).ratio()
+                if seq_score > score:
+                    score = seq_score
+                    strategy = "sequence_matcher"
+            
+            # Strategy 3: Token overlap (fallback)
+            if strategy is None or score < 0.5:
+                overlap = len(tokens_set & mandal_set)
+                if overlap > 0:
+                    token_score = overlap / max(len(tokens_set), len(mandal_set))
+                    if token_score > score:
+                        score = token_score
+                        strategy = "token_overlap"
+            
+            # Update best match if this is better
             if score > best_score:
                 best_score = score
                 best_match = mandal
+                match_strategy = strategy
 
+        # Return match only if meets threshold
         if best_score >= sim_threshold:
+            logger.debug("found mandal=%s score=%.2f strategy=%s from tokens=%s",
+                        best_match, best_score, match_strategy, tokens)
             return best_match
 
         return None
@@ -153,23 +201,47 @@ def _val(v: Optional[str]) -> Optional[str]:
     return v.strip() if v and v.strip() else None
 
 
-def build_tokens(fields: List[Optional[str]]) -> Optional[str]:
+def normalize_text(text: str) -> str:
+    """Aggressive normalization: remove special chars, normalize unicode."""
+    if not text:
+        return ""
+    
+    # Unicode normalization (NFKD = decompose, remove accents)
+    text = unicodedata.normalize('NFKD', text)
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    
+    # Lowercase
+    text = text.lower()
+    
+    # Remove special characters, keep only alphanumeric and spaces
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    
+    # Normalize whitespace
+    text = ' '.join(text.split())
+    
+    return text
 
+
+def build_tokens(fields: List[Optional[str]]) -> Optional[str]:
+    """Build combined token string from address fields.
+    
+    Combines address components and applies aggressive normalization
+    to improve mandal matching accuracy.
+    """
     tokens = []
 
     for f in fields:
         v = _val(f)
         if v:
-            tokens.append(v.lower())
+            normalized = normalize_text(v)
+            if normalized:
+                tokens.append(normalized)
 
     if not tokens:
         return None
 
     text = " ".join(tokens)
-
-    text = text.replace(",", " ")
-    text = text.replace("-", " ")
-    text = " ".join(text.split())
+    text = ' '.join(text.split())  # Final whitespace cleanup
 
     return text
 
@@ -265,10 +337,14 @@ def fetch_batch(offset, limit):
 
     pool = PostgreSQLConnectionPool()
 
+    logger.info("fetching batch at offset=%s limit=%s", offset, limit)
+    
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (offset, limit))
             rows = cur.fetchall()
+
+    logger.info("fetched %d rows from batch", len(rows))
 
     records = []
 
@@ -363,6 +439,10 @@ def process_record(rec, stats, lock):
         ])
 
         perm_new = recover_mandal(tokens, rec.perm_district, rec.perm_state)
+        
+        if perm_new:
+            logger.debug("imputed perm_mandal=%s for person_id=%s from tokens=%s",
+                        perm_new, rec.person_id, tokens)
 
     if not _val(rec.pres_mandal):
 
@@ -376,6 +456,10 @@ def process_record(rec, stats, lock):
         ])
 
         pres_new = recover_mandal(tokens, rec.pres_district, rec.pres_state)
+        
+        if pres_new:
+            logger.debug("imputed pres_mandal=%s for person_id=%s from tokens=%s",
+                        pres_new, rec.person_id, tokens)
 
     if perm_new or pres_new:
 
