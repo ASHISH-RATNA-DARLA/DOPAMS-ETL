@@ -1624,7 +1624,7 @@ class AccusedETL:
                 success, operation = self.insert_accused(accused, conn, cursor, chunk_range)
                 return {'accused_id': accused_id, 'operation': operation, 'success': success, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
 
-        requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+        requested_workers = int(os.environ.get('MAX_WORKERS', 2))  # Default to 2 for safety (not CPU-based)
         # Guardrail: don't allow row-level concurrency to exceed pool capacity.
         # This prevents psycopg2.pool.PoolError: Connection pool exhausted under load.
         pool_maxconn = getattr(self.db_pool, 'maxconn', None)
