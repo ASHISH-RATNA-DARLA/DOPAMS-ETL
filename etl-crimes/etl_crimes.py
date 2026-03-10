@@ -674,14 +674,48 @@ class CrimesETL:
                 
                 if self.crime_exists(crime_id, cursor):
                     existing = self.get_existing_crime(crime_id, cursor)
-                    # ... [Keep your existing logic to calculate update_fields] ...
+                    
+                    # Calculate which fields have changed
+                    update_fields = []
+                    update_values = []
+                    
+                    fields_to_check = [
+                        ('ps_code', 'ps_code'),
+                        ('fir_num', 'fir_num'),
+                        ('fir_reg_num', 'fir_reg_num'),
+                        ('fir_type', 'fir_type'),
+                        ('acts_sections', 'acts_sections'),
+                        ('fir_date', 'fir_date'),
+                        ('case_status', 'case_status'),
+                        ('major_head', 'major_head'),
+                        ('minor_head', 'minor_head'),
+                        ('crime_type', 'crime_type'),
+                        ('io_name', 'io_name'),
+                        ('io_rank', 'io_rank'),
+                        ('brief_facts', 'brief_facts'),
+                        ('fir_copy', 'fir_copy'),
+                        ('additional_json_data', 'additional_json_data'),
+                        ('date_modified', 'date_modified')
+                    ]
+                    
+                    for crime_key, db_key in fields_to_check:
+                        if crime.get(crime_key) != existing.get(db_key):
+                            update_fields.append(f"{db_key} = %s")
+                            if crime_key == 'additional_json_data':
+                                update_values.append(Json(crime[crime_key]) if crime[crime_key] else None)
+                            else:
+                                update_values.append(crime.get(crime_key))
                     
                     if update_fields:
                         update_query = f"UPDATE {CRIMES_TABLE} SET {', '.join(update_fields)} WHERE crime_id = %s"
                         update_values.append(crime_id)
                         cursor.execute(update_query, tuple(update_values))
+                        with self.stats_lock:
+                            self.stats['total_crimes_updated'] += 1
                         operation = 'updated'
                     else:
+                        with self.stats_lock:
+                            self.stats['total_crimes_no_change'] += 1
                         operation = 'no_change'
                 else:
                     insert_query = f"""
@@ -701,6 +735,8 @@ class CrimesETL:
                         Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
                         crime['date_created'], crime['date_modified']
                     ))
+                    with self.stats_lock:
+                        self.stats['total_crimes_inserted'] += 1
                     operation = 'inserted'
 
                 cursor.execute("RELEASE SAVEPOINT smart_upsert_sp")
@@ -711,13 +747,23 @@ class CrimesETL:
             except Exception as e:
                 # This is the critical fix: If the insert/update fails, 
                 # we MUST rollback the savepoint to keep the connection "clean"
-                cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert_sp")
+                try:
+                    cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert_sp")
+                except:
+                    # If savepoint rollback fails, just rollback the whole transaction
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
                 logger.error(f"Row error for {crime_id}: {e}")
                 return False, 'error'
 
         except Exception as e:
             # If the hierarchy check or outer logic fails
-            conn.rollback()
+            try:
+                conn.rollback()
+            except:
+                pass
             logger.error(f"Critical error for {crime_id}: {e}")
             return False, 'critical_error'
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
