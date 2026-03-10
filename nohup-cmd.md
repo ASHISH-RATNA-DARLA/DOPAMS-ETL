@@ -27,6 +27,7 @@ cd /data-drive/etl-process-dev/etl-persons && source /data-drive/etl-process-dev
 Order 7 – update-state-country
 bash
 cd /data-drive/etl-process-dev/update-state-country && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 update-state-country.py > update_state_country.log 2>&1 &
+
 Order 8 – domicile_classification
 bash
 cd /data-drive/etl-process-dev/domicile_classification && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 domicile_classifier.py > domicile_classifier.log 2>&1 &

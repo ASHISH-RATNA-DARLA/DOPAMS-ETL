@@ -91,7 +91,7 @@ MAX_WORKERS  = int(os.environ.get("MAX_WORKERS",  str(min(32, (os.cpu_count() or
 SIM_STATE    = float(os.environ.get("GEO_SIM_STATE",    "0.85"))
 SIM_DISTRICT = float(os.environ.get("GEO_SIM_DISTRICT", "0.80"))
 SIM_MANDAL   = float(os.environ.get("GEO_SIM_MANDAL",   "0.65"))
-SIM_FOREIGN  = float(os.environ.get("GEO_SIM_FOREIGN",  "0.50"))
+SIM_FOREIGN  = float(os.environ.get("GEO_SIM_FOREIGN",  "0.65"))
 
 logger.info("DB      : %s @ %s", os.environ.get("DB_NAME", "dopamas"), os.environ.get("DB_HOST", "localhost"))
 logger.info("Table   : %s  ID: %s", TABLE_NAME, ID_COLUMN)
