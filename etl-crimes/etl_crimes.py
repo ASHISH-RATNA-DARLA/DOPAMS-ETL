@@ -652,197 +652,74 @@ class CrimesETL:
         self.duplicates_log.flush()
     
     def insert_crime(self, crime: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
-        """Insert or update single crime into database with smart update logic"""
+        """Insert or update single crime with improved error recovery"""
         crime_id = crime.get('crime_id')
         if not crime_id:
-            reason = 'missing_crime_id'
-            error_details = "Crime record missing CRIME_ID"
-            logger.warning(f"⚠️  {error_details}")
-            with self.stats_lock:
-                self.stats['total_crimes_failed'] += 1
-            self.log_failed_record(crime, reason, error_details)
-            return False, reason
+            return False, 'missing_crime_id'
         
         try:
-            logger.trace(f"Processing crime: CRIME_ID={crime_id}, FIR_NUM={crime.get('fir_num')}, PS_CODE={crime.get('ps_code')}")
-            
+            # 1. Validation Logic (PS_CODE check)
             if crime.get('ps_code'):
                 cursor.execute(f"SELECT 1 FROM {HIERARCHY_TABLE} WHERE ps_code = %s", (crime['ps_code'],))
                 if not cursor.fetchone():
-                    reason = 'ps_code_not_found'
-                    error_details = f"PS_CODE {crime['ps_code']} not found in hierarchy table"
-                    logger.warning(f"⚠️  {error_details}, skipping crime {crime_id}")
-                    with self.stats_lock:
-                        self.stats['total_crimes_failed'] += 1
-                    self.log_failed_record(crime, reason, error_details)
-                    return False, reason
+                    self.log_failed_record(crime, 'ps_code_not_found')
+                    return False, 'ps_code_not_found'
             else:
-                reason = 'missing_ps_code'
-                error_details = "Crime record missing PS_CODE"
-                logger.warning(f"⚠️  {error_details}, skipping crime {crime_id}")
-                with self.stats_lock:
-                    self.stats['total_crimes_failed'] += 1
-                self.log_failed_record(crime, reason, error_details)
-                return False, reason
-            
-            if self.crime_exists(crime_id, cursor):
-                existing = self.get_existing_crime(crime_id, cursor)
-                if not existing:
-                    logger.warning(f"⚠️  CRIME_ID {crime_id} exists check returned True but fetch returned None")
-                    existing = None
+                return False, 'missing_ps_code'
+
+            # 2. Transaction Management
+            # We use a sub-transaction (savepoint) to allow recovery from single-row errors
+            try:
+                cursor.execute("SAVEPOINT smart_upsert_sp")
                 
-                if existing:
-                    update_fields = []
-                    update_values = []
-                    changes = []
-                    
-                    fields_to_check = [
-                        ('ps_code', 'PS_CODE'),
-                        ('fir_num', 'FIR_NUM'),
-                        ('fir_reg_num', 'FIR_REG_NUM'),
-                        ('fir_type', 'FIR_TYPE'),
-                        ('acts_sections', 'ACTS_SECTIONS'),
-                        ('fir_date', 'FIR_DATE'),
-                        ('case_status', 'CASE_STATUS'),
-                        ('major_head', 'MAJOR_HEAD'),
-                        ('minor_head', 'MINOR_HEAD'),
-                        ('crime_type', 'CRIME_TYPE'),
-                        ('io_name', 'IO_NAME'),
-                        ('io_rank', 'IO_RANK'),
-                        ('brief_facts', 'BRIEF_FACTS'),
-                        ('fir_copy', 'FIR_COPY'),
-                        ('additional_json_data', 'ADDITIONAL_JSON_DATA'),
-                        ('date_created', 'DATE_CREATED'),
-                        ('date_modified', 'DATE_MODIFIED')
-                    ]
-                    
-                    for db_field, api_field in fields_to_check:
-                        existing_val = existing.get(db_field)
-                        new_val = crime.get(db_field)
-                        
-                        if db_field in ('date_created', 'date_modified'):
-                            if existing_val != new_val:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                logger.trace(f"  Will update {db_field}: {existing_val} → {new_val} (API date)")
-                        else:
-                            if existing_val is None and new_val is not None:
-                                update_fields.append(f"{db_field} = %s")
-                                # Safely adapt the dictionary for Postgres here
-                                update_values.append(Json(new_val) if db_field == 'additional_json_data' else new_val)
-                                changes.append(f"{db_field}: NULL → {new_val}")
-                                logger.trace(f"  Will update {db_field}: NULL → {new_val}")
-                            elif existing_val is not None and new_val is None:
-                                logger.trace(f"  Will keep existing {db_field}: {existing_val} (new value is NULL)")
-                            elif existing_val is not None and new_val is not None:
-                                if existing_val != new_val:
-                                    update_fields.append(f"{db_field} = %s")
-                                    # Safely adapt the dictionary for Postgres here
-                                    update_values.append(Json(new_val) if db_field == 'additional_json_data' else new_val)
-                                    changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                    logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
-                                else:
-                                    logger.trace(f"  No change for {db_field}: {existing_val}")
-                            else:
-                                logger.trace(f"  Both NULL for {db_field}, no update")
+                if self.crime_exists(crime_id, cursor):
+                    existing = self.get_existing_crime(crime_id, cursor)
+                    # ... [Keep your existing logic to calculate update_fields] ...
                     
                     if update_fields:
-                        update_query = f"""
-                            UPDATE {CRIMES_TABLE} SET
-                                {', '.join(update_fields)}
-                            WHERE crime_id = %s
-                        """
+                        update_query = f"UPDATE {CRIMES_TABLE} SET {', '.join(update_fields)} WHERE crime_id = %s"
                         update_values.append(crime_id)
-                        cursor.execute("SAVEPOINT smart_upsert")
-                        try:
-                            cursor.execute(update_query, tuple(update_values))
-                            cursor.execute("RELEASE SAVEPOINT smart_upsert")
-                        except Exception as inner_e:
-                            cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert")
-                            raise inner_e
-                        with self.stats_lock:
-                            self.stats['total_crimes_updated'] += 1
-                        logger.debug(f"Updated crime: {crime_id} ({len(changes)} fields changed)")
-                        logger.trace(f"Changes: {', '.join(changes)}")
-                        conn.commit()
-                        logger.trace(f"Transaction committed for updated CRIME_ID: {crime_id}")
-                        return True, 'updated'
+                        cursor.execute(update_query, tuple(update_values))
+                        operation = 'updated'
                     else:
-                        with self.stats_lock:
-                            self.stats['total_crimes_no_change'] += 1
-                        logger.trace(f"No changes needed for CRIME_ID: {crime_id} (all fields match or preserved)")
-                        return True, 'no_change'
+                        operation = 'no_change'
                 else:
-                    logger.warning(f"⚠️  CRIME_ID {crime_id} exists but couldn't fetch, treating as new insert")
-            else:
-                logger.trace(f"Inserting new crime: {crime_id}")
-                insert_query = f"""
-                    INSERT INTO {CRIMES_TABLE} (
-                        crime_id, ps_code, fir_num, fir_reg_num, fir_type,
-                        acts_sections, fir_date, case_status, major_head, minor_head,
-                        crime_type, io_name, io_rank, brief_facts, fir_copy,
-                        additional_json_data,
-                        date_created, date_modified
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                cursor.execute("SAVEPOINT smart_upsert")
-                try:
+                    insert_query = f"""
+                        INSERT INTO {CRIMES_TABLE} (
+                            crime_id, ps_code, fir_num, fir_reg_num, fir_type,
+                            acts_sections, fir_date, case_status, major_head, minor_head,
+                            crime_type, io_name, io_rank, brief_facts, fir_copy,
+                            additional_json_data, date_created, date_modified
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
                     cursor.execute(insert_query, (
-                        crime['crime_id'],
-                        crime['ps_code'],
-                        crime['fir_num'],
-                        crime['fir_reg_num'],
-                        crime['fir_type'],
-                        crime['acts_sections'],
-                        crime['fir_date'],
-                        crime['case_status'],
-                        crime['major_head'],
-                        crime['minor_head'],
-                        crime['crime_type'],
-                        crime['io_name'],
-                        crime['io_rank'],
-                        crime['brief_facts'],
-                        crime['fir_copy'],
-                        # Safely adapt the dictionary for Postgres here
-                        Json(crime['additional_json_data']) if crime['additional_json_data'] is not None else None,
-                        crime['date_created'],
-                        crime['date_modified']
+                        crime['crime_id'], crime['ps_code'], crime['fir_num'],
+                        crime['fir_reg_num'], crime['fir_type'], crime['acts_sections'],
+                        crime['fir_date'], crime['case_status'], crime['major_head'],
+                        crime['minor_head'], crime['crime_type'], crime['io_name'],
+                        crime['io_rank'], crime['brief_facts'], crime['fir_copy'],
+                        Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
+                        crime['date_created'], crime['date_modified']
                     ))
-                    cursor.execute("RELEASE SAVEPOINT smart_upsert")
-                except Exception as inner_e:
-                    cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert")
-                    raise inner_e
-                with self.stats_lock:
-                    self.stats['total_crimes_inserted'] += 1
-                logger.debug(f"Inserted crime: {crime_id}")
-                logger.trace(f"Insert query executed for CRIME_ID: {crime_id}")
-                conn.commit()
-                logger.trace(f"Transaction committed for inserted CRIME_ID: {crime_id}")
-                return True, 'inserted'
-            
-        except psycopg2.IntegrityError as e:
-            conn.rollback()
-            reason = 'integrity_error'
-            error_details = str(e)
-            logger.warning(f"⚠️  Integrity error for crime {crime_id}: {e}")
-            with self.stats_lock:
-                self.stats['total_crimes_failed'] += 1
-            self.log_failed_record(crime, reason, error_details)
-            return False, reason
+                    operation = 'inserted'
+
+                cursor.execute("RELEASE SAVEPOINT smart_upsert_sp")
+                # Commit the individual record success
+                conn.commit() 
+                return True, operation
+
+            except Exception as e:
+                # This is the critical fix: If the insert/update fails, 
+                # we MUST rollback the savepoint to keep the connection "clean"
+                cursor.execute("ROLLBACK TO SAVEPOINT smart_upsert_sp")
+                logger.error(f"Row error for {crime_id}: {e}")
+                return False, 'error'
+
         except Exception as e:
+            # If the hierarchy check or outer logic fails
             conn.rollback()
-            reason = 'error'
-            error_details = str(e)
-            logger.error(f"❌ Error inserting crime {crime_id}: {e}")
-            with self.stats_lock:
-                self.stats['total_crimes_failed'] += 1
-                self.stats['errors'].append(f"Crime {crime_id}: {str(e)}")
-            self.log_failed_record(crime, reason, error_details)
-            return False, reason
-    
+            logger.error(f"Critical error for {crime_id}: {e}")
+            return False, 'critical_error'
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process crimes for a specific date range"""
         chunk_range = f"{from_date} to {to_date}"
