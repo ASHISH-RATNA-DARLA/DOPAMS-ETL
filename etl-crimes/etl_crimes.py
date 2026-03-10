@@ -767,9 +767,10 @@ class CrimesETL:
             self.log_db_chunk(from_date, to_date, 0, [], [], [], [], [], error="No crimes in API response")
             return
         
-        with self.db_pool.get_connection_context() as conn:
-            cursor = conn.cursor()
-            if table_columns is not None and len(crimes_raw) > 0:
+        # Handle schema updates once per chunk
+        if table_columns is not None and len(crimes_raw) > 0:
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
                 with self.schema_lock:
                     new_fields = self.detect_new_fields(crimes_raw[0], table_columns)
                     if new_fields:
@@ -778,9 +779,10 @@ class CrimesETL:
                             if self.add_column_to_table(db_column, conn, cursor):
                                 table_columns.add(db_column)
                         self.update_existing_records_with_new_fields(new_fields, to_date)
-            
-            with self.stats_lock:
-                self.stats['total_crimes_fetched'] += len(crimes_raw)
+        
+        with self.stats_lock:
+            self.stats['total_crimes_fetched'] += len(crimes_raw)
+        
         logger.trace(f"Processing {len(crimes_raw)} crimes for chunk {chunk_range}")
         
         inserted_ids = []
@@ -830,7 +832,16 @@ class CrimesETL:
                 seen_crime_ids[crime_id] = chunk_range
                 crime_id_occurrences[crime_id] = 1
             
-            success, operation = self.insert_crime(crime, conn, cursor, chunk_range)
+            # Get fresh connection and cursor for each record
+            try:
+                with self.db_pool.get_connection_context() as conn:
+                    cursor = conn.cursor()
+                    success, operation = self.insert_crime(crime, conn, cursor, chunk_range)
+            except Exception as e:
+                logger.error(f"Connection error for {crime_id}: {e}")
+                success = False
+                operation = 'error'
+            
             if success:
                 if operation == 'inserted':
                     if crime_id not in inserted_ids:
@@ -852,8 +863,6 @@ class CrimesETL:
                         'ps_code': crime.get('ps_code'),
                         'fir_num': crime.get('fir_num')
                     })
-            
-            conn.commit()
         
         if duplicates_in_chunk:
             logger.info(f"📊 Found {len(duplicates_in_chunk)} duplicate occurrences in chunk {chunk_range} - All were processed for potential updates")
