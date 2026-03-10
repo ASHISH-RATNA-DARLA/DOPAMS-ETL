@@ -18,6 +18,9 @@ cd /data-drive/etl-process-dev/etl_case_status && source /data-drive/etl-process
 Order 5 – accused
 bash
 cd /data-drive/etl-process-dev/etl-accused && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 etl_accused.py > etl_accused.log 2>&1 &
+
+
+
 Order 6 – persons
 bash
 cd /data-drive/etl-process-dev/etl-persons && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 etl_persons.py > etl_persons.log 2>&1 &

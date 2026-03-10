@@ -33,25 +33,27 @@ API_CONFIG = {
 }
 
 # ETL Configuration
-# Date range is now calculated dynamically:
-#   - Start date: Always 2022-01-01T00:00:00+05:30 (hardcoded in ETL scripts)
-#   - End date: Yesterday at 23:59:59+05:30 IST (calculated dynamically each run)
-#   - For existing databases: ETL checks max(date_created, date_modified) and resumes from there
-#   - For new databases: ETL starts from 2022-01-01
+# Date range can be configured via environment variables:
+#   - ACCUSED_START_DATE: Override start date (format: YYYY-MM-DDTHH:MM:SS+HH:MM or YYYY-MM-DD)
+#   - ACCUSED_END_DATE: Override end date (format: YYYY-MM-DDTHH:MM:SS+HH:MM or YYYY-MM-DD)
+#   - If not set, ETL behavior depends on run mode:
+#     * RUN_MODE=1 (Incremental): Uses max(date_created, date_modified) from existing data, defaults to DEFAULT_START_DATE
+#     * RUN_MODE=0 (Full Reset): Uses DEFAULT_START_DATE to yesterday
 # Chunks are 5 days with 1-day overlap to ensure no data loss
 
+# Default date for full reset or initial runs (can be overridden with ACCUSED_START_DATE)
+DEFAULT_START_DATE = os.getenv('ACCUSED_START_DATE', '2022-01-01T00:00:00+05:30')
+
 ETL_CONFIG = {
-    # NOTE: start_date and end_date are kept for backward compatibility and log headers only
-    # Actual date range is calculated dynamically in each ETL script:
-    #   - Fixed start: 2022-01-01T00:00:00+05:30 (hardcoded in ETL scripts)
-    #   - Dynamic end: Yesterday at 23:59:59+05:30 IST (calculated each run)
-    #   - For existing databases: ETL checks max(date_created, date_modified) and resumes from there
-    'start_date': '2022-01-01T00:00:00+05:30',  # Reference date for log headers (1st January 2022, 00:00:00 IST)
-    'end_date': '2025-12-31T23:59:59+05:30',    # Placeholder for log headers (not used in actual processing)
+    # NOTE: start_date and end_date can be overridden via environment variables:
+    #   - ACCUSED_START_DATE: Override the start date (useful for testing or partial re-runs)
+    #   - ACCUSED_END_DATE: Override the end date
+    'start_date': DEFAULT_START_DATE,           # Can be overridden via ACCUSED_START_DATE env var
+    'end_date': os.getenv('ACCUSED_END_DATE', '2025-12-31T23:59:59+05:30'),    # Can be overridden via ACCUSED_END_DATE env var
     
     'chunk_days': 5,  # Fetch 5 days at a time
     'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS')),  # Overlap between chunks to ensure no data is missed
-    'batch_size': 100,  # Insert batch size
+    'batch_size': 500,  # Insert batch size (optimized for 64GB server - increased from 100)
     'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS') == 'true'
 }
 

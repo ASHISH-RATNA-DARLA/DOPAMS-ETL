@@ -282,8 +282,10 @@ class AccusedETL:
 
     def connect_db(self):
         try:
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '1'))
-            row_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
+            # Optimized for 64GB server - aggressive multithreading
+            # Default: 8 chunks × 64 workers = 512 concurrent threads
+            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '8'))
+            row_workers = int(os.environ.get('MAX_WORKERS', min(64, (os.cpu_count() or 1) * 8)))
             total_workers = chunk_workers * row_workers
                 
             self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=total_workers + 10, **DB_CONFIG)
@@ -316,9 +318,15 @@ class AccusedETL:
     def get_effective_start_date(self) -> str:
         """
         Get effective start date for ETL:
-        - If table is empty: return 2022-01-01T00:00:00+05:30
+        - If explicitly set via ACCUSED_START_DATE env var: use that
+        - If table is empty: use DEFAULT_START_DATE (configurable, defaults to 2022-01-01T00:00:00+05:30)
         - If table has data: return max(date_created, date_modified) from table
         """
+        # Check if explicitly overridden via environment variable
+        if os.environ.get('ACCUSED_START_DATE'):
+            logger.info(f"📌 Using environment-provided start date: {os.environ.get('ACCUSED_START_DATE')}")
+            return os.environ.get('ACCUSED_START_DATE')
+        
         try:
             with self.db_pool.get_connection_context() as conn:
                 cursor = conn.cursor()
@@ -326,20 +334,24 @@ class AccusedETL:
                 cursor.execute(f"SELECT COUNT(*) FROM {ACCUSED_TABLE}")
                 count = cursor.fetchone()[0]
                 
+                default_start_date = ETL_CONFIG['start_date']
                 if count == 0:
-                    # New database, start from beginning
-                    logger.info("📊 Table is empty, starting from 2022-01-01")
-                    return '2022-01-01T00:00:00+05:30'
+                    # New database, start from beginning (configurable default)
+                    logger.info(f"📊 Table is empty, starting from {default_start_date}")
+                    return default_start_date
                 
                 # Table has data, get max of date_created and date_modified
-                # Only consider dates >= 2022-01-01 to avoid processing very old data
-                MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-                min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                # Only consider dates >= the configured default start date
+                MIN_START_DATE = default_start_date
+                min_start_dt = parse_iso_date(default_start_date)
+                
+                # Parse the date string to extract the date part for SQL
+                min_date_for_sql = min_start_dt.strftime('%Y-%m-%d')
                 
                 cursor.execute(f"""
                     SELECT GREATEST(
-                        COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                        COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                        COALESCE(MAX(CASE WHEN date_created >= '{min_date_for_sql}'::timestamp THEN date_created END), '{min_date_for_sql}'::timestamp),
+                        COALESCE(MAX(CASE WHEN date_modified >= '{min_date_for_sql}'::timestamp THEN date_modified END), '{min_date_for_sql}'::timestamp)
                     ) as max_date
                     FROM {ACCUSED_TABLE}
                 """)
@@ -353,22 +365,23 @@ class AccusedETL:
                         else:
                             max_date = max_date.astimezone(IST_OFFSET)
                         
-                        # Ensure we never go before 2022-01-01
+                        # Ensure we never go before the configured minimum start date
                         if max_date < min_start_dt:
-                            logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                            logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before {MIN_START_DATE}, using {MIN_START_DATE}")
                             return MIN_START_DATE
                         
                         logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
                         return max_date.isoformat()
                 
-                # Fallback to start date
-                logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-                return '2022-01-01T00:00:00+05:30'
+                # Fallback to configured start date
+                logger.warning(f"⚠️  Could not determine max date, using configured start date: {default_start_date}")
+                return default_start_date
                 
         except Exception as e:
             logger.error(f"❌ Error getting effective start date: {e}")
-            logger.warning("⚠️  Using default start date: 2022-01-01")
-            return '2022-01-01T00:00:00+05:30'
+            default_start_date = ETL_CONFIG['start_date']
+            logger.warning(f"⚠️  Using default start date: {default_start_date}")
+            return default_start_date
     
     def detect_new_fields(self, api_record: Dict, table_columns: Set[str]) -> Dict[str, str]:
         """
@@ -1736,15 +1749,26 @@ class AccusedETL:
             return False
         
         try:
+            # Get start and end dates, allowing environment variable overrides
+            env_start_date = os.environ.get('ACCUSED_START_DATE')
+            env_end_date = os.environ.get('ACCUSED_END_DATE')
+            
             if RUN_MODE == 1:
                 # Standard Incremental Logic
-                effective_start_date = self.get_effective_start_date()
-                calculated_end_date = get_yesterday_end_ist()
+                if env_start_date:
+                    # If explicitly set, use it
+                    effective_start_date = env_start_date
+                    logger.info(f"📌 Using environment-provided start date: {effective_start_date}")
+                else:
+                    # Otherwise, determine automatically from DB or config
+                    effective_start_date = self.get_effective_start_date()
+                
+                calculated_end_date = env_end_date if env_end_date else get_yesterday_end_ist()
                 logger.info(f"🔄 Incremental Mode: Fetching data from {effective_start_date} to {calculated_end_date}")
             else:
-                # Hardcoded Full Reset Logic
-                effective_start_date = "2022-01-01T00:00:00+05:30"
-                calculated_end_date = get_yesterday_end_ist() 
+                # Full Reset Logic
+                effective_start_date = env_start_date if env_start_date else ETL_CONFIG['start_date']
+                calculated_end_date = env_end_date if env_end_date else get_yesterday_end_ist()
                 logger.info(f"⚠️ FULL RESET Mode: Fetching historical data from {effective_start_date} to {calculated_end_date}")
             
             # Get table columns for schema evolution
