@@ -652,7 +652,7 @@ class CrimesETL:
         self.duplicates_log.flush()
     
     def insert_crime(self, crime: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
-        """Insert or update single crime with improved error recovery"""
+        """Insert or update single crime with atomic UPSERT to handle race conditions"""
         crime_id = crime.get('crime_id')
         if not crime_id:
             return False, 'missing_crime_id'
@@ -663,74 +663,111 @@ class CrimesETL:
                 cursor.execute(f"SELECT 1 FROM {HIERARCHY_TABLE} WHERE ps_code = %s", (crime['ps_code'],))
                 if not cursor.fetchone():
                     self.log_failed_record(crime, 'ps_code_not_found')
+                    with self.stats_lock:
+                        self.stats['total_crimes_failed_ps_code'] += 1
                     return False, 'ps_code_not_found'
             else:
                 return False, 'missing_ps_code'
 
-            # 2. Perform insert or update
-            if self.crime_exists(crime_id, cursor):
+            # 2. Use atomic UPSERT to avoid race conditions with parallel workers
+            upsert_query = f"""
+                INSERT INTO {CRIMES_TABLE} (
+                    crime_id, ps_code, fir_num, fir_reg_num, fir_type,
+                    acts_sections, fir_date, case_status, major_head, minor_head,
+                    crime_type, io_name, io_rank, brief_facts, fir_copy,
+                    additional_json_data, date_created, date_modified
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (crime_id) DO UPDATE SET
+                    ps_code = EXCLUDED.ps_code,
+                    fir_num = EXCLUDED.fir_num,
+                    fir_reg_num = EXCLUDED.fir_reg_num,
+                    fir_type = EXCLUDED.fir_type,
+                    acts_sections = EXCLUDED.acts_sections,
+                    fir_date = EXCLUDED.fir_date,
+                    case_status = EXCLUDED.case_status,
+                    major_head = EXCLUDED.major_head,
+                    minor_head = EXCLUDED.minor_head,
+                    crime_type = EXCLUDED.crime_type,
+                    io_name = EXCLUDED.io_name,
+                    io_rank = EXCLUDED.io_rank,
+                    brief_facts = EXCLUDED.brief_facts,
+                    fir_copy = EXCLUDED.fir_copy,
+                    additional_json_data = EXCLUDED.additional_json_data,
+                    date_modified = EXCLUDED.date_modified
+                WHERE (
+                    {CRIMES_TABLE}.ps_code IS DISTINCT FROM EXCLUDED.ps_code OR
+                    {CRIMES_TABLE}.fir_num IS DISTINCT FROM EXCLUDED.fir_num OR
+                    {CRIMES_TABLE}.fir_reg_num IS DISTINCT FROM EXCLUDED.fir_reg_num OR
+                    {CRIMES_TABLE}.fir_type IS DISTINCT FROM EXCLUDED.fir_type OR
+                    {CRIMES_TABLE}.acts_sections IS DISTINCT FROM EXCLUDED.acts_sections OR
+                    {CRIMES_TABLE}.fir_date IS DISTINCT FROM EXCLUDED.fir_date OR
+                    {CRIMES_TABLE}.case_status IS DISTINCT FROM EXCLUDED.case_status OR
+                    {CRIMES_TABLE}.major_head IS DISTINCT FROM EXCLUDED.major_head OR
+                    {CRIMES_TABLE}.minor_head IS DISTINCT FROM EXCLUDED.minor_head OR
+                    {CRIMES_TABLE}.crime_type IS DISTINCT FROM EXCLUDED.crime_type OR
+                    {CRIMES_TABLE}.io_name IS DISTINCT FROM EXCLUDED.io_name OR
+                    {CRIMES_TABLE}.io_rank IS DISTINCT FROM EXCLUDED.io_rank OR
+                    {CRIMES_TABLE}.brief_facts IS DISTINCT FROM EXCLUDED.brief_facts OR
+                    {CRIMES_TABLE}.fir_copy IS DISTINCT FROM EXCLUDED.fir_copy OR
+                    {CRIMES_TABLE}.additional_json_data IS DISTINCT FROM EXCLUDED.additional_json_data
+                )
+            """
+            
+            cursor.execute(upsert_query, (
+                crime['crime_id'], crime['ps_code'], crime['fir_num'],
+                crime['fir_reg_num'], crime['fir_type'], crime['acts_sections'],
+                crime['fir_date'], crime['case_status'], crime['major_head'],
+                crime['minor_head'], crime['crime_type'], crime['io_name'],
+                crime['io_rank'], crime['brief_facts'], crime['fir_copy'],
+                Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
+                crime['date_created'], crime['date_modified']
+            ))
+            
+            # Check if this was an insert or update by examining rowcount
+            if cursor.rowcount == 1:
+                # Single row affected - could be insert or no-change update
+                # We need to determine if it was actually changed
                 existing = self.get_existing_crime(crime_id, cursor)
-                
-                # Calculate which fields have changed
-                update_fields = []
-                update_values = []
-                
-                fields_to_check = [
-                    ('ps_code', 'ps_code'),
-                    ('fir_num', 'fir_num'),
-                    ('fir_reg_num', 'fir_reg_num'),
-                    ('fir_type', 'fir_type'),
-                    ('acts_sections', 'acts_sections'),
-                    ('fir_date', 'fir_date'),
-                    ('case_status', 'case_status'),
-                    ('major_head', 'major_head'),
-                    ('minor_head', 'minor_head'),
-                    ('crime_type', 'crime_type'),
-                    ('io_name', 'io_name'),
-                    ('io_rank', 'io_rank'),
-                    ('brief_facts', 'brief_facts'),
-                    ('fir_copy', 'fir_copy'),
-                    ('additional_json_data', 'additional_json_data'),
-                    ('date_modified', 'date_modified')
-                ]
-                
-                for crime_key, db_key in fields_to_check:
-                    if crime.get(crime_key) != existing.get(db_key):
-                        update_fields.append(f"{db_key} = %s")
-                        if crime_key == 'additional_json_data':
-                            update_values.append(Json(crime[crime_key]) if crime[crime_key] else None)
-                        else:
-                            update_values.append(crime.get(crime_key))
-                
-                if update_fields:
-                    update_query = f"UPDATE {CRIMES_TABLE} SET {', '.join(update_fields)} WHERE crime_id = %s"
-                    update_values.append(crime_id)
-                    cursor.execute(update_query, tuple(update_values))
-                    with self.stats_lock:
-                        self.stats['total_crimes_updated'] += 1
-                    operation = 'updated'
+                if existing:
+                    # Record exists, check if it was actually modified
+                    fields_differ = False
+                    fields_to_check = [
+                        ('ps_code', 'ps_code'),
+                        ('fir_num', 'fir_num'),
+                        ('fir_reg_num', 'fir_reg_num'),
+                        ('fir_type', 'fir_type'),
+                        ('acts_sections', 'acts_sections'),
+                        ('fir_date', 'fir_date'),
+                        ('case_status', 'case_status'),
+                        ('major_head', 'major_head'),
+                        ('minor_head', 'minor_head'),
+                        ('crime_type', 'crime_type'),
+                        ('io_name', 'io_name'),
+                        ('io_rank', 'io_rank'),
+                        ('brief_facts', 'brief_facts'),
+                        ('fir_copy', 'fir_copy'),
+                        ('additional_json_data', 'additional_json_data')
+                    ]
+                    for crime_key, db_key in fields_to_check:
+                        if crime.get(crime_key) != existing.get(db_key):
+                            fields_differ = True
+                            break
+                    
+                    if fields_differ:
+                        with self.stats_lock:
+                            self.stats['total_crimes_updated'] += 1
+                        operation = 'updated'
+                    else:
+                        with self.stats_lock:
+                            self.stats['total_crimes_no_change'] += 1
+                        operation = 'no_change'
                 else:
+                    # New record inserted
                     with self.stats_lock:
-                        self.stats['total_crimes_no_change'] += 1
-                    operation = 'no_change'
+                        self.stats['total_crimes_inserted'] += 1
+                    operation = 'inserted'
             else:
-                insert_query = f"""
-                    INSERT INTO {CRIMES_TABLE} (
-                        crime_id, ps_code, fir_num, fir_reg_num, fir_type,
-                        acts_sections, fir_date, case_status, major_head, minor_head,
-                        crime_type, io_name, io_rank, brief_facts, fir_copy,
-                        additional_json_data, date_created, date_modified
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(insert_query, (
-                    crime['crime_id'], crime['ps_code'], crime['fir_num'],
-                    crime['fir_reg_num'], crime['fir_type'], crime['acts_sections'],
-                    crime['fir_date'], crime['case_status'], crime['major_head'],
-                    crime['minor_head'], crime['crime_type'], crime['io_name'],
-                    crime['io_rank'], crime['brief_facts'], crime['fir_copy'],
-                    Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
-                    crime['date_created'], crime['date_modified']
-                ))
+                # Shouldn't happen, but treat as insert
                 with self.stats_lock:
                     self.stats['total_crimes_inserted'] += 1
                 operation = 'inserted'
