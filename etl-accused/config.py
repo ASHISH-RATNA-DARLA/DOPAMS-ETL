@@ -53,7 +53,7 @@ ETL_CONFIG = {
     
     'chunk_days': 5,  # Fetch 5 days at a time
     'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS')),  # Overlap between chunks to ensure no data is missed
-    'batch_size': 500,  # Insert batch size (optimized for 64GB server - increased from 100)
+    'batch_size': 250,  # Insert batch size (balanced for memory and connection efficiency)
     'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS') == 'true'
 }
 

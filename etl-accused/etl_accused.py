@@ -282,13 +282,17 @@ class AccusedETL:
 
     def connect_db(self):
         try:
-            # Optimized for 64GB server - aggressive multithreading
-            # Default: 8 chunks × 64 workers = 512 concurrent threads
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '8'))
-            row_workers = int(os.environ.get('MAX_WORKERS', min(64, (os.cpu_count() or 1) * 8)))
+            # Optimized parallelism - balance concurrency with DB connection limits
+            # Default: 4 chunks × 4 workers = 16 concurrent threads (safe for most PostgreSQL configs)
+            # Can override: ACCUSED_CHUNK_WORKERS=8 MAX_WORKERS=8 for 64 total (if DB supports it)
+            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '4'))
+            row_workers = int(os.environ.get('MAX_WORKERS', 4))  # Fixed 4 to avoid exhausting connections
             total_workers = chunk_workers * row_workers
+            
+            # Keep connection pool reasonable: 2 * total_workers + 5 spare connections
+            max_connections = min(50, total_workers * 2 + 5)  # Cap at 50 to be safe
                 
-            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=total_workers + 10, **DB_CONFIG)
+            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_connections, **DB_CONFIG)
             logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']} (maxconn={total_workers + 10})")
             return True
         except Exception as e:
@@ -1791,8 +1795,10 @@ class AccusedETL:
             logger.info(f"ℹ️  Expected Total from API Team: 22423 (insert + update records)")
             logger.info("")
             
-            # Chunk-level parallelism - now defaults to 8 workers for 64GB server
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '8'))
+            # Chunk-level parallelism - defaults to 4 for DB connection safety
+            # Safe default: 4 chunks × 4 workers = 16 concurrent threads
+            # Can override: ACCUSED_CHUNK_WORKERS=8 MAX_WORKERS=8 for higher throughput if DB allows
+            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '4'))
             inter_chunk_sleep = float(os.environ.get('ACCUSED_INTER_CHUNK_SLEEP', '0'))
 
             if chunk_workers <= 1:
