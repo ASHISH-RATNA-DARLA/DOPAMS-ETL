@@ -1332,6 +1332,29 @@ class AccusedETL:
                 # Insert new accused (no existing record found)
                 logger.trace(f"Inserting new accused: {accused_id}")
                 
+                # Check for seq_num conflicts BEFORE inserting (seq_num has unique constraint)
+                seq_num = accused.get('seq_num')
+                if seq_num:
+                    cursor.execute(
+                        f"SELECT accused_id FROM {ACCUSED_TABLE} WHERE seq_num = %s",
+                        (seq_num,)
+                    )
+                    existing_with_seq_num = cursor.fetchone()
+                    if existing_with_seq_num:
+                        existing_accused_id = existing_with_seq_num[0]
+                        logger.warning(
+                            f"⚠️  seq_num conflict: {seq_num} already exists with accused_id={existing_accused_id}, "
+                            f"new accused_id={accused_id}. Skipping insert to preserve unique constraint."
+                        )
+                        with self.stats_lock:
+                            self.stats['total_accused_failed'] += 1
+                        self.log_failed_record(
+                            accused, 'seq_num_conflict',
+                            f"seq_num {seq_num} already exists with accused_id={existing_accused_id}"
+                        )
+                        conn.commit()
+                        return False, 'seq_num_conflict'
+                
                 # Use ON CONFLICT to handle duplicate accused_id (primary key) gracefully
                 insert_query = f"""
                     INSERT INTO {ACCUSED_TABLE} (
