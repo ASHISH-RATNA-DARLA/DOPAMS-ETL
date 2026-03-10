@@ -53,36 +53,93 @@ def fetch_unprocessed_crimes(conn, limit=100):
 
 def fetch_existing_accused_for_crime(conn, crime_id):
     """
-    Fetches known accused/persons linked to a specific crime.
-    Used for matching extracted entities to database records.
+    Fetches all accused rows for a given crime_id with a LEFT JOIN to persons.
+
+    Always returns accused-level fields (accused_id, accused_code, seq_num,
+    is_ccl, accused_status). Returns person identity fields only when person_id
+    IS NOT NULL; otherwise those columns are NULL.
+
+    Column mapping to brief_facts_accused output:
+      persons.alias        → alias_name
+      persons.phone_number → phone_numbers
+      CONCAT(present_*)   → address  (single string, NULL if all parts empty)
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = """
-            SELECT 
+            SELECT
                 a.accused_id,
                 a.person_id,
+                a.accused_code,
+                a.seq_num,
+                a.is_ccl,
+                a.accused_status,
                 p.full_name,
-                p.alias,
-                a.type as accused_type,
+                p.alias             AS alias_name,
                 p.age,
                 p.gender,
                 p.occupation,
-                NULLIF(TRIM(CONCAT_WS(', ', 
-                    p.present_house_no, 
-                    p.present_street_road_no, 
-                    p.present_locality_village, 
-                    p.present_area_mandal, 
-                    p.present_district, 
-                    p.present_state_ut
-                )), '') as address,
-                p.phone_number as phone_numbers
+                p.phone_number      AS phone_numbers,
+                NULLIF(TRIM(CONCAT_WS(', ',
+                    NULLIF(TRIM(p.present_house_no), ''),
+                    NULLIF(TRIM(p.present_street_road_no), ''),
+                    NULLIF(TRIM(p.present_locality_village), ''),
+                    NULLIF(TRIM(p.present_area_mandal), ''),
+                    NULLIF(TRIM(p.present_district), ''),
+                    NULLIF(TRIM(p.present_state_ut), '')
+                )), '') AS address
             FROM accused a
-            JOIN persons p ON a.person_id = p.person_id
+            LEFT JOIN persons p ON a.person_id = p.person_id
             WHERE a.crime_id = %s
         """
         cur.execute(query, (crime_id,))
         return cur.fetchall()
 
+
+# ---------------------------------------------------------------------------
+# Status Normalisation
+# ---------------------------------------------------------------------------
+
+_ARRESTED_KEYWORDS = frozenset([
+    "arrested", "caught", "apprehended", "detained", "nabbed", "held",
+    "taken into custody", "remanded", "produced before court",
+    "surrendered", "confessed", "confession",
+])
+
+_ABSCONDING_KEYWORDS = frozenset([
+    "absconding", "absconder", "evading", "fled", "on the run",
+    "not traceable", "not found", "missing", "could not be traced",
+    "yet to be arrested", "failed to appear", "escaped",
+])
+
+
+def normalize_accused_status(raw_status):
+    """
+    Normalises the free-text accused.accused_status field from the API into
+    one of: 'arrested' | 'absconding' | None.
+
+    Handles NULL, empty-string, and mixed-case variants gracefully.
+    """
+    if not raw_status:
+        return None
+
+    lowered = raw_status.strip().lower()
+    if not lowered:
+        return None
+
+    for kw in _ARRESTED_KEYWORDS:
+        if kw in lowered:
+            return "arrested"
+
+    for kw in _ABSCONDING_KEYWORDS:
+        if kw in lowered:
+            return "absconding"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Value Guards
+# ---------------------------------------------------------------------------
 
 def truncate_varchar(value, max_length=255):
     """Truncate string values to fit VARCHAR constraints."""
@@ -146,13 +203,13 @@ def insert_accused_facts(conn, item_data):
         bf_id = str(uuid.uuid4())
 
         # Guard constrained columns before the per-crime transaction commits.
-        full_name = truncate_varchar(item_data.get('full_name'), 500)
-        alias_name = truncate_varchar(item_data.get('alias_name'), 255)
-        occupation = truncate_varchar(item_data.get('occupation'), 255)
+        full_name    = truncate_varchar(item_data.get('full_name'), 500)
+        alias_name   = truncate_varchar(item_data.get('alias_name'), 255)
+        occupation   = truncate_varchar(item_data.get('occupation'), 255)
         phone_numbers = truncate_varchar(item_data.get('phone_numbers'), 255)
-        gender = truncate_varchar(item_data.get('gender'), 20)
-        status = truncate_varchar(item_data.get('status'), 40)
-        age = validate_age(item_data.get('age'))
+        gender       = truncate_varchar(item_data.get('gender'), 20)
+        status       = truncate_varchar(item_data.get('status'), 40)
+        age          = validate_age(item_data.get('age'))
 
         cur.execute(query, (
             bf_id,
