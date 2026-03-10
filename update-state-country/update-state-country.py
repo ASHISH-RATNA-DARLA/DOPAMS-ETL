@@ -515,7 +515,7 @@ def match_geo(
                         geo = GeoMatch(
                             state=row[0],
                             district=row[1],
-                            mandal=row[2],
+                            mandal=row[2] if pm else None,
                             # weighted_score is the last column (index 6)
                             score=float(row[6]),
                         )
@@ -728,14 +728,32 @@ def apply_updates(
     params: List = []
 
     if perm_geo:
-        sets  += ["permanent_state_ut = %s", "permanent_district = %s",
-                  "permanent_area_mandal = %s", "permanent_country = %s"]
-        params += [perm_geo.state, perm_geo.district, perm_geo.mandal, "India"]
+        sets.append("permanent_state_ut = %s")
+        params.append(perm_geo.state)
+
+        sets.append("permanent_district = %s")
+        params.append(perm_geo.district)
+
+        if perm_geo.mandal:
+            sets.append("permanent_area_mandal = %s")
+            params.append(perm_geo.mandal)
+
+        sets.append("permanent_country = %s")
+        params.append("India")
 
     if pres_geo:
-        sets  += ["present_state_ut = %s", "present_district = %s",
-                  "present_area_mandal = %s", "present_country = %s"]
-        params += [pres_geo.state, pres_geo.district, pres_geo.mandal, "India"]
+        sets.append("present_state_ut = %s")
+        params.append(pres_geo.state)
+
+        sets.append("present_district = %s")
+        params.append(pres_geo.district)
+
+        if pres_geo.mandal:
+            sets.append("present_area_mandal = %s")
+            params.append(pres_geo.mandal)
+
+        sets.append("present_country = %s")
+        params.append("India")
 
     if not sets:
         return False
