@@ -807,6 +807,10 @@ STRICT RULES
 - Key Details: Quantities, drug type, vehicle, items seized, or other specific facts.
 - If a person has no mention in the text, return role_in_crime: null, key_details: null.
 
+Do NOT extract: name, gender, phone, seq_num, accused_type, is_ccl, status.
+These are already available from the database.
+Only extract: role_in_crime, key_details, and fallback fields (address, age, alias) when flagged as missing.
+
 Known Accused List (accused_code → name):
 {accused_list}
 
@@ -849,8 +853,8 @@ def extract_roles_for_known_accused(text: str, accused_list: List[Dict[str, Any]
         code = acc.get('accused_code')
         name = acc.get('full_name') or 'Unknown'
         if not code:
-            # Fallback: use name as the identifier so LLM can return it
-            code = name if name != 'Unknown' else f'Accused-{i}'
+            # Assign sequential A-{i} code per spec when accused_code is NULL
+            code = f'A-{i}'
         accused_entries.append(f"{code}: {name}")
     accused_list_str = "\n".join(accused_entries)
 

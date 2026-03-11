@@ -8,6 +8,9 @@ from db import (
     fetch_unprocessed_crimes,
     fetch_existing_accused_for_crime,
     normalize_accused_status,
+    resolve_status_for_insert,
+    strip_alias_name,
+    compute_age_from_dob,
 )
 from extractor import (
     extract_accused_info,
@@ -289,27 +292,38 @@ def process_crimes(conn, crimes):
 def _process_branch_a(conn, crime_id, facts_text, db_accused):
     """
     DB is authoritative for identity. LLM extracts roles only.
+    Skips accused rows where person_id IS NULL (spec SKIP RULE).
     Handles NULL accused_code by using positional index fallback.
     """
-    roles_by_code = extract_roles_for_known_accused(facts_text, list(db_accused))
+    # Filter to only rows with person_id (spec: skip NULL person_id)
+    valid_accused = [row for row in db_accused if row.get('person_id')]
+    skipped = len(db_accused) - len(valid_accused)
+    if skipped:
+        logging.info(f"Branch A: Skipped {skipped} accused rows with NULL person_id")
+
+    roles_by_code = extract_roles_for_known_accused(facts_text, list(valid_accused))
     if not roles_by_code:
         roles_by_code = {}
 
     # Positional fallback: if only 1 accused and 1 role, pair directly
     single_role = None
-    if len(db_accused) == 1 and len(roles_by_code) == 1:
+    if len(valid_accused) == 1 and len(roles_by_code) == 1:
         single_role = list(roles_by_code.values())[0]
 
     count = 0
-    for row in db_accused:
+    for row in valid_accused:
         accused_id    = row.get('accused_id')
         person_id     = row.get('person_id')
         accused_code  = row.get('accused_code') or ''
+        seq_num       = row.get('seq_num')
         is_ccl_db     = row.get('is_ccl', False)
 
         full_name     = row.get('full_name')
-        alias_name    = row.get('alias_name')
+        raw_alias     = row.get('alias_name')
+        alias_name    = strip_alias_name(raw_alias)
         age           = row.get('age')
+        if age is None:
+            age = compute_age_from_dob(row.get('date_of_birth'))
         gender        = row.get('gender')
         occupation    = row.get('occupation')
         address       = row.get('address')
@@ -323,8 +337,8 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
         role_in_crime = role_data.get('role_in_crime') if role_data else None
         key_details   = role_data.get('key_details') if role_data else None
 
-        # Status
-        status = _resolve_status(row.get('accused_status'), facts_text, full_name or accused_code)
+        # Status: raw DB value first, keyword fallback
+        status = resolve_status_for_insert(row.get('accused_status'), facts_text, full_name or accused_code)
 
         # Classification
         if role_in_crime:
@@ -342,14 +356,30 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
 
         if accused_type == 'unknown':
             accused_type = None
-        if status == 'unknown':
-            status = None
+
+        # Build source audit trail
+        source_person = {k: 'DB' for k in ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'phone_numbers', 'address']
+                         if row.get(k) is not None and row.get(k) != ''}
+        source_accused = {k: 'DB' for k, v in [
+            ('accused_id', accused_id), ('person_code', accused_code),
+            ('seq_num', seq_num), ('is_ccl', is_ccl_db),
+            ('status', row.get('accused_status'))
+        ] if v is not None and v != ''}
+        source_summary = {}
+        if role_in_crime:
+            source_summary['role_in_crime'] = 'LLM'
+        if key_details:
+            source_summary['key_details'] = 'LLM'
+        if accused_type:
+            source_summary['accused_type'] = 'LLM_CLASSIFICATION'
 
         insert_accused_facts(conn, {
             'crime_id'             : crime_id,
             'accused_id'           : accused_id,
             'person_id'            : person_id,
-            'existing_accused'     : person_id is not None,
+            'person_code'          : accused_code or None,
+            'seq_num'              : seq_num,
+            'existing_accused'     : True,
             'full_name'            : full_name,
             'alias_name'           : alias_name,
             'age'                  : age,
@@ -362,9 +392,9 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
             'accused_type'         : accused_type,
             'status'               : status,
             'is_ccl'               : is_ccl,
-            'source_person_fields' : {},
-            'source_accused_fields': {},
-            'source_summary_fields': {},
+            'source_person_fields' : source_person,
+            'source_accused_fields': source_accused,
+            'source_summary_fields': source_summary,
         })
         count += 1
 
@@ -393,6 +423,7 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             'status'          : None,
             'existing_accused': False,
             'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
+            'source_summary_fields': {'error': 'LLM_EXTRACTION_FAILED'},
         })
         return
 
@@ -407,6 +438,7 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             'status'          : None,
             'existing_accused': False,
             'role_in_crime'   : 'NO_ACCUSED_IN_TEXT',
+            'source_summary_fields': {'note': 'NO_ACCUSED_IN_TEXT'},
         })
         count = 1
     else:
@@ -419,11 +451,14 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
                 _pair_accused_id_from_db(accused.full_name, facts_text, db_accused)
 
             data['accused_id']       = accused_id
+            data['person_code']      = matched_code
             data['existing_accused'] = False
 
             if accused_id:
-                db_status_norm = normalize_accused_status(accused_status_raw)
-                data['status'] = db_status_norm or data.get('status')
+                # Use raw DB status, fallback to LLM-detected
+                data['status'] = resolve_status_for_insert(
+                    accused_status_raw, facts_text, accused.full_name
+                ) or data.get('status')
 
             data['gender'] = detect_gender(facts_text, accused.full_name, data.get('gender'))
 
@@ -434,6 +469,15 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
                 data['accused_type'] = None
             if data.get('status') == 'unknown':
                 data['status'] = None
+
+            # Source audit trail: all from LLM in Branch B
+            data['source_person_fields'] = {k: 'LLM' for k in
+                ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'address', 'phone_numbers']
+                if data.get(k) is not None}
+            data['source_accused_fields'] = {'accused_id': 'DB_PAIRED' if accused_id else 'UNMATCHED'}
+            data['source_summary_fields'] = {k: 'LLM' for k in
+                ['role_in_crime', 'key_details', 'accused_type', 'status']
+                if data.get(k) is not None}
 
             insert_accused_facts(conn, data)
             count += 1
@@ -458,6 +502,7 @@ def _process_branch_c(conn, crime_id, facts_text):
             'status'          : None,
             'existing_accused': False,
             'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
+            'source_summary_fields': {'error': 'LLM_EXTRACTION_FAILED'},
         })
         return
 
@@ -472,6 +517,7 @@ def _process_branch_c(conn, crime_id, facts_text):
             'status'          : None,
             'existing_accused': False,
             'role_in_crime'   : 'NO_ACCUSED_IN_TEXT',
+            'source_summary_fields': {'note': 'NO_ACCUSED_IN_TEXT'},
         })
         count = 1
     else:
@@ -487,6 +533,15 @@ def _process_branch_c(conn, crime_id, facts_text):
                 data['accused_type'] = None
             if data.get('status') == 'unknown':
                 data['status'] = None
+
+            # Source audit trail: all from LLM in Branch C
+            data['source_person_fields'] = {k: 'LLM' for k in
+                ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'address', 'phone_numbers']
+                if data.get(k) is not None}
+            data['source_accused_fields'] = {}
+            data['source_summary_fields'] = {k: 'LLM' for k in
+                ['role_in_crime', 'key_details', 'accused_type', 'status']
+                if data.get(k) is not None}
 
             insert_accused_facts(conn, data)
             count += 1

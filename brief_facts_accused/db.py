@@ -92,17 +92,20 @@ def fetch_existing_accused_for_crime(conn, crime_id):
                 a.person_id,
                 a.accused_code,
                 a.seq_num,
+                a.type              AS accused_type_db,
                 a.is_ccl,
                 a.accused_status,
                 p.full_name,
                 p.alias             AS alias_name,
                 p.age,
+                p.date_of_birth,
                 p.gender,
                 p.occupation,
                 p.phone_number      AS phone_numbers,
                 NULLIF(TRIM(CONCAT_WS(', ',
                     NULLIF(TRIM(p.present_house_no), ''),
                     NULLIF(TRIM(p.present_street_road_no), ''),
+                    NULLIF(TRIM(p.present_ward_colony), ''),
                     NULLIF(TRIM(p.present_locality_village), ''),
                     NULLIF(TRIM(p.present_area_mandal), ''),
                     NULLIF(TRIM(p.present_district), ''),
@@ -159,6 +162,85 @@ def normalize_accused_status(raw_status):
             return "arrested"
 
     return None
+
+
+def resolve_status_for_insert(raw_db_status, text, name_hint):
+    """
+    Returns the raw DB accused_status if present (stored as-is per spec),
+    otherwise falls back to keyword-based detection from brief_facts text.
+    """
+    if raw_db_status and str(raw_db_status).strip():
+        return str(raw_db_status).strip()
+
+    # Fallback: keyword scan on local context window
+    return normalize_accused_status(raw_db_status) or _keyword_status_fallback(text, name_hint)
+
+
+def _keyword_status_fallback(text, name_hint):
+    """Keyword scan on local context window (±120 chars around name)."""
+    text_lower = (text or "").lower()
+    candidate = (name_hint or "").lower()
+    combined = ""
+    if candidate:
+        idx = text_lower.find(candidate)
+        if idx >= 0:
+            start = max(0, idx - 120)
+            end = min(len(text_lower), idx + len(candidate) + 120)
+            combined = text_lower[start:end]
+
+    if not combined:
+        return None
+
+    for kw in _ABSCONDING_KEYWORDS:
+        if kw in combined:
+            return "absconding"
+    for kw in _ARRESTED_KEYWORDS:
+        if kw in combined:
+            return "arrested"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Alias Stripping
+# ---------------------------------------------------------------------------
+
+def strip_alias_name(raw_alias):
+    """
+    Strips 'name @alias' format to just the alias portion.
+    E.g. 'Mohammed Imran @Rocky' → 'Rocky'
+         'Rocky' → 'Rocky'
+         None → None
+    """
+    if not raw_alias:
+        return None
+    alias_str = str(raw_alias).strip()
+    if not alias_str:
+        return None
+    if '@' in alias_str:
+        return alias_str.split('@', 1)[1].strip() or None
+    return alias_str
+
+
+# ---------------------------------------------------------------------------
+# Age from DOB Fallback
+# ---------------------------------------------------------------------------
+
+def compute_age_from_dob(dob):
+    """
+    Computes age from date_of_birth if age is NULL.
+    Returns int age or None.
+    """
+    if not dob:
+        return None
+    try:
+        from datetime import date
+        today = date.today()
+        if hasattr(dob, 'year'):
+            return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        return None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -231,14 +313,14 @@ def insert_accused_facts(conn, item_data):
             INSERT INTO {table} 
             (
                 bf_accused_id, crime_id, 
-                accused_id, person_id, existing_accused,
+                accused_id, person_id, person_code, seq_num, existing_accused,
                 full_name, alias_name, age, gender, occupation, address, phone_numbers,
                 role_in_crime, key_details, accused_type, status, is_ccl,
                 source_person_fields, source_accused_fields, source_summary_fields
             )
             VALUES (
                 %s, %s, 
-                %s, %s, %s,
+                %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
                 %s, %s, %s
@@ -259,12 +341,17 @@ def insert_accused_facts(conn, item_data):
         status        = truncate_varchar(item_data.get('status'), MAX_STATUS_LEN)
         age           = validate_age(item_data.get('age'))
 
+        person_code = truncate_varchar(item_data.get('person_code'), 50)
+        seq_num     = truncate_varchar(item_data.get('seq_num'), 50)
+
         try:
             cur.execute(query, (
                 bf_id,
                 item_data.get('crime_id'),
                 item_data.get('accused_id'),
                 item_data.get('person_id'),
+                person_code,
+                seq_num,
                 item_data.get('existing_accused', False),
                 full_name,
                 alias_name,
