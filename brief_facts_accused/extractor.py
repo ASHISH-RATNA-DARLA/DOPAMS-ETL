@@ -784,34 +784,38 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
 PASS2_KNOWN_ACCUSED_PROMPT = """You are a criminal investigation analyst.
 
 =====================================
-TASK: ROLE EXTRACTION FOR KNOWN ACCUSED
+TASK: ACCUSED ANALYSIS FROM BRIEF FACTS
 =====================================
 
 You are given:
 1. FIR / Brief Facts text
-2. A list of known accused persons already linked to the crime.
-   Each entry contains the accused_code (e.g. A-1, A-2) and their name.
+2. A list of accused persons linked to the crime with their known details.
 
-For EACH person in the accused list:
-1. Locate all mentions of their accused_code AND their name in the text.
-2. COPY SHARED ACTIONS:
-   - If "A-1 and A-2 purchased...", assign "Purchased..." to BOTH.
-   - If "A-1 to A-3 were apprehended...", assign to A-1, A-2, AND A-3.
-3. Extract Role and Key Details.
+For EACH person in the accused list, you MUST:
+1. Search the ENTIRE text for ALL mentions of their accused_code (A-1, A-2, A1, A2, etc.)
+   AND/OR their name.
+2. COPY SHARED ACTIONS to EACH individual's role:
+   - "A-1 and A-2 purchased..." → assign "Purchased..." to BOTH A-1 AND A-2.
+   - "A-1 to A-3 were apprehended..." → assign to A-1, A-2, AND A-3.
+   - "Both accused..." / "They..." / "All accused..." → assign to ALL relevant persons.
+3. Extract their specific role_in_crime and key_details.
+4. For fields annotated [MISSING], extract that field from the text if available.
+5. For accused annotated [ASSIGN_CODE], assign a person code (A1, A2, A3...) based on
+   order of first mention in the narrative text.
 
 =====================================
-STRICT RULES
+CRITICAL: ROLE EXTRACTION RULES
 =====================================
-- Extract strictly from the text. Do not guess.
-- Role: Describe what they did AND their intent (e.g. "Caught with 5kg ganja for selling").
-- Key Details: Quantities, drug type, vehicle, items seized, or other specific facts.
-- If a person has no mention in the text, return role_in_crime: null, key_details: null.
+- EVERY accused person MUST have a role_in_crime extracted if they are mentioned in the text.
+- Role must describe WHAT THEY DID (e.g. "Selling hash oil to customers",
+  "Purchased hash oil for personal consumption", "Supplied hash oil from Visakhapatnam",
+  "Co-supplier and business partner in hash oil trade").
+- Key Details: Quantities, drug type, vehicle, items seized, phone numbers seized,
+  or other specific investigative facts unique to this accused.
+- Extract strictly from the text. Do not guess or fabricate.
+- If a person is genuinely not mentioned at all in the text, return role_in_crime: null.
 
-Do NOT extract: name, gender, phone, seq_num, accused_type, is_ccl, status.
-These are already available from the database.
-Only extract: role_in_crime, key_details, and fallback fields (address, age, alias) when flagged as missing.
-
-Known Accused List (accused_code → name):
+Known Accused List:
 {accused_list}
 
 Input Text:
@@ -820,42 +824,71 @@ Input Text:
 {format_instructions}
 """
 
-# Reuse Pass2 response schema
+# Enhanced response model with fallback fields
 class RoleExtractionItem(BaseModel):
     accused_code: str = Field(description="The accused code from the input list, e.g. A-1, A-2")
     role_in_crime: Optional[str] = Field(default=None, description="Factual action or role description")
     key_details: Optional[str] = Field(default=None, description="Quantities seized, substance type, vehicle, or other specific investigative facts")
+    address: Optional[str] = Field(default=None, description="Full address extracted from text, only when flagged as MISSING")
+    age: Optional[int] = Field(default=None, description="Age extracted from text, only when flagged as MISSING")
+    alias_name: Optional[str] = Field(default=None, description="Alias/nickname from text, only when flagged as MISSING")
+    occupation: Optional[str] = Field(default=None, description="Occupation from text, only when flagged as MISSING")
+    person_code_assigned: Optional[str] = Field(default=None, description="Person code (A1, A2, etc.) assigned by order of first mention, only for ASSIGN_CODE accused")
 
 class RoleExtractionResponse(BaseModel):
     accused_roles: List[RoleExtractionItem]
 
 
-def extract_roles_for_known_accused(text: str, accused_list: List[Dict[str, Any]]) -> Dict[str, Dict[str, Optional[str]]]:
+def extract_roles_for_known_accused(
+    text: str,
+    accused_list: List[Dict[str, Any]],
+    missing_fields_map: Optional[Dict[str, List[str]]] = None,
+    needs_person_code: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """
-    Targeted LLM Pass 2 for Branch A / Branch B.
+    Targeted LLM extraction for Branch A / Branch B.
 
-    Accepts a list of DB-sourced accused dicts with 'accused_code' and optionally 'full_name'.
-    Returns a dict keyed by accused_code -> {'role_in_crime': ..., 'key_details': ...}.
+    Accepts:
+      - accused_list: DB-sourced accused dicts with 'accused_code', 'full_name', etc.
+      - missing_fields_map: {accused_code: [list of field names missing from DB]}
+      - needs_person_code: list of accused_codes that need LLM-assigned person code
 
-    Used when we already know WHO the accused are from the DB, so we skip Pass 1
-    (name identification) and go straight to role extraction using the accused_code
-    as the deterministic pairing anchor.
+    Returns a dict keyed by accused_code -> {
+        'role_in_crime': ..., 'key_details': ...,
+        'address': ..., 'age': ..., 'alias_name': ..., 'occupation': ...,
+        'person_code_assigned': ...
+    }.
 
     Returns {} on failure so callers can fall back gracefully.
     """
     if not text or not accused_list:
         return {}
 
-    # Build a human-readable list for the prompt
-    # When accused_code is NULL, use full_name or a positional label (Accused-1, etc.)
+    missing_fields_map = missing_fields_map or {}
+    needs_person_code = needs_person_code or []
+
+    # Build a human-readable list with annotations for the prompt
     accused_entries = []
     for i, acc in enumerate(accused_list, start=1):
         code = acc.get('accused_code')
         name = acc.get('full_name') or 'Unknown'
         if not code:
-            # Assign sequential A-{i} code per spec when accused_code is NULL
             code = f'A-{i}'
-        accused_entries.append(f"{code}: {name}")
+
+        entry = f"{code}: {name}"
+
+        # Add annotations for missing fields
+        annotations = []
+        missing = missing_fields_map.get(code, [])
+        if missing:
+            annotations.append(f"[MISSING: {', '.join(missing)}]")
+        if code in needs_person_code:
+            annotations.append("[ASSIGN_CODE]")
+
+        if annotations:
+            entry += " " + " ".join(annotations)
+
+        accused_entries.append(entry)
     accused_list_str = "\n".join(accused_entries)
 
     parser = JsonOutputParser(pydantic_object=RoleExtractionResponse)
@@ -864,7 +897,10 @@ def extract_roles_for_known_accused(text: str, accused_list: List[Dict[str, Any]
     try:
         import time
         start_time = time.time()
-        logger.info(f"extract_roles_for_known_accused: invoking LLM for {len(accused_list)} accused")
+        logger.info(
+            f"extract_roles_for_known_accused: invoking LLM for {len(accused_list)} accused "
+            f"(missing_fields={len(missing_fields_map)}, needs_code={len(needs_person_code)})"
+        )
 
         response = invoke_extraction_with_retry(
             chain,
@@ -873,7 +909,7 @@ def extract_roles_for_known_accused(text: str, accused_list: List[Dict[str, Any]
                 "accused_list": accused_list_str,
                 "format_instructions": parser.get_format_instructions()
             },
-            max_retries=1
+            max_retries=2
         )
 
         duration = time.time() - start_time
@@ -889,17 +925,35 @@ def extract_roles_for_known_accused(text: str, accused_list: List[Dict[str, Any]
         elif isinstance(response, list):
             raw_list = response
 
-        result: Dict[str, Dict[str, Optional[str]]] = {}
+        if not raw_list:
+            logger.warning("extract_roles_for_known_accused: got response but accused_roles list is empty")
+            return {}
+
+        result: Dict[str, Dict[str, Any]] = {}
         for item in raw_list:
             if not isinstance(item, dict):
                 continue
             code = (item.get("accused_code") or "").strip()
             if not code:
                 continue
-            result[code] = {
+
+            entry: Dict[str, Any] = {
                 "role_in_crime": item.get("role_in_crime"),
                 "key_details": item.get("key_details"),
             }
+            # Include fallback fields if present
+            if item.get("address"):
+                entry["address"] = item["address"]
+            if item.get("age") is not None:
+                entry["age"] = item["age"]
+            if item.get("alias_name"):
+                entry["alias_name"] = item["alias_name"]
+            if item.get("occupation"):
+                entry["occupation"] = item["occupation"]
+            if item.get("person_code_assigned"):
+                entry["person_code_assigned"] = item["person_code_assigned"]
+
+            result[code] = entry
 
         logger.info(f"extract_roles_for_known_accused: extracted roles for codes={list(result.keys())}")
         return result

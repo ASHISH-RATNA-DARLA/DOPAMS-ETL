@@ -291,9 +291,12 @@ def process_crimes(conn, crimes):
 
 def _process_branch_a(conn, crime_id, facts_text, db_accused):
     """
-    DB is authoritative for identity. LLM extracts roles only.
+    DB is authoritative for identity. LLM extracts roles + fills missing fields.
     Skips accused rows where person_id IS NULL (spec SKIP RULE).
-    Handles NULL accused_code by using positional index fallback.
+
+    person_code logic by accused.type:
+      - 'Accused' / 'CCL': person_code = accused_code (direct from DB)
+      - 'Known' / 'Respondent' / 'Suspect': LLM assigns person_code (A1, A2 by mention)
     """
     # Filter to only rows with person_id (spec: skip NULL person_id)
     valid_accused = [row for row in db_accused if row.get('person_id')]
@@ -301,7 +304,45 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
     if skipped:
         logging.info(f"Branch A: Skipped {skipped} accused rows with NULL person_id")
 
-    roles_by_code = extract_roles_for_known_accused(facts_text, list(valid_accused))
+    if not valid_accused:
+        logging.info(f"Branch A: No valid accused with person_id for Crime {crime_id}")
+        return
+
+    # ---- Pre-scan: determine person_code strategy and missing fields per accused ----
+    DIRECT_CODE_TYPES = {'Accused', 'CCL'}
+    LLM_CODE_TYPES = {'Known', 'Respondent', 'Suspect'}
+
+    missing_fields_map = {}   # accused_code -> [list of missing field names]
+    needs_person_code = []    # accused_codes that need LLM assignment
+    PERSON_FIELDS_TO_CHECK = ['age', 'address', 'alias_name', 'occupation']
+
+    for i, row in enumerate(valid_accused, start=1):
+        code = row.get('accused_code') or f'A-{i}'
+        accused_type_db = (row.get('accused_type_db') or 'Accused').strip()
+
+        # Check if this type needs LLM-assigned person_code
+        if accused_type_db in LLM_CODE_TYPES:
+            needs_person_code.append(code)
+
+        # Detect which person fields are NULL and need LLM fallback
+        missing = []
+        if not row.get('age') and not row.get('date_of_birth'):
+            missing.append('age')
+        if not row.get('address'):
+            missing.append('address')
+        if not row.get('alias_name'):
+            missing.append('alias_name')
+        if not row.get('occupation'):
+            missing.append('occupation')
+        if missing:
+            missing_fields_map[code] = missing
+
+    # ---- Call LLM with annotations ----
+    roles_by_code = extract_roles_for_known_accused(
+        facts_text, list(valid_accused),
+        missing_fields_map=missing_fields_map,
+        needs_person_code=needs_person_code,
+    )
     if not roles_by_code:
         roles_by_code = {}
 
@@ -311,13 +352,22 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
         single_role = list(roles_by_code.values())[0]
 
     count = 0
-    for row in valid_accused:
+    for i, row in enumerate(valid_accused, start=1):
         accused_id    = row.get('accused_id')
         person_id     = row.get('person_id')
         accused_code  = row.get('accused_code') or ''
         seq_num       = row.get('seq_num')
         is_ccl_db     = row.get('is_ccl', False)
+        accused_type_db = (row.get('accused_type_db') or 'Accused').strip()
 
+        # ---- person_code by accused.type ----
+        if accused_type_db in DIRECT_CODE_TYPES:
+            person_code = accused_code or None
+        else:
+            # Known/Respondent/Suspect: try LLM-assigned code
+            person_code = None  # will be filled from LLM below
+
+        # ---- DB person fields ----
         full_name     = row.get('full_name')
         raw_alias     = row.get('alias_name')
         alias_name    = strip_alias_name(raw_alias)
@@ -329,18 +379,41 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
         address       = row.get('address')
         phone_numbers = row.get('phone_numbers')
 
-        # Role pairing: code → normalised code → name → positional
-        role_data = _pair_role_to_accused(accused_code, full_name, roles_by_code)
+        # ---- Role pairing: code → normalised code → name → positional ----
+        effective_code = accused_code or f'A-{i}'
+        role_data = _pair_role_to_accused(effective_code, full_name, roles_by_code)
         if not role_data and single_role:
-            role_data = single_role  # Positional fallback for single-accused cases
+            role_data = single_role
 
         role_in_crime = role_data.get('role_in_crime') if role_data else None
         key_details   = role_data.get('key_details') if role_data else None
 
-        # Status: raw DB value first, keyword fallback
+        # ---- LLM fallback: fill missing person fields ----
+        source_person = {k: 'DB' for k in ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'phone_numbers', 'address']
+                         if row.get(k) is not None and row.get(k) != ''}
+
+        if role_data:
+            # Fill NULL DB fields with LLM-extracted values
+            if not address and role_data.get('address'):
+                address = role_data['address']
+                source_person['address'] = 'LLM_FALLBACK'
+            if age is None and role_data.get('age') is not None:
+                age = role_data['age']
+                source_person['age'] = 'LLM_FALLBACK'
+            if not alias_name and role_data.get('alias_name'):
+                alias_name = role_data['alias_name']
+                source_person['alias_name'] = 'LLM_FALLBACK'
+            if not occupation and role_data.get('occupation'):
+                occupation = role_data['occupation']
+                source_person['occupation'] = 'LLM_FALLBACK'
+            # LLM-assigned person_code for Known/Respondent/Suspect
+            if person_code is None and role_data.get('person_code_assigned'):
+                person_code = role_data['person_code_assigned']
+
+        # ---- Status: raw DB value first, keyword fallback ----
         status = resolve_status_for_insert(row.get('accused_status'), facts_text, full_name or accused_code)
 
-        # Classification
+        # ---- Classification ----
         if role_in_crime:
             classification_text = role_in_crime + (" " + key_details if key_details else "")
             accused_type = classify_accused_type(classification_text)
@@ -357,13 +430,12 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
         if accused_type == 'unknown':
             accused_type = None
 
-        # Build source audit trail
-        source_person = {k: 'DB' for k in ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'phone_numbers', 'address']
-                         if row.get(k) is not None and row.get(k) != ''}
+        # ---- Source audit trail ----
         source_accused = {k: 'DB' for k, v in [
             ('accused_id', accused_id), ('person_code', accused_code),
             ('seq_num', seq_num), ('is_ccl', is_ccl_db),
-            ('status', row.get('accused_status'))
+            ('status', row.get('accused_status')),
+            ('accused_type_db', accused_type_db),
         ] if v is not None and v != ''}
         source_summary = {}
         if role_in_crime:
@@ -377,7 +449,7 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
             'crime_id'             : crime_id,
             'accused_id'           : accused_id,
             'person_id'            : person_id,
-            'person_code'          : accused_code or None,
+            'person_code'          : person_code,
             'seq_num'              : seq_num,
             'existing_accused'     : True,
             'full_name'            : full_name,
