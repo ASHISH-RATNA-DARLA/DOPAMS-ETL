@@ -843,10 +843,14 @@ def extract_roles_for_known_accused(text: str, accused_list: List[Dict[str, Any]
         return {}
 
     # Build a human-readable list for the prompt
+    # When accused_code is NULL, use full_name or a positional label (Accused-1, etc.)
     accused_entries = []
-    for acc in accused_list:
-        code = acc.get('accused_code') or '?'
+    for i, acc in enumerate(accused_list, start=1):
+        code = acc.get('accused_code')
         name = acc.get('full_name') or 'Unknown'
+        if not code:
+            # Fallback: use name as the identifier so LLM can return it
+            code = name if name != 'Unknown' else f'Accused-{i}'
         accused_entries.append(f"{code}: {name}")
     accused_list_str = "\n".join(accused_entries)
 

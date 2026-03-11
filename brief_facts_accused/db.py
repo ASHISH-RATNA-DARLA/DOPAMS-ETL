@@ -2,6 +2,8 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import re
+import json
+import uuid
 import logging
 import config
 
@@ -235,7 +237,7 @@ def insert_accused_facts(conn, item_data):
                 source_person_fields, source_accused_fields, source_summary_fields
             )
             VALUES (
-                gen_random_uuid(), %s, 
+                %s, %s, 
                 %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
@@ -243,7 +245,7 @@ def insert_accused_facts(conn, item_data):
             )
         """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
 
-        import json
+        bf_id = str(uuid.uuid4())
 
         # Guard constrained columns before the per-crime transaction commits.
         full_name     = truncate_varchar(item_data.get('full_name'), MAX_FULL_NAME_LEN)
@@ -259,6 +261,7 @@ def insert_accused_facts(conn, item_data):
 
         try:
             cur.execute(query, (
+                bf_id,
                 item_data.get('crime_id'),
                 item_data.get('accused_id'),
                 item_data.get('person_id'),
