@@ -130,12 +130,21 @@ def execute_process(process):
     # We join with ' && ' so that if one step fails, the whole block fails immediately.
     full_command = " && ".join(commands)
 
-    # Each process writes its own live output to output.log in the process folder.
+    # Extract working directory from the 'cd' command so logs are written
+    # to master_output.log inside each individual ETL folder.
+    working_dir = None
+    for cmd in commands:
+        if cmd.startswith('cd '):
+            working_dir = cmd[3:].strip()
+            break
+
+    log_path = os.path.join(working_dir, 'master_output.log') if working_dir else 'master_output.log'
+
     # `set -o pipefail` keeps failures visible even when piping through tee.
-    logged_command = f"set -o pipefail; ( {full_command} ) 2>&1 | tee output.log"
-    
+    logged_command = f"set -o pipefail; ( {full_command} ) 2>&1 | tee {log_path}"
+
     logger.info(f"Executing: {full_command}")
-    logger.info("Subprocess logs will be written to output.log in the target ETL folder")
+    logger.info(f"Subprocess logs will be written to: {log_path}")
     
     try:
         # executable='/bin/bash' is crucial for 'source' to work

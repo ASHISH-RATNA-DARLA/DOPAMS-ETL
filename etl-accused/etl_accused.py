@@ -116,6 +116,7 @@ class AccusedETL:
             'crimes_updated_from_accused': 0,
             'errors': []
         }
+        self.db_limiter = None
         
         # Setup chunk-wise logging files
         self.setup_chunk_loggers()
@@ -282,18 +283,25 @@ class AccusedETL:
 
     def connect_db(self):
         try:
-            # Optimized parallelism - balance concurrency with DB connection limits
-            # Default: 4 chunks × 4 workers = 16 concurrent threads (safe for most PostgreSQL configs)
-            # Can override: ACCUSED_CHUNK_WORKERS=8 MAX_WORKERS=8 for 64 total (if DB supports it)
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '4'))
-            row_workers = int(os.environ.get('MAX_WORKERS', 4))  # Fixed 4 to avoid exhausting connections
+            # Optimized parallelism for 64GB RAM server
+            # We increase chunk workers and row workers to leverage more cores and memory
+            # Default: 6 chunks × 8 workers = 48 concurrent threads
+            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '6'))
+            row_workers = int(os.environ.get('MAX_WORKERS', '8'))
             total_workers = chunk_workers * row_workers
             
-            # Keep connection pool reasonable: 2 * total_workers + 5 spare connections
-            max_connections = min(50, total_workers * 2 + 5)  # Cap at 50 to be safe
+            # Connection pool sizing: workers + headroom
+            # For 64GB RAM, we can easily handle 100+ connections if PostgreSQL is configured for it
+            max_connections = int(os.environ.get('DB_MAX_CONNECTIONS', max(50, total_workers + 20)))
                 
-            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_connections, **DB_CONFIG)
-            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']} (maxconn={total_workers + 10})")
+            self.db_pool = PostgreSQLConnectionPool(minconn=5, maxconn=max_connections, **DB_CONFIG)
+            
+            # Resource protection: Gate DB-intensive workers using a semaphore
+            from db_pooling import ConnectionLimiter
+            self.db_limiter = ConnectionLimiter(self.db_pool, max_concurrent_db_ops=max_connections - 10)
+            
+            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']} (maxconn={max_connections})")
+            logger.info(f"🚀 Concurrency scaled for 64GB server: {chunk_workers} chunks, {row_workers} workers/chunk")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection pool initialization failed: {e}")
@@ -1636,7 +1644,8 @@ class AccusedETL:
         logger.trace(f"Starting to process records for chunk: {chunk_range} concurrently")
         
         def process_row(accused_raw_row, chunk_range):
-            with self.db_pool.get_connection_context() as conn:
+            # Protected resource access using ConnectionLimiter
+            with self.db_limiter.acquire() as conn:
                 cursor = conn.cursor()
                 accused = self.transform_accused(accused_raw_row)
                 accused_id = accused.get('accused_id')
@@ -1647,7 +1656,8 @@ class AccusedETL:
                 success, operation = self.insert_accused(accused, conn, cursor, chunk_range)
                 return {'accused_id': accused_id, 'operation': operation, 'success': success, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
 
-        requested_workers = int(os.environ.get('MAX_WORKERS', 2))  # Default to 2 for safety (not CPU-based)
+        # Scale concurrency for 64GB server; default to 8 workers per chunk
+        requested_workers = int(os.environ.get('MAX_WORKERS', 8)) 
         # Guardrail: don't allow row-level concurrency to exceed pool capacity.
         # This prevents psycopg2.pool.PoolError: Connection pool exhausted under load.
         pool_maxconn = getattr(self.db_pool, 'maxconn', None)

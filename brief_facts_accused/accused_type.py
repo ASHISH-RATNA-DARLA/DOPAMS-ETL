@@ -225,10 +225,11 @@ def main():
         if crime_ids:
             logging.info(f"Read {len(crime_ids)} IDs from {input_file}.")
             crimes = fetch_crimes_by_ids(conn, crime_ids)
-            process_crimes(conn, crimes)
+            process_crimes_parallel(crimes)
         else:
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
-            batch_size = 50
+            # Scale batch size for parallel processing on 64GB server
+            batch_size = int(os.environ.get('BATCH_SIZE', '30'))
             total_processed = 0
             while True:
                 crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
@@ -236,7 +237,7 @@ def main():
                     logging.info("No more unprocessed crimes found. Exiting.")
                     break
                 logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                process_crimes(conn, crimes)
+                process_crimes_parallel(crimes)
                 total_processed += len(crimes)
                 logging.info(f"Batch complete. Total processed so far: {total_processed}")
 
@@ -253,22 +254,26 @@ def main():
 # Per-crime dispatcher — commits per crime (safe for production)
 # ---------------------------------------------------------------------------
 
-def process_crimes(conn, crimes):
-    """Processes a list of crimes. Commits per crime for safety."""
-    for crime in crimes:
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+
+def process_crimes_parallel(crimes):
+    """Processes a list of crimes in parallel using thread pool and connection pool."""
+    # Scale LLM workers for 64GB server
+    max_workers = int(os.environ.get('PARALLEL_LLM_WORKERS', '6'))
+    logging.info(f"🚀 Scaling accused extraction with {max_workers} parallel workers")
+
+    def worker(crime):
         crime_id = crime['crime_id']
         facts_text = (crime['brief_facts'] or "").strip()
-        logging.info(f"Processing Crime ID: {crime_id}")
-
+        
+        # Use a fresh connection from the pool for each thread
+        from db_pooling import get_db_connection as get_pooled_conn
+        conn = get_pooled_conn()
         try:
             db_accused = fetch_existing_accused_for_crime(conn, crime_id)
             branch = _classify_db_accused(db_accused)
-            logging.info(
-                f"Crime {crime_id}: Branch {branch} "
-                f"({len(db_accused)} accused rows, "
-                f"{sum(1 for r in db_accused if r.get('person_id'))} with person_id)"
-            )
-
+            
             if branch == 'A':
                 _process_branch_a(conn, crime_id, facts_text, db_accused)
             elif branch == 'B':
@@ -276,13 +281,25 @@ def process_crimes(conn, crimes):
             else:
                 _process_branch_c(conn, crime_id, facts_text)
 
-            # Per-crime commit — safe, each crime is independent
             conn.commit()
-            logging.info(f"Crime {crime_id} committed successfully.")
-
+            return True, crime_id
         except Exception as e:
             conn.rollback()
-            logging.error(f"Failed processing Crime {crime_id}: {e}", exc_info=True)
+            logging.error(f"Failed processing Crime {crime_id}: {e}")
+            return False, crime_id
+        finally:
+            # Return to pool handled by get_db_connection wrapper if using context manager,
+            # but since we used direct call, let's close it (which returns to pool in ThreadedConnectionPool)
+            conn.close()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_crime = {executor.submit(worker, crime): crime['crime_id'] for crime in crimes}
+        for future in as_completed(future_to_crime):
+            success, cid = future.result()
+            if success:
+                logging.info(f"✅ Crime {cid} processed successfully.")
+            else:
+                logging.error(f"❌ Crime {cid} processing failed.")
 
 
 # ---------------------------------------------------------------------------

@@ -20,20 +20,20 @@ MAX_GENDER_LEN    = 20
 MAX_STATUS_LEN    = 40
 
 
+import sys
+import os
+# Import PostgreSQLConnectionPool
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import get_db_connection as get_pooled_connection, return_db_connection
+
 def get_db_connection():
-    """Establishes a connection to the PostgreSQL database."""
+    """Establishes a connection to the PostgreSQL database via pool."""
     try:
-        conn = psycopg2.connect(
-            dbname=config.DB_NAME,
-            user=config.DB_USER,
-            password=config.DB_PASSWORD,
-            host=config.DB_HOST,
-            port=config.DB_PORT
-        )
+        conn = get_pooled_connection()
         conn.autocommit = False  # Explicit transaction control
         return conn
     except Exception as e:
-        logger.error(f"Error connecting to database: {e}")
+        logger.error(f"Error connecting to database via pool: {e}")
         raise
 
 

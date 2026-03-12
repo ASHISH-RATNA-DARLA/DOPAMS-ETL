@@ -7,24 +7,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import sys
+import os
+# Import PostgreSQLConnectionPool
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_pooling import get_db_connection as get_pooled_connection
+
 def get_db_connection():
-    """Establishes a connection to the PostgreSQL database with TCP keepalive."""
+    """Establishes a connection to the PostgreSQL database via pool."""
     try:
-        conn = psycopg2.connect(
-            dbname=config.DB_NAME,
-            user=config.DB_USER,
-            password=config.DB_PASSWORD,
-            host=config.DB_HOST,
-            port=config.DB_PORT,
-            connect_timeout=10,
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5
-        )
-        return conn
+        return get_pooled_connection()
     except Exception as e:
-        logger.error(f"Error connecting to database: {e}")
+        logger.error(f"Error connecting to database via pool: {e}")
         raise
 
 

@@ -56,143 +56,149 @@ source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_persons.py
 
 [Order 7]
+update-mandal
+cd /data-drive/etl-process-dev/etl-update-mandal
+source /data-drive/etl-process-dev/venv/bin/activate
+python3 etl_update_mandal.py
+
+[Order 8]
 update-state-country
 cd /data-drive/etl-process-dev/update-state-country
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 update-state-country.py
 
-[Order 8]
+[Order 9]
 Domicile classification
 cd /data-drive/etl-process-dev/domicile_classification
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 domicile_classifier.py
 
-[Order 9]
+[Order 10]
 fix_person_names
 cd /data-drive/etl-process-dev/fix_fullname
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 fix_person_names.py
 
-[Order 10]
+[Order 11]
 full_name_fix
 cd /data-drive/etl-process-dev/fix_fullname
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 fix_all_fullnames.py
 
-[Order 11]
+[Order 12]
 name_fix
 cd /data-drive/etl-process-dev/fix_fullname
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 fix_name_field.py
 
-[Order 12]
+[Order 13]
 surname_fix
 cd /data-drive/etl-process-dev/fix_fullname
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 fix_surname_field.py
 
 
-[Order 13]
+[Order 14]
 properties
 cd /data-drive/etl-process-dev/etl-properties
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_properties.py
 
-[Order 14]
+[Order 15]
 IR
 cd /data-drive/etl-process-dev/etl-ir
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 ir_etl.py
 
 
-[Order 15]
+[Order 16]
 Disposal
 cd /data-drive/etl-process-dev/etl-disposal
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_disposal.py
 
-[Order 16]
+[Order 17]
 arrests
 cd /data-drive/etl-process-dev/etl_arrests
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_arrests.py
 
-[Order 17]
+[Order 18]
 mo_seizures
 cd /data-drive/etl-process-dev/etl_mo_seizures
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_mo_seizure.py
 
 
-[Order 18]
+[Order 19]
 chargesheets
 cd /data-drive/etl-process-dev/etl_chargesheets
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_chargesheets.py
 
-[Order 19]
+[Order 20]
 updated_chargesheet
 cd /data-drive/etl-process-dev/etl_updated_chargesheet
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_update_chargesheet.py
 
 
-[Order 20]
+[Order 21]
 fsl_case_property
 cd /data-drive/etl-process-dev/etl_fsl_case_property
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 etl_fsl_case_property.py
 
 
-[Order 21]
+[Order 22]
 refresh_views
 cd /data-drive/etl-process-dev/etl_refresh_views
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 views_refresh_sql.py
 
-[Order 22]
+[Order 23]
 brief_facts_accused
 cd /data-drive/etl-process-dev/brief_facts_accused
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 accused_type.py
 
-[Order 23]
+[Order 24]
 brief_facts_drugs
 cd /data-drive/etl-process-dev/brief_facts_drugs
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 main.py
 
-[Order 24]
+[Order 25]
 drug_standardization
 cd /data-drive/etl-process-dev/drug_standardization
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 drug_standardization.py
 
-[Order 25]
+[Order 26]
 refresh_views
 cd /data-drive/etl-process-dev/etl_refresh_views
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 views_refresh_sql.py
 
-[Order 26]
+[Order 27]
 update_file_id
 cd /data-drive/etl-process-dev/etl-files/etl_pipeline_files
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 main_standalone.py
 
-[Order 27]
+[Order 28]
 files_download_media_server
 cd /data-drive/etl-process-dev/etl-files/etl_files_media_server
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 -m etl_files_media_server.main
 
-[Order 28]
+[Order 29]
 update_file_extentions
 cd /data-drive/etl-process-dev/etl-files/update_file_urls_with_extensions
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 update_file_urls_with_extensions.py
 
-[Order 29]
+[Order 30]
 refresh_views
 cd /data-drive/etl-process-dev/etl_refresh_views
 source /data-drive/etl-process-dev/venv/bin/activate

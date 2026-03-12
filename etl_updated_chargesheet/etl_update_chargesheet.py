@@ -15,6 +15,9 @@ import logging
 import colorlog
 from typing import List, Dict, Optional, Tuple, Set
 import json
+import threading
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -139,8 +142,11 @@ class UpdatedChargesheetETL:
     """ETL Pipeline for Updated Chargesheets API"""
     
     def __init__(self):
-        self.db_conn = None
-        self.db_cursor = None
+        self._local = threading.local()
+        self.stats_lock = threading.Lock()
+        self.log_lock = threading.Lock()
+        self.schema_lock = threading.Lock()
+        self.max_workers = min(32, int(os.environ.get('MAX_WORKERS', (os.cpu_count() or 1) * 4)))
         self.stats = {
             'total_api_calls': 0,
             'total_chargesheets_fetched': 0,
@@ -239,16 +245,26 @@ class UpdatedChargesheetETL:
         if hasattr(self, 'duplicates_log') and self.duplicates_log:
             self.duplicates_log.close()
     
+    @property
+    def _conn(self):
+        if not hasattr(self._local, 'conn') or self._local.conn is None or self._local.conn.closed:
+            conn = psycopg2.connect(**DB_CONFIG)
+            conn.autocommit = True
+            self._local.conn = conn
+            self._local.cursor = conn.cursor()
+        return self._local.conn
+
+    @property
+    def _cursor(self):
+        _ = self._conn
+        if not hasattr(self._local, 'cursor') or self._local.cursor is None or self._local.cursor.closed:
+            self._local.cursor = self._local.conn.cursor()
+        return self._local.cursor
+
     def connect_db(self):
         """Connect to PostgreSQL database"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            # Enable autocommit mode for better connection stability
-            # With autocommit=True, SELECT queries don't leave transactions open during API calls
-            # This prevents issues if idle_in_transaction_session_timeout is ever enabled
-            # Also ensures each operation commits immediately, reducing connection overhead
-            self.db_conn.autocommit = True
-            self.db_cursor = self.db_conn.cursor()
+            _ = self._conn
             logger.info(f"✅ Connected to database: {DB_CONFIG['database']} (autocommit enabled)")
             return True
         except Exception as e:
@@ -257,52 +273,46 @@ class UpdatedChargesheetETL:
     
     def close_db(self):
         """Close database connection"""
-        if self.db_cursor:
-            self.db_cursor.close()
-        if self.db_conn:
-            self.db_conn.close()
+        if hasattr(self._local, 'cursor') and self._local.cursor:
+            try:
+                self._local.cursor.close()
+            except Exception:
+                pass
+            self._local.cursor = None
+        if hasattr(self._local, 'conn') and self._local.conn:
+            try:
+                self._local.conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
         logger.info("Database connection closed")
     
     def ensure_db_connection(self):
         """
-        Ensure database connection is alive. Reconnect if connection is closed.
+        Ensure database connection is alive for the current thread. Reconnect if needed.
         Returns True if connection is valid, False if reconnection failed.
         """
         try:
-            # Check if connection exists and is not closed
-            if self.db_conn is None or self.db_conn.closed:
-                logger.warning("⚠️  Database connection is closed, reconnecting...")
-                return self.connect_db()
-            
-            # Check if cursor exists and is not closed
-            if self.db_cursor is None or self.db_cursor.closed:
-                logger.warning("⚠️  Database cursor is closed, recreating cursor...")
-                try:
-                    # Ensure autocommit is still enabled after reconnection
-                    self.db_conn.autocommit = True
-                    self.db_cursor = self.db_conn.cursor()
-                    logger.info("✅ Cursor recreated successfully")
-                    return True
-                except Exception as e:
-                    logger.error(f"❌ Failed to recreate cursor: {e}, reconnecting...")
-                    return self.connect_db()
-            
-            # Test the connection with a simple query
-            self.db_cursor.execute("SELECT 1")
-            self.db_cursor.fetchone()
+            self._cursor.execute("SELECT 1")
+            self._cursor.fetchone()
             return True
-            
         except (psycopg2.OperationalError, psycopg2.InterfaceError, psycopg2.ProgrammingError) as e:
             logger.warning(f"⚠️  Database connection test failed: {e}, reconnecting...")
-            # Close existing connection if it exists
             try:
-                if self.db_cursor:
-                    self.db_cursor.close()
-                if self.db_conn:
-                    self.db_conn.close()
-            except:
+                if hasattr(self._local, 'cursor') and self._local.cursor:
+                    self._local.cursor.close()
+                if hasattr(self._local, 'conn') and self._local.conn:
+                    self._local.conn.close()
+            except Exception:
                 pass
-            return self.connect_db()
+            self._local.conn = None
+            self._local.cursor = None
+            try:
+                _ = self._conn
+                return True
+            except Exception as e2:
+                logger.error(f"❌ Failed to reconnect: {e2}")
+                return False
         except Exception as e:
             logger.error(f"❌ Unexpected error checking database connection: {e}")
             return False
@@ -310,12 +320,12 @@ class UpdatedChargesheetETL:
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
         try:
-            self.db_cursor.execute("""
+            self._cursor.execute("""
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = %s
             """, (table_name,))
-            return {row[0] for row in self.db_cursor.fetchall()}
+            return {row[0] for row in self._cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
@@ -328,8 +338,8 @@ class UpdatedChargesheetETL:
         """
         try:
             # Check if table has any data
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {UPDATE_CHARGESHEET_TABLE}")
-            count = self.db_cursor.fetchone()[0]
+            self._cursor.execute(f"SELECT COUNT(*) FROM {UPDATE_CHARGESHEET_TABLE}")
+            count = self._cursor.fetchone()[0]
             
             if count == 0:
                 # New database, start from beginning
@@ -341,11 +351,11 @@ class UpdatedChargesheetETL:
             MIN_START_DATE = '2022-01-01T00:00:00+05:30'
             min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
             
-            self.db_cursor.execute(f"""
+            self._cursor.execute(f"""
                 SELECT COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp) as max_date
                 FROM {UPDATE_CHARGESHEET_TABLE}
             """)
-            result = self.db_cursor.fetchone()
+            result = self._cursor.fetchone()
             if result and result[0]:
                 max_date = result[0]
                 # Convert to IST timezone if needed
@@ -417,13 +427,16 @@ class UpdatedChargesheetETL:
                 column_type = 'TEXT'
             
             alter_sql = f"ALTER TABLE {UPDATE_CHARGESHEET_TABLE} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
-            self.db_cursor.execute(alter_sql)
-            # No need to commit with autocommit=True (DDL statements auto-commit anyway)
+            with self.schema_lock:
+                self._cursor.execute(alter_sql)
             logger.info(f"✅ Added column {column_name} ({column_type}) to {UPDATE_CHARGESHEET_TABLE}")
             return True
         except Exception as e:
             logger.error(f"❌ Error adding column {column_name}: {e}")
-            self.db_conn.rollback()
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
             return False
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str], chunk_end_date: str):
@@ -613,27 +626,24 @@ class UpdatedChargesheetETL:
             'error': error
         }
         
-        self.api_log.write(f"\n{'='*80}\n")
-        self.api_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.api_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.api_log.write(f"{'-'*80}\n")
-        
-        if error:
-            self.api_log.write(f"ERROR: {error}\n")
-            self.api_log.write(f"Count: 0\n")
-            self.api_log.write(f"Crime IDs: []\n")
-        else:
-            self.api_log.write(f"Count: {count}\n")
-            self.api_log.write(f"Crime IDs ({len(crime_ids)}):\n")
-            for i, crime_id in enumerate(crime_ids, 1):
-                self.api_log.write(f"  {i}. {crime_id}\n")
-            
-            # Also write JSON format for easy parsing
-            self.api_log.write(f"\nJSON Format:\n")
-            self.api_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-            self.api_log.write(f"\n")
-        
-        self.api_log.flush()
+        with self.log_lock:
+            self.api_log.write(f"\n{'='*80}\n")
+            self.api_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.api_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.api_log.write(f"{'-'*80}\n")
+            if error:
+                self.api_log.write(f"ERROR: {error}\n")
+                self.api_log.write(f"Count: 0\n")
+                self.api_log.write(f"Crime IDs: []\n")
+            else:
+                self.api_log.write(f"Count: {count}\n")
+                self.api_log.write(f"Crime IDs ({len(crime_ids)}):\n")
+                for i, crime_id in enumerate(crime_ids, 1):
+                    self.api_log.write(f"  {i}. {crime_id}\n")
+                self.api_log.write(f"\nJSON Format:\n")
+                self.api_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+                self.api_log.write(f"\n")
+            self.api_log.flush()
     
     def normalize_date_value(self, value):
         """
@@ -673,8 +683,8 @@ class UpdatedChargesheetETL:
             else:
                 # Validate that crime_id exists in crimes table
                 try:
-                    self.db_cursor.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id_str,))
-                    result = self.db_cursor.fetchone()
+                    self._cursor.execute(f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id_str,))
+                    result = self._cursor.fetchone()
                     if result:
                         crime_id_valid = crime_id_str
                         logger.trace(f"CRIME_ID {crime_id_str} found in crimes table")
@@ -733,17 +743,16 @@ class UpdatedChargesheetETL:
             WHERE update_charge_sheet_id = %s
         """
         try:
-            self.db_cursor.execute(query, (update_charge_sheet_id,))
-            exists = self.db_cursor.fetchone() is not None
+            self._cursor.execute(query, (update_charge_sheet_id,))
+            exists = self._cursor.fetchone() is not None
             logger.trace(f"Chargesheet exists: {exists}")
             return exists
         except Exception as e:
             logger.error(f"Error checking if chargesheet exists: {e}")
-            # Try to reconnect
             if self.ensure_db_connection():
                 try:
-                    self.db_cursor.execute(query, (update_charge_sheet_id,))
-                    exists = self.db_cursor.fetchone() is not None
+                    self._cursor.execute(query, (update_charge_sheet_id,))
+                    exists = self._cursor.fetchone() is not None
                     return exists
                 except Exception as e2:
                     logger.error(f"Error retrying chargesheet exists check: {e2}")
@@ -761,15 +770,14 @@ class UpdatedChargesheetETL:
             WHERE update_charge_sheet_id = %s
         """
         try:
-            self.db_cursor.execute(query, (update_charge_sheet_id,))
-            row = self.db_cursor.fetchone()
+            self._cursor.execute(query, (update_charge_sheet_id,))
+            row = self._cursor.fetchone()
         except Exception as e:
             logger.error(f"Error getting existing chargesheet: {e}")
-            # Try to reconnect and retry
             if self.ensure_db_connection():
                 try:
-                    self.db_cursor.execute(query, (update_charge_sheet_id,))
-                    row = self.db_cursor.fetchone()
+                    self._cursor.execute(query, (update_charge_sheet_id,))
+                    row = self._cursor.fetchone()
                 except Exception as e2:
                     logger.error(f"Error retrying get existing chargesheet: {e2}")
                     return None
@@ -801,18 +809,19 @@ class UpdatedChargesheetETL:
             'chargesheet_data': chargesheet
         }
         
-        self.failed_log.write(f"\n{'='*80}\n")
-        self.failed_log.write(f"UPDATE_CHARGE_SHEET_ID: {chargesheet.get('update_charge_sheet_id')}\n")
-        self.failed_log.write(f"CRIME_ID: {chargesheet.get('crime_id')}\n")
-        self.failed_log.write(f"CHARGE_SHEET_NO: {chargesheet.get('charge_sheet_no')}\n")
-        self.failed_log.write(f"REASON: {reason}\n")
-        if error_details:
-            self.failed_log.write(f"ERROR: {error_details}\n")
-        self.failed_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.failed_log.write(f"\nJSON Format:\n")
-        self.failed_log.write(json.dumps(failed_info, indent=2, ensure_ascii=False, default=str))
-        self.failed_log.write(f"\n")
-        self.failed_log.flush()
+        with self.log_lock:
+            self.failed_log.write(f"\n{'='*80}\n")
+            self.failed_log.write(f"UPDATE_CHARGE_SHEET_ID: {chargesheet.get('update_charge_sheet_id')}\n")
+            self.failed_log.write(f"CRIME_ID: {chargesheet.get('crime_id')}\n")
+            self.failed_log.write(f"CHARGE_SHEET_NO: {chargesheet.get('charge_sheet_no')}\n")
+            self.failed_log.write(f"REASON: {reason}\n")
+            if error_details:
+                self.failed_log.write(f"ERROR: {error_details}\n")
+            self.failed_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.failed_log.write(f"\nJSON Format:\n")
+            self.failed_log.write(json.dumps(failed_info, indent=2, ensure_ascii=False, default=str))
+            self.failed_log.write(f"\n")
+            self.failed_log.flush()
     
     def log_invalid_crime_id(self, chargesheet: Dict, crime_id_str: str, chunk_range: str = ""):
         """Log a chargesheet that failed due to invalid CRIME_ID (not found in crimes table)"""
@@ -825,17 +834,18 @@ class UpdatedChargesheetETL:
             'chargesheet_data': chargesheet
         }
         
-        self.invalid_crime_id_log.write(f"\n{'='*80}\n")
-        self.invalid_crime_id_log.write(f"UPDATE_CHARGE_SHEET_ID: {chargesheet.get('update_charge_sheet_id')}\n")
-        self.invalid_crime_id_log.write(f"CRIME_ID: {crime_id_str}\n")
-        self.invalid_crime_id_log.write(f"CHARGE_SHEET_NO: {chargesheet.get('charge_sheet_no')}\n")
-        self.invalid_crime_id_log.write(f"REASON: CRIME_ID not found in crimes table\n")
-        self.invalid_crime_id_log.write(f"Chunk: {chunk_range}\n")
-        self.invalid_crime_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.invalid_crime_id_log.write(f"\nJSON Format:\n")
-        self.invalid_crime_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
-        self.invalid_crime_id_log.write(f"\n")
-        self.invalid_crime_id_log.flush()
+        with self.log_lock:
+            self.invalid_crime_id_log.write(f"\n{'='*80}\n")
+            self.invalid_crime_id_log.write(f"UPDATE_CHARGE_SHEET_ID: {chargesheet.get('update_charge_sheet_id')}\n")
+            self.invalid_crime_id_log.write(f"CRIME_ID: {crime_id_str}\n")
+            self.invalid_crime_id_log.write(f"CHARGE_SHEET_NO: {chargesheet.get('charge_sheet_no')}\n")
+            self.invalid_crime_id_log.write(f"REASON: CRIME_ID not found in crimes table\n")
+            self.invalid_crime_id_log.write(f"Chunk: {chunk_range}\n")
+            self.invalid_crime_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.invalid_crime_id_log.write(f"\nJSON Format:\n")
+            self.invalid_crime_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
+            self.invalid_crime_id_log.write(f"\n")
+            self.invalid_crime_id_log.flush()
     
     def log_duplicates_chunk(self, from_date: str, to_date: str, duplicates: List[Dict]):
         """Log duplicates found in a chunk"""
@@ -846,25 +856,23 @@ class UpdatedChargesheetETL:
             'duplicates': duplicates
         }
         
-        self.duplicates_log.write(f"\n{'='*80}\n")
-        self.duplicates_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.duplicates_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.duplicates_log.write(f"{'-'*80}\n")
-        self.duplicates_log.write(f"Duplicate Count: {len(duplicates)}\n")
-        self.duplicates_log.write(f"Note: These duplicates were PROCESSED (not skipped) to allow updates\n")
-        self.duplicates_log.write(f"\nDuplicates:\n")
-        for i, dup in enumerate(duplicates, 1):
-            self.duplicates_log.write(f"  {i}. UPDATE_CHARGE_SHEET_ID: {dup.get('update_charge_sheet_id')}, CRIME_ID: {dup.get('crime_id')}\n")
-            self.duplicates_log.write(f"     Occurrence: #{dup.get('occurrence', 'N/A')}\n")
-            self.duplicates_log.write(f"     First seen in: {dup['first_seen_in']}\n")
-            self.duplicates_log.write(f"     Duplicate in: {dup['duplicate_in']}\n")
-        
-        # Also write JSON format for easy parsing
-        self.duplicates_log.write(f"\nJSON Format:\n")
-        self.duplicates_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-        self.duplicates_log.write(f"\n")
-        
-        self.duplicates_log.flush()
+        with self.log_lock:
+            self.duplicates_log.write(f"\n{'='*80}\n")
+            self.duplicates_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.duplicates_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.duplicates_log.write(f"{'-'*80}\n")
+            self.duplicates_log.write(f"Duplicate Count: {len(duplicates)}\n")
+            self.duplicates_log.write(f"Note: These duplicates were PROCESSED (not skipped) to allow updates\n")
+            self.duplicates_log.write(f"\nDuplicates:\n")
+            for i, dup in enumerate(duplicates, 1):
+                self.duplicates_log.write(f"  {i}. UPDATE_CHARGE_SHEET_ID: {dup.get('update_charge_sheet_id')}, CRIME_ID: {dup.get('crime_id')}\n")
+                self.duplicates_log.write(f"     Occurrence: #{dup.get('occurrence', 'N/A')}\n")
+                self.duplicates_log.write(f"     First seen in: {dup['first_seen_in']}\n")
+                self.duplicates_log.write(f"     Duplicate in: {dup['duplicate_in']}\n")
+            self.duplicates_log.write(f"\nJSON Format:\n")
+            self.duplicates_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+            self.duplicates_log.write(f"\n")
+            self.duplicates_log.flush()
     
     def insert_chargesheet(self, chargesheet: Dict, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
@@ -897,7 +905,8 @@ class UpdatedChargesheetETL:
             reason = 'missing_update_id'
             error_details = "Chargesheet record missing update_charge_sheet_id"
             logger.warning(f"⚠️  {error_details}")
-            self.stats['total_chargesheets_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_chargesheets_failed'] += 1
             self.log_failed_record(chargesheet, reason, error_details)
             return False, reason
         
@@ -906,8 +915,9 @@ class UpdatedChargesheetETL:
             reason = 'invalid_crime_id'
             error_details = f"CRIME_ID {original_crime_id} not found in crimes table"
             logger.warning(f"⚠️  {error_details}, skipping chargesheet")
-            self.stats['total_chargesheets_failed'] += 1
-            self.stats['total_chargesheets_failed_crime_id'] += 1
+            with self.stats_lock:
+                self.stats['total_chargesheets_failed'] += 1
+                self.stats['total_chargesheets_failed_crime_id'] += 1
             self.log_failed_record(chargesheet, reason, error_details)
             self.log_invalid_crime_id(chargesheet, original_crime_id, chunk_date_range)
             return False, reason
@@ -917,7 +927,8 @@ class UpdatedChargesheetETL:
             reason = 'db_connection_error'
             error_details = "Database connection unavailable"
             logger.error(f"❌ {error_details}, skipping chargesheet")
-            self.stats['total_chargesheets_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_chargesheets_failed'] += 1
             self.log_failed_record(chargesheet, reason, error_details)
             return False, reason
         
@@ -1006,8 +1017,9 @@ class UpdatedChargesheetETL:
                             WHERE update_charge_sheet_id = %s
                         """
                         update_values.append(update_charge_sheet_id)
-                        self.db_cursor.execute(update_query, tuple(update_values))
-                        self.stats['total_chargesheets_updated'] += 1
+                        self._cursor.execute(update_query, tuple(update_values))
+                        with self.stats_lock:
+                            self.stats['total_chargesheets_updated'] += 1
                         logger.debug(f"Updated chargesheet: update_charge_sheet_id={update_charge_sheet_id} ({len(changes)} fields changed)")
                         logger.trace(f"Changes: {', '.join(changes)}")
                         # No need to commit with autocommit=True, but we can still call it for clarity
@@ -1016,7 +1028,8 @@ class UpdatedChargesheetETL:
                         return True, 'updated'
                     else:
                         # No changes needed
-                        self.stats['total_chargesheets_no_change'] += 1
+                        with self.stats_lock:
+                            self.stats['total_chargesheets_no_change'] += 1
                         logger.trace(f"No changes needed for chargesheet (all fields match or preserved)")
                         return True, 'no_change'
                 else:
@@ -1034,7 +1047,7 @@ class UpdatedChargesheetETL:
                         %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
-                self.db_cursor.execute(insert_query, (
+                self._cursor.execute(insert_query, (
                     update_charge_sheet_id,
                     crime_id,
                     chargesheet.get('charge_sheet_no'),
@@ -1043,9 +1056,10 @@ class UpdatedChargesheetETL:
                     chargesheet.get('taken_on_file_date'),
                     chargesheet.get('taken_on_file_case_type'),
                     chargesheet.get('taken_on_file_court_case_no'),
-                    chargesheet.get('date_created')  # From API (or NULL)
+                    chargesheet.get('date_created')
                 ))
-                self.stats['total_chargesheets_inserted'] += 1
+                with self.stats_lock:
+                    self.stats['total_chargesheets_inserted'] += 1
                 logger.debug(f"Inserted chargesheet: update_charge_sheet_id={update_charge_sheet_id}, crime_id={crime_id}")
                 logger.trace(f"Insert query executed for chargesheet")
                 # No need to commit with autocommit=True, but we can still call it for clarity
@@ -1055,30 +1069,100 @@ class UpdatedChargesheetETL:
             
         except psycopg2.IntegrityError as e:
             try:
-                if self.db_conn and not self.db_conn.closed:
-                    self.db_conn.rollback()
-            except Exception as rollback_err:
-                logger.error(f"Error during rollback after integrity error: {rollback_err}")
+                self._conn.rollback()
+            except Exception:
+                pass
             reason = 'integrity_error'
             error_details = str(e)
             logger.warning(f"⚠️  Integrity error for chargesheet: {e}")
-            self.stats['total_chargesheets_failed'] += 1
+            with self.stats_lock:
+                self.stats['total_chargesheets_failed'] += 1
             self.log_failed_record(chargesheet, reason, error_details)
             return False, reason
         except Exception as e:
             try:
-                if self.db_conn and not self.db_conn.closed:
-                    self.db_conn.rollback()
-            except Exception as rollback_err:
-                logger.error(f"Error during rollback after insert error: {rollback_err}")
+                self._conn.rollback()
+            except Exception:
+                pass
             reason = 'error'
             error_details = str(e)
             logger.error(f"❌ Error inserting chargesheet: {e}")
-            self.stats['total_chargesheets_failed'] += 1
-            self.stats['errors'].append(f"Chargesheet update_charge_sheet_id={update_charge_sheet_id}: {str(e)}")
+            with self.stats_lock:
+                self.stats['total_chargesheets_failed'] += 1
+                self.stats['errors'].append(f"Chargesheet update_charge_sheet_id={update_charge_sheet_id}: {str(e)}")
             self.log_failed_record(chargesheet, reason, error_details)
             return False, reason
     
+    def process_record_worker(self, idx: int, chargesheet_record: Dict, chunk_range: str,
+                              chunk_state: Dict, chunk_lock: threading.Lock):
+        """Worker method to process a single updated chargesheet record in a thread"""
+        try:
+            chargesheet = self.transform_chargesheet(chargesheet_record)
+            update_charge_sheet_id = chargesheet.get('update_charge_sheet_id')
+            crime_id = chargesheet.get('crime_id')
+            original_crime_id = chargesheet.get('_original_crime_id')
+
+            if not crime_id:
+                with chunk_lock:
+                    logger.warning(f"⚠️  Chargesheet with CRIME_ID {original_crime_id} not found in crimes table, skipping")
+                    with self.stats_lock:
+                        self.stats['total_chargesheets_failed'] += 1
+                        self.stats['total_chargesheets_failed_crime_id'] += 1
+                    failed_key = f"{update_charge_sheet_id or 'NO_ID'}:{original_crime_id}"
+                    chunk_state['failed_keys'].append(failed_key)
+                    reason = 'invalid_crime_id'
+                    if reason not in chunk_state['failed_reasons']:
+                        chunk_state['failed_reasons'][reason] = []
+                    chunk_state['failed_reasons'][reason].append(original_crime_id)
+                    chunk_state['invalid_crime_ids_in_chunk'].append({
+                        'update_charge_sheet_id': update_charge_sheet_id,
+                        'crime_id': original_crime_id
+                    })
+                self.log_invalid_crime_id(chargesheet, original_crime_id, chunk_range)
+                return
+
+            unique_key = update_charge_sheet_id or f"NO_ID_{idx}"
+
+            with chunk_lock:
+                if unique_key in chunk_state['seen_keys']:
+                    occurrence_count = chunk_state['key_occurrences'].get(unique_key, 1) + 1
+                    chunk_state['key_occurrences'][unique_key] = occurrence_count
+                    chunk_state['duplicates'].append({
+                        'update_charge_sheet_id': update_charge_sheet_id,
+                        'crime_id': crime_id,
+                        'occurrence': occurrence_count,
+                        'first_seen_in': chunk_state['seen_keys'][unique_key],
+                        'duplicate_in': chunk_range
+                    })
+                    with self.stats_lock:
+                        self.stats['total_duplicates'] += 1
+                    logger.info(f"⚠️  Duplicate chargesheet found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
+                else:
+                    chunk_state['seen_keys'][unique_key] = chunk_range
+                    chunk_state['key_occurrences'][unique_key] = 1
+
+            success, operation = self.insert_chargesheet(chargesheet, chunk_range)
+            with chunk_lock:
+                if success:
+                    if operation == 'inserted':
+                        if unique_key not in chunk_state['inserted_keys']:
+                            chunk_state['inserted_keys'].append(unique_key)
+                    elif operation == 'updated':
+                        chunk_state['updated_keys'].append(unique_key)
+                    elif operation == 'no_change':
+                        if unique_key not in chunk_state['no_change_keys']:
+                            chunk_state['no_change_keys'].append(unique_key)
+                else:
+                    chunk_state['failed_keys'].append(unique_key)
+                    if operation not in chunk_state['failed_reasons']:
+                        chunk_state['failed_reasons'][operation] = []
+                    chunk_state['failed_reasons'][operation].append(unique_key)
+
+        except Exception as e:
+            logger.error(f"❌ Error in worker processing record {idx}: {e}")
+            with self.stats_lock:
+                self.stats['total_chargesheets_failed'] += 1
+
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process updated chargesheet records for a specific date range"""
         chunk_range = f"{from_date} to {to_date}"
@@ -1115,96 +1199,38 @@ class UpdatedChargesheetETL:
         self.stats['total_chargesheets_fetched'] += len(chargesheet_raw)
         logger.trace(f"Processing {len(chargesheet_raw)} chargesheet records for chunk {chunk_range}")
         
-        # Track operations for this chunk
-        inserted_keys = []
-        updated_keys = []
-        no_change_keys = []
-        failed_keys = []
-        failed_reasons = {}
-        duplicates_in_chunk = []
-        invalid_crime_ids_in_chunk = []
-        
-        # Track unique keys seen in this chunk to detect duplicates (for reporting only, not skipping)
-        seen_keys = {}
-        key_occurrences = {}
-        
-        logger.trace(f"Starting to process records for chunk: {chunk_range}")
-        for idx, chargesheet_record in enumerate(chargesheet_raw, 1):
-            # Get crime_id for logging (API may use camelCase or UPPERCASE)
-            crime_id_for_log = chargesheet_record.get('crimeId') or chargesheet_record.get('CRIME_ID')
-            logger.trace(f"Processing record {idx}/{len(chargesheet_raw)}: CRIME_ID={crime_id_for_log}")
-            chargesheet = self.transform_chargesheet(chargesheet_record)
-            update_charge_sheet_id = chargesheet.get('update_charge_sheet_id')
-            crime_id = chargesheet.get('crime_id')
-            original_crime_id = chargesheet.get('_original_crime_id')
-            
-            # Check if crime_id is valid (exists in crimes table)
-            if not crime_id:
-                logger.warning(f"⚠️  Chargesheet with CRIME_ID {original_crime_id} not found in crimes table, skipping")
-                self.stats['total_chargesheets_failed'] += 1
-                self.stats['total_chargesheets_failed_crime_id'] += 1
-                failed_keys.append(f"{update_charge_sheet_id or 'NO_ID'}:{original_crime_id}")
-                reason = 'invalid_crime_id'
-                if reason not in failed_reasons:
-                    failed_reasons[reason] = []
-                failed_reasons[reason].append(original_crime_id)
-                invalid_crime_ids_in_chunk.append({
-                    'update_charge_sheet_id': update_charge_sheet_id,
-                    'crime_id': original_crime_id
-                })
-                self.log_invalid_crime_id(chargesheet, original_crime_id, chunk_range)
-                continue
-            
-            # Create unique key for tracking duplicates (using update_charge_sheet_id)
-            unique_key = update_charge_sheet_id or f"NO_ID_{idx}"
-            
-            # Track occurrences for duplicate reporting (but don't skip - process all)
-            if unique_key in seen_keys:
-                # This is a duplicate occurrence - track it but still process
-                occurrence_count = key_occurrences.get(unique_key, 1) + 1
-                key_occurrences[unique_key] = occurrence_count
-                
-                duplicates_in_chunk.append({
-                    'update_charge_sheet_id': update_charge_sheet_id,
-                    'crime_id': crime_id,
-                    'occurrence': occurrence_count,
-                    'first_seen_in': seen_keys[unique_key],
-                    'duplicate_in': chunk_range
-                })
-                self.stats['total_duplicates'] += 1
-                logger.info(f"⚠️  Duplicate chargesheet found in chunk {chunk_range} (occurrence #{occurrence_count}) - Will process to update record")
-                logger.trace(f"Duplicate details - First seen: {seen_keys[unique_key]}, Current occurrence: {occurrence_count}")
-            else:
-                seen_keys[unique_key] = chunk_range
-                key_occurrences[unique_key] = 1
-                logger.trace(f"New chargesheet key seen: {unique_key} in chunk {chunk_range}")
-            
-            # IMPORTANT: Process ALL records, even duplicates
-            # If same key appears multiple times, each occurrence might have updated data
-            # The smart update logic will handle whether to actually update or not
-            success, operation = self.insert_chargesheet(chargesheet, chunk_range)
-            logger.trace(f"Operation result for chargesheet: success={success}, operation={operation}")
-            if success:
-                if operation == 'inserted':
-                    # Only add to list if first occurrence (to avoid duplicate entries in log)
-                    if unique_key not in inserted_keys:
-                        inserted_keys.append(unique_key)
-                    logger.trace(f"Added to inserted list: {unique_key}")
-                elif operation == 'updated':
-                    # Track all updates (even if same key updated multiple times)
-                    updated_keys.append(unique_key)
-                    logger.trace(f"Added to updated list: {unique_key} (occurrence #{key_occurrences.get(unique_key, 1)})")
-                elif operation == 'no_change':
-                    # Only add to list if first occurrence
-                    if unique_key not in no_change_keys:
-                        no_change_keys.append(unique_key)
-                    logger.trace(f"Added to no_change list: {unique_key}")
-            else:
-                failed_keys.append(unique_key)
-                if operation not in failed_reasons:
-                    failed_reasons[operation] = []
-                failed_reasons[operation].append(unique_key)
-                logger.trace(f"Added to failed list: {unique_key}, reason: {operation}")
+        chunk_state = {
+            'inserted_keys': [],
+            'updated_keys': [],
+            'no_change_keys': [],
+            'failed_keys': [],
+            'failed_reasons': {},
+            'duplicates': [],
+            'invalid_crime_ids_in_chunk': [],
+            'seen_keys': {},
+            'key_occurrences': {}
+        }
+        chunk_lock = threading.Lock()
+
+        logger.trace(f"Starting to process {len(chargesheet_raw)} records for chunk: {chunk_range} with {self.max_workers} workers")
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(self.process_record_worker, idx, record, chunk_range, chunk_state, chunk_lock): idx
+                for idx, record in enumerate(chargesheet_raw, 1)
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"❌ Worker thread failed: {e}")
+
+        inserted_keys = chunk_state['inserted_keys']
+        updated_keys = chunk_state['updated_keys']
+        no_change_keys = chunk_state['no_change_keys']
+        failed_keys = chunk_state['failed_keys']
+        failed_reasons = chunk_state['failed_reasons']
+        duplicates_in_chunk = chunk_state['duplicates']
+        invalid_crime_ids_in_chunk = chunk_state['invalid_crime_ids_in_chunk']
         
         # Log duplicates for this chunk (for reporting, but they were all processed)
         if duplicates_in_chunk:
@@ -1247,42 +1273,36 @@ class UpdatedChargesheetETL:
             'error': error
         }
         
-        self.db_log.write(f"\n{'='*80}\n")
-        self.db_log.write(f"CHUNK: {from_date} to {to_date}\n")
-        self.db_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-        self.db_log.write(f"{'-'*80}\n")
-        
-        if error:
-            self.db_log.write(f"ERROR: {error}\n")
-        else:
-            self.db_log.write(f"Total Fetched from API: {total_fetched}\n")
-            self.db_log.write(f"\nINSERTED: {len(inserted_keys)}\n")
-            for i, key in enumerate(inserted_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
-            
-            self.db_log.write(f"\nUPDATED: {len(updated_keys)}\n")
-            for i, key in enumerate(updated_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
-            
-            self.db_log.write(f"\nNO CHANGE: {len(no_change_keys)}\n")
-            for i, key in enumerate(no_change_keys, 1):
-                self.db_log.write(f"  {i}. {key}\n")
-            
-            self.db_log.write(f"\nFAILED: {len(failed_keys)}\n")
-            if failed_reasons:
-                for reason, keys in failed_reasons.items():
-                    self.db_log.write(f"  Reason: {reason} ({len(keys)})\n")
-                    for i, key in enumerate(keys[:20], 1):  # Show first 20
-                        self.db_log.write(f"    {i}. {key}\n")
-                    if len(keys) > 20:
-                        self.db_log.write(f"    ... and {len(keys) - 20} more\n")
-            
-            # Also write JSON format for easy parsing
-            self.db_log.write(f"\nJSON Format:\n")
-            self.db_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
-            self.db_log.write(f"\n")
-        
-        self.db_log.flush()
+        with self.log_lock:
+            self.db_log.write(f"\n{'='*80}\n")
+            self.db_log.write(f"CHUNK: {from_date} to {to_date}\n")
+            self.db_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            self.db_log.write(f"{'-'*80}\n")
+            if error:
+                self.db_log.write(f"ERROR: {error}\n")
+            else:
+                self.db_log.write(f"Total Fetched from API: {total_fetched}\n")
+                self.db_log.write(f"\nINSERTED: {len(inserted_keys)}\n")
+                for i, key in enumerate(inserted_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                self.db_log.write(f"\nUPDATED: {len(updated_keys)}\n")
+                for i, key in enumerate(updated_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                self.db_log.write(f"\nNO CHANGE: {len(no_change_keys)}\n")
+                for i, key in enumerate(no_change_keys, 1):
+                    self.db_log.write(f"  {i}. {key}\n")
+                self.db_log.write(f"\nFAILED: {len(failed_keys)}\n")
+                if failed_reasons:
+                    for reason, keys in failed_reasons.items():
+                        self.db_log.write(f"  Reason: {reason} ({len(keys)})\n")
+                        for i, key in enumerate(keys[:20], 1):
+                            self.db_log.write(f"    {i}. {key}\n")
+                        if len(keys) > 20:
+                            self.db_log.write(f"    ... and {len(keys) - 20} more\n")
+                self.db_log.write(f"\nJSON Format:\n")
+                self.db_log.write(json.dumps(chunk_info, indent=2, ensure_ascii=False))
+                self.db_log.write(f"\n")
+            self.db_log.flush()
     
     def write_log_summaries(self):
         """Write summary sections to all log files"""
@@ -1403,8 +1423,8 @@ class UpdatedChargesheetETL:
                 time.sleep(1)  # Be nice to the API
             
             # Get database counts
-            self.db_cursor.execute(f"SELECT COUNT(*) FROM {UPDATE_CHARGESHEET_TABLE}")
-            db_chargesheets_count = self.db_cursor.fetchone()[0]
+            self._cursor.execute(f"SELECT COUNT(*) FROM {UPDATE_CHARGESHEET_TABLE}")
+            db_chargesheets_count = self._cursor.fetchone()[0]
             
             # Store for summary
             self.stats['db_total_count'] = db_chargesheets_count

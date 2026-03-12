@@ -24,7 +24,8 @@ logging.basicConfig(
 #   48 GB VRAM → 6 workers
 #   80 GB VRAM → 10 workers
 import os
-PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "3"))
+# Optimized for 64GB RAM server with decent VRAM
+PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "6"))
 
 
 def main():
@@ -64,7 +65,8 @@ def main():
         else:
             # Dynamic Mode: Process ALL unprocessed crimes in batches
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
-            batch_size = int(os.getenv("BATCH_SIZE", "5"))
+            # Increased batch size for 64GB server throughput
+            batch_size = int(os.getenv("BATCH_SIZE", "15"))
             total_processed = 0
 
             while True:
