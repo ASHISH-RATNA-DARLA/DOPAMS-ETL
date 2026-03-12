@@ -394,7 +394,7 @@ class PersonsETL:
         # If there are new fields to update, execute an UPDATE statement
         if new_fields_to_update:
             try:
-                set_clauses = [f"{col} = %s" for col in new_fields_to_update.keys()]
+                set_clauses = [f"{col} = COALESCE(%s, {col})" for col in new_fields_to_update.keys()]
                 update_values_list = list(new_fields_to_update.values()) + [person_id]
                 
                 update_query = f"""
@@ -581,8 +581,10 @@ class PersonsETL:
         return None
 
     def truncate_string(self, value: Optional[str], max_length: int = 100, field_name: str = "") -> Optional[str]:
-        """Truncate string to max_length, logging if truncation occurs"""
+        """Truncate string to max_length, logging if truncation occurs. Empty strings become None."""
         if value is None:
+            return None
+        if isinstance(value, str) and value.strip() == '':
             return None
         if not isinstance(value, str):
             return str(value)[:max_length] if len(str(value)) > max_length else str(value)

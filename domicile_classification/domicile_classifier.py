@@ -235,6 +235,7 @@ def process_persons(cursor=None):
                 cur.execute("""
                     SELECT person_id, permanent_state_ut, permanent_country, present_state_ut, present_country 
                     FROM persons
+                    WHERE domicile_classification IS NULL OR TRIM(domicile_classification) = ''
                     ORDER BY person_id;
                 """)
                 persons = cur.fetchall()

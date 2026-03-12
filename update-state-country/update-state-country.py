@@ -327,7 +327,7 @@ def apply_foreign_country(
         logger.info("  [DRY-RUN] %s: would set permanent_country=%s", person_id, country)
         return True
 
-    sql = f"UPDATE {table} SET permanent_country = %s WHERE {id_col} = %s"
+    sql = f"UPDATE {table} SET permanent_country = COALESCE(NULLIF(TRIM(permanent_country), ''), %s) WHERE {id_col} = %s"
     pool = PostgreSQLConnectionPool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
@@ -728,31 +728,31 @@ def apply_updates(
     params: List = []
 
     if perm_geo:
-        sets.append("permanent_state_ut = %s")
+        sets.append("permanent_state_ut = COALESCE(NULLIF(TRIM(permanent_state_ut), ''), %s)")
         params.append(perm_geo.state)
 
-        sets.append("permanent_district = %s")
+        sets.append("permanent_district = COALESCE(NULLIF(TRIM(permanent_district), ''), %s)")
         params.append(perm_geo.district)
 
         if perm_geo.mandal:
-            sets.append("permanent_area_mandal = %s")
+            sets.append("permanent_area_mandal = COALESCE(NULLIF(TRIM(permanent_area_mandal), ''), %s)")
             params.append(perm_geo.mandal)
 
-        sets.append("permanent_country = %s")
+        sets.append("permanent_country = COALESCE(NULLIF(TRIM(permanent_country), ''), %s)")
         params.append("India")
 
     if pres_geo:
-        sets.append("present_state_ut = %s")
+        sets.append("present_state_ut = COALESCE(NULLIF(TRIM(present_state_ut), ''), %s)")
         params.append(pres_geo.state)
 
-        sets.append("present_district = %s")
+        sets.append("present_district = COALESCE(NULLIF(TRIM(present_district), ''), %s)")
         params.append(pres_geo.district)
 
         if pres_geo.mandal:
-            sets.append("present_area_mandal = %s")
+            sets.append("present_area_mandal = COALESCE(NULLIF(TRIM(present_area_mandal), ''), %s)")
             params.append(pres_geo.mandal)
 
-        sets.append("present_country = %s")
+        sets.append("present_country = COALESCE(NULLIF(TRIM(present_country), ''), %s)")
         params.append("India")
 
     if not sets:
