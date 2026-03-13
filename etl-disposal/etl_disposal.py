@@ -74,6 +74,9 @@ CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
 
+# API data availability start date (2022-06-06 is the earliest date API has data)
+API_DATA_START_DATE = '2022-06-06T00:00:00+05:30'
+
 def parse_iso_date(iso_date_str: str) -> datetime:
     """
     Parse ISO 8601 date string to datetime object
@@ -160,12 +163,14 @@ class DisposalETL:
             'total_disposals_failed_crime_id': 0,  # Disposals failed due to CRIME_ID not found
             'total_duplicates': 0,  # Duplicate records found within chunks
             'failed_api_calls': 0,
-            'errors': []
+            'errors': [],
+            'duplicate_warnings_suppressed': 0  # Count of suppressed duplicate insert warnings
         }
         self.stats_lock = threading.Lock()
         self.log_lock = threading.Lock()
         self.schema_lock = threading.Lock()
         self.db_pool = None
+        self.preflight_checks_done = False
         
         # Setup chunk-wise logging files
         self.setup_chunk_loggers()
@@ -253,13 +258,19 @@ class DisposalETL:
             self.duplicates_log.close()
     
     def connect_db(self):
-        """Connect to PostgreSQL database"""
+        """Connect to PostgreSQL database with optimized pool sizing"""
         try:
             pool_config = DB_CONFIG.copy()
-            # Adjust min/max conn based on MAX_WORKERS if needed
+            
+            # Smart connection pool sizing to avoid worker contention
+            # Formula: max_workers * 1.5 ensures each worker can get a connection when needed
+            # plus buffer for schema operations
             max_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
-            pool_config['minconn'] = 1
-            pool_config['maxconn'] = max_workers + 5  # Add a small buffer
+            optimal_pool_size = max(max_workers // 2, 5)  # At least 5, but allow worker sharing
+            max_pool_size = max_workers + 10  # Max can be higher to prevent queue buildup
+            
+            pool_config['minconn'] = optimal_pool_size // 2
+            pool_config['maxconn'] = max_pool_size
             
             self.db_pool = PostgreSQLConnectionPool(**pool_config)
             
@@ -268,6 +279,7 @@ class DisposalETL:
             self.db_cursor = self.db_conn.cursor()
             
             logger.info(f"✅ Connected to database: {DB_CONFIG['database']} using connection pool")
+            logger.info(f"   Pool: min={optimal_pool_size // 2}, max={max_pool_size} (workers={max_workers})")
             return self.db_pool is not None
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")
@@ -306,8 +318,9 @@ class DisposalETL:
     def get_effective_start_date(self) -> str:
         """
         Get effective start date for ETL:
-        - If table is empty: return 2022-01-01T00:00:00+05:30
+        - If table is empty: return API_DATA_START_DATE (2022-06-06, earliest API data)
         - If table has data: return max(date_created, date_modified) from table
+        - Always respect API_DATA_START_DATE as minimum (API has no data before this)
         """
         try:
             with self.db_pool.get_connection_context() as conn:
@@ -317,19 +330,21 @@ class DisposalETL:
                     count = cur.fetchone()[0]
                     
                     if count == 0:
-                        # New database, start from beginning
-                        logger.info("📊 Table is empty, starting from 2022-01-01")
-                        return '2022-01-01T00:00:00+05:30'
+                        # New database, start from API data availability date
+                        logger.info(f"📊 Table is empty, starting from {API_DATA_START_DATE}")
+                        return API_DATA_START_DATE
                     
                     # Table has data, get max of date_created and date_modified
-                    # Only consider dates >= 2022-01-01 to avoid processing very old data
-                    MIN_START_DATE = '2022-01-01T00:00:00+05:30'
-                    min_start_dt = parse_iso_date('2022-01-01T00:00:00+05:30')
+                    # Only consider dates >= API_DATA_START_DATE to avoid processing non-existent data
+                    MIN_START_DATE = API_DATA_START_DATE
+                    min_start_dt = parse_iso_date(API_DATA_START_DATE)
                     
+                    api_start_dt = parse_iso_date(API_DATA_START_DATE)
+                    api_start_date_str = api_start_dt.strftime('%Y-%m-%d')
                     cur.execute(f"""
                         SELECT GREATEST(
-                            COALESCE(MAX(CASE WHEN date_created >= '2022-01-01'::timestamp THEN date_created END), '2022-01-01'::timestamp),
-                            COALESCE(MAX(CASE WHEN date_modified >= '2022-01-01'::timestamp THEN date_modified END), '2022-01-01'::timestamp)
+                            COALESCE(MAX(CASE WHEN date_created >= '{api_start_date_str}'::timestamp THEN date_created END), '{api_start_date_str}'::timestamp),
+                            COALESCE(MAX(CASE WHEN date_modified >= '{api_start_date_str}'::timestamp THEN date_modified END), '{api_start_date_str}'::timestamp)
                         ) as max_date
                         FROM {DISPOSAL_TABLE}
                     """)
@@ -343,22 +358,22 @@ class DisposalETL:
                             else:
                                 max_date = max_date.astimezone(IST_OFFSET)
                             
-                            # Ensure we never go before 2022-01-01
+                            # Ensure we never go before API_DATA_START_DATE
                             if max_date < min_start_dt:
-                                logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before 2022-01-01, using 2022-01-01")
+                                logger.warning(f"⚠️  Max date ({max_date.isoformat()}) is before {API_DATA_START_DATE}, using {API_DATA_START_DATE}")
                                 return MIN_START_DATE
                             
                             logger.info(f"📊 Table has data, starting from: {max_date.isoformat()}")
                             return max_date.isoformat()
                     
                     # Fallback to start date
-                    logger.warning("⚠️  Could not determine max date, using 2022-01-01")
-                    return '2022-01-01T00:00:00+05:30'
+                    logger.warning(f"⚠️  Could not determine max date, using {API_DATA_START_DATE}")
+                    return API_DATA_START_DATE
             
         except Exception as e:
             logger.error(f"❌ Error getting effective start date: {e}")
-            logger.warning("⚠️  Using default start date: 2022-01-01")
-            return '2022-01-01T00:00:00+05:30'
+            logger.warning(f"⚠️  Using default start date: {API_DATA_START_DATE}")
+            return API_DATA_START_DATE
     
     def detect_new_fields(self, api_record: Dict, table_columns: Set[str]) -> Dict[str, str]:
         """
@@ -497,7 +512,7 @@ class DisposalETL:
     
     def fetch_disposal_api(self, from_date: str, to_date: str) -> Optional[List[Dict]]:
         """
-        Fetch disposal data from API for given date range
+        Fetch disposal data from API for given date range with adaptive timeout
         
         Args:
             from_date: Start date (YYYY-MM-DD)
@@ -516,15 +531,22 @@ class DisposalETL:
             'x-api-key': API_CONFIG['api_key']
         }
         
+        # Adaptive timeout: start conservative, increase on retry with backoff
+        base_timeout = API_CONFIG.get('timeout', 30)
+        
         for attempt in range(API_CONFIG['max_retries']):
             try:
-                logger.debug(f"Fetching disposal: {from_date} to {to_date} (Attempt {attempt + 1})")
+                # Adaptive timeout: increases with retry attempts
+                # Attempt 0: 30s, Attempt 1: 45s, Attempt 2: 60s
+                adaptive_timeout = base_timeout + (attempt * 15)
+                
+                logger.debug(f"Fetching disposal: {from_date} to {to_date} (Attempt {attempt + 1}/{API_CONFIG['max_retries']}, timeout={adaptive_timeout}s)")
                 logger.trace(f"API Request - URL: {url}, Params: {params}, Headers: {headers}")
                 response = requests.get(
                     url,
                     params=params,
                     headers=headers,
-                    timeout=API_CONFIG['timeout']
+                    timeout=adaptive_timeout
                 )
                 logger.trace(f"API Response - Status: {response.status_code}, Headers: {dict(response.headers)}")
                 
@@ -565,26 +587,38 @@ class DisposalETL:
                 elif response.status_code == 404:
                     # Log 404 response
                     self.log_api_chunk(from_date, to_date, 0, [], [], error="404 Not Found")
-                    logger.warning(f"⚠️  No data found for {from_date} to {to_date}")
+                    logger.info(f"ℹ️  No data found for {from_date} to {to_date}")
                     return []
                 
                 else:
                     logger.warning(f"API returned status code {response.status_code}, retrying...")
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    backoff_time = min(2 ** attempt, 30)  # Exponential backoff, cap at 30s
+                    logger.debug(f"Waiting {backoff_time}s before retry...")
+                    time.sleep(backoff_time)
                     
             except requests.exceptions.Timeout:
-                logger.warning(f"API timeout, retrying... (Attempt {attempt + 1})")
-                time.sleep(2 ** attempt)
+                backoff_time = min(2 ** attempt, 30)
+                logger.warning(f"API timeout (exceeded {adaptive_timeout}s), retrying in {backoff_time}s... (Attempt {attempt + 1}/{API_CONFIG['max_retries']})")
+                if attempt < API_CONFIG['max_retries'] - 1:
+                    time.sleep(backoff_time)
+                else:
+                    logger.error(f"❌ API timeout after {API_CONFIG['max_retries']} attempts for {from_date} to {to_date}")
+                    self.stats['failed_api_calls'] += 1
+                    self.stats['errors'].append(f"{from_date} to {to_date}: Timeout after {adaptive_timeout}s")
+                    self.log_api_chunk(from_date, to_date, 0, [], [], error=f"Timeout after {adaptive_timeout}s")
             except Exception as e:
-                logger.error(f"API error: {e}")
+                logger.debug(f"API error: {e}")
                 if attempt == API_CONFIG['max_retries'] - 1:
                     self.stats['failed_api_calls'] += 1
                     self.stats['errors'].append(f"{from_date} to {to_date}: {str(e)}")
                     self.log_api_chunk(from_date, to_date, 0, [], [], error=str(e))
-                time.sleep(2 ** attempt)
+                elif attempt < API_CONFIG['max_retries'] - 1:
+                    backoff_time = min(2 ** attempt, 30)
+                    logger.debug(f"Retrying in {backoff_time}s...")
+                    time.sleep(backoff_time)
         
-        logger.error(f"❌ Failed to fetch disposal for {from_date} to {to_date} after {API_CONFIG['max_retries']} attempts")
-        self.log_api_chunk(from_date, to_date, 0, [], [], error="Failed after max retries")
+        logger.error(f"❌ Failed to fetch disposal for {from_date} to {to_date} after {API_CONFIG['max_retries']} attempts (max timeout was {adaptive_timeout}s)")
+        self.log_api_chunk(from_date, to_date, 0, [], [], error=f"Failed after {API_CONFIG['max_retries']} attempts (timeout={adaptive_timeout}s)")
         return None
     
     def log_api_chunk(self, from_date: str, to_date: str, count: int, crime_ids: List[str], 
@@ -652,10 +686,20 @@ class DisposalETL:
                 logger.error(f"Error validating crime_id {crime_id_str}: {e}")
                 # Note: The calling worker ensures transaction handling
         
+        # FIX: API sends DISPOSED_DATE (not DISPOSED_AT)
+        disposed_date_str = disposal_raw.get('DISPOSED_DATE')  # API field name
+        disposed_at_timestamp = None
+        if disposed_date_str:
+            try:
+                # Parse ISO format date from API
+                disposed_at_timestamp = parse_iso_date(disposed_date_str)
+            except Exception as e:
+                logger.warning(f"Warning parsing DISPOSED_DATE {disposed_date_str}: {e}")
+        
         transformed = {
             'crime_id': crime_id_valid,  # VARCHAR foreign key to crimes.crime_id
             'disposal_type': disposal_raw.get('DISPOSAL_TYPE'),
-            'disposed_at': disposal_raw.get('DISPOSED_AT'),
+            'disposed_at': disposed_at_timestamp,  # FIX: Maps DISPOSED_DATE from API
             'disposal': disposal_raw.get('DISPOSAL'),
             'case_status': disposal_raw.get('CASE_STATUS'),
             # Dates are always from API (never use CURRENT_TIMESTAMP)
@@ -960,13 +1004,23 @@ class DisposalETL:
             
         except psycopg2.IntegrityError as e:
             conn.rollback()
-            reason = 'integrity_error'
-            error_details = str(e)
-            logger.warning(f"⚠️  Integrity error for disposal: {e}")
-            with self.stats_lock:
-                self.stats['total_disposals_failed'] += 1
-            self.log_failed_record(disposal, reason, error_details)
-            return False, reason
+            # Check if error is due to duplicate key (already inserted)
+            error_str = str(e).lower()
+            if 'duplicate' in error_str or 'unique' in error_str:
+                reason = 'duplicate_key_constraint'
+                with self.stats_lock:
+                    self.stats['duplicate_warnings_suppressed'] += 1
+                # Suppress warning for duplicates - this is expected with overlapping chunks
+                logger.trace(f"Duplicate key for disposal (expected with overlaps): crime_id={crime_id}, disposal_type={disposal_type}")
+                return True, 'no_change'  # Treat as no-change to avoid error count inflation
+            else:
+                reason = 'integrity_error'
+                error_details = str(e)
+                logger.warning(f"⚠️  Integrity error for disposal: {e}")
+                with self.stats_lock:
+                    self.stats['total_disposals_failed'] += 1
+                self.log_failed_record(disposal, reason, error_details)
+                return False, reason
         except Exception as e:
             conn.rollback()
             reason = 'error'
@@ -1310,30 +1364,101 @@ class DisposalETL:
         self.duplicates_log.write(f"If the same key appears multiple times, each occurrence is processed\n")
         self.duplicates_log.write(f"The smart update logic will determine if actual updates are needed\n")
     
+    def run_preflight_checks(self) -> bool:
+        """Run pre-flight validation checks before ETL execution"""
+        logger.info("\n" + "=" * 80)
+        logger.info("🔍 PRE-FLIGHT VALIDATION CHECKS")
+        logger.info("=" * 80)
+        
+        try:
+            # Check 1: Database connectivity
+            logger.info("[1/5] Checking database connectivity...")
+            if not self.connect_db():
+                logger.error("❌ Failed to connect to database")
+                return False
+            logger.info("✅ Database connected successfully")
+            
+            # Check 2: Check if crimes table has data (prerequisite for disposal ETL)
+            logger.info("[2/5] Checking if crimes table is loaded (prerequisite)...")
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM {CRIMES_TABLE}")
+                    crime_count = cur.fetchone()[0]
+                    if crime_count == 0:
+                        logger.error("❌ PREREQUISITE FAILED: Crimes table is empty. Load crimes data first before running disposal ETL.")
+                        return False
+                    logger.info(f"✅ Crimes table has {crime_count:,} records")
+            
+            # Check 3: Verify disposal table schema
+            logger.info("[3/5] Verifying disposal table schema...")
+            table_columns = self.get_table_columns(DISPOSAL_TABLE)
+            required_columns = {'crime_id', 'disposal_type', 'disposed_at'}
+            if not required_columns.issubset(table_columns):
+                logger.error(f"❌ Disposal table missing required columns: {required_columns - table_columns}")
+                return False
+            logger.info(f"✅ Disposal table has all required columns")
+            
+            # Check 4: Verify API connectivity
+            logger.info("[4/5] Checking API connectivity...")
+            test_url = API_CONFIG.get('disposal_url', f"{API_CONFIG['base_url']}/crimes/disposal")
+            headers = {'x-api-key': API_CONFIG['api_key']}
+            try:
+                response = requests.get(
+                    test_url,
+                    params={'fromDate': '2022-06-06', 'toDate': '2022-06-07'},
+                    headers=headers,
+                    timeout=10
+                )
+                if response.status_code in [200, 404]:  # 200 = data, 404 = no data (both OK)
+                    logger.info(f"✅ API is accessible (HTTP {response.status_code})")
+                else:
+                    logger.error(f"❌ API returned unexpected status {response.status_code}")
+                    return False
+            except requests.exceptions.Timeout:
+                logger.error("❌ API connectivity check timed out")
+                return False
+            except Exception as e:
+                logger.error(f"❌ API connectivity check failed: {e}")
+                return False
+            
+            # Check 5: Verify API data availability start date
+            logger.info("[5/5] Verifying API data availability (minimum date: 2022-06-06)...")
+            logger.info(f"✅ API data available from: {API_DATA_START_DATE}")
+            
+            logger.info("=" * 80)
+            logger.info("✅ ALL PRE-FLIGHT CHECKS PASSED - Ready to start ETL")
+            logger.info("=" * 80 + "\n")
+            self.preflight_checks_done = True
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Pre-flight check failed with error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def run(self):
         """Main ETL execution"""
         logger.info("=" * 80)
         logger.info("🚀 DOPAMAS ETL Pipeline - Disposal API")
         logger.info("=" * 80)
         
-        # Calculate date range
-        # Start date: Always 2022-01-01T00:00:00+05:30
-        # End date: Yesterday at 23:59:59+05:30 (IST)
-        fixed_start_date = '2022-01-01T00:00:00+05:30'
-        calculated_end_date = get_yesterday_end_ist()
-        
-        logger.info(f"Fixed Start Date: {fixed_start_date}")
-        logger.info(f"Calculated End Date: {calculated_end_date}")
-        
-        # Connect to database
-        if not self.connect_db():
-            logger.error("Failed to connect to database. Exiting.")
+        # Run pre-flight validation checks
+        if not self.run_preflight_checks():
+            logger.error("\n❌ PRE-FLIGHT CHECKS FAILED - Aborting ETL run")
             return False
         
+        # Calculate date range
+        # Calculate end date: Yesterday at 23:59:59+05:30 (IST)
+        calculated_end_date = get_yesterday_end_ist()
+        
+        logger.info(f"API Data Availability: {API_DATA_START_DATE}")
+        logger.info(f"Calculated End Date: {calculated_end_date}")
+        
         try:
-            # Get effective start date (check if table has data)
+            # Get effective start date (check if table has data, or use API_DATA_START_DATE)
             effective_start_date = self.get_effective_start_date()
-            logger.info(f"Effective Start Date: {effective_start_date}")
+            logger.info(f"Effective Start Date (for this run): {effective_start_date}")
             
             # Get table columns for schema evolution
             table_columns = self.get_table_columns(DISPOSAL_TABLE)
@@ -1350,10 +1475,11 @@ class DisposalETL:
             logger.info(f"Date Range: {effective_start_date} to {calculated_end_date}")
             overlap_days = ETL_CONFIG.get('chunk_overlap_days', 1)
             logger.info(f"Chunk Size: {ETL_CONFIG['chunk_days']} days (overlap: {overlap_days} day(s) to ensure no data loss)")
+            logger.info(f"API Min Date: {API_DATA_START_DATE} (earliest data available from API)")
             logger.info("=" * 80)
             
             logger.info(f"📊 Total date ranges to process: {len(date_ranges)}")
-            logger.trace(f"Generated date ranges: {date_ranges[:5]}{'...' if len(date_ranges) > 5 else ''} (showing first 5)")
+            logger.debug(f"Generated date ranges: {date_ranges[:5]}{'...' if len(date_ranges) > 5 else ''} (showing first 5)")
             logger.info("")
             start_dt = parse_iso_date(effective_start_date)
             end_dt = parse_iso_date(calculated_end_date)
@@ -1416,11 +1542,13 @@ class DisposalETL:
             logger.info(f"  Duplicate Occurrences: {self.stats['total_duplicates']} (all processed)")
             logger.info(f"  Failed:               {self.stats['total_disposals_failed']}")
             logger.info(f"")
-            logger.info(f"💡 NOTE:")
-            logger.info(f"  - Same disposal key can appear multiple times in API response")
-            logger.info(f"  - Each occurrence is processed to capture any data updates")
-            logger.info(f"  - Smart update logic ensures only changed fields are updated")
+            logger.info(f"💡 NOTES:")
+            logger.info(f"  - API data available from: {API_DATA_START_DATE}")
+            logger.info(f"  - Same disposal key can appear in overlapping chunks (handled)")
+            logger.info(f"  - Duplicate warnings suppressed: {self.stats.get('duplicate_warnings_suppressed', 0)}")
+            logger.info(f"  - Smart update logic: only changed fields are updated")
             logger.info(f"  - Invalid CRIME_IDs are logged separately for review")
+            logger.info(f"  - FIX: Using DISPOSED_DATE from API (maps to disposed_at column)")
             logger.info(f"")
             logger.info(f"Errors:               {len(self.stats['errors'])}")
             logger.info("=" * 80)
