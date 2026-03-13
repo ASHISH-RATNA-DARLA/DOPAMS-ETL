@@ -27,7 +27,7 @@ cd /data-drive/etl-process-dev/etl-persons && source /data-drive/etl-process-dev
 
 Order 7 – update-mandal
 bash
-cd /data-drive/etl-process-dev/etl-update-mandal && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 etl_update_mandal.py > etl_update_mandal.log 2>&1 &
+cd /data-drive/etl-process-dev/update-mandal && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 mandal_imputation_from_address.py > mandal_imputation.log 2>&1 &
 
 Order 8 – update-state-country
 bash
