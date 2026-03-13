@@ -30,7 +30,8 @@ def get_db_connection():
     """Establishes a connection to the PostgreSQL database via pool."""
     try:
         conn = get_pooled_connection()
-        conn.autocommit = False  # Explicit transaction control
+        # Note: autocommit is already False by default in psycopg2
+        # Do not set it here as connection may already be in a transaction
         return conn
     except Exception as e:
         logger.error(f"Error connecting to database via pool: {e}")
