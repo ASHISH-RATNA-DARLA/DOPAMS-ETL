@@ -267,30 +267,29 @@ def process_crimes_parallel(crimes):
         crime_id = crime['crime_id']
         facts_text = (crime['brief_facts'] or "").strip()
         
-        # Use a fresh connection from the pool for each thread
-        from db_pooling import get_db_connection as get_pooled_conn
-        conn = get_pooled_conn()
-        try:
-            db_accused = fetch_existing_accused_for_crime(conn, crime_id)
-            branch = _classify_db_accused(db_accused)
-            
-            if branch == 'A':
-                _process_branch_a(conn, crime_id, facts_text, db_accused)
-            elif branch == 'B':
-                _process_branch_b(conn, crime_id, facts_text, db_accused)
-            else:
-                _process_branch_c(conn, crime_id, facts_text)
+        # Use connection context manager to ensure proper return to pool
+        from db_pooling import PostgreSQLConnectionPool
+        pool = PostgreSQLConnectionPool()
+        
+        with pool.get_connection_context() as conn:
+            try:
+                db_accused = fetch_existing_accused_for_crime(conn, crime_id)
+                branch = _classify_db_accused(db_accused)
+                
+                if branch == 'A':
+                    _process_branch_a(conn, crime_id, facts_text, db_accused)
+                elif branch == 'B':
+                    _process_branch_b(conn, crime_id, facts_text, db_accused)
+                else:
+                    _process_branch_c(conn, crime_id, facts_text)
 
-            conn.commit()
-            return True, crime_id
-        except Exception as e:
-            conn.rollback()
-            logging.error(f"Failed processing Crime {crime_id}: {e}")
-            return False, crime_id
-        finally:
-            # Return to pool handled by get_db_connection wrapper if using context manager,
-            # but since we used direct call, let's close it (which returns to pool in ThreadedConnectionPool)
-            conn.close()
+                conn.commit()
+                return True, crime_id
+            except Exception as e:
+                conn.rollback()
+                logging.error(f"Failed processing Crime {crime_id}: {e}")
+                return False, crime_id
+            # Connection automatically returned to pool via context manager
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_crime = {executor.submit(worker, crime): crime['crime_id'] for crime in crimes}
