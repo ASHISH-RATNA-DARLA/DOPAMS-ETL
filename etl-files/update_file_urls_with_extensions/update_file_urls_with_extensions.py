@@ -86,10 +86,10 @@ DB_CONFIG = {
     'keepalives_count': 5,
 }
 
-# Base path on the Tomcat media server
+# Base path on the Tomcat media server (NFS mount)
 BASE_MEDIA_PATH = os.getenv(
     "FILES_MEDIA_BASE_PATH",
-    "/data-drive/etl-process-dev/etl-files/tomcat/webapps/files"
+    "/mnt/shared-etl-files"
 )
 
 # Base URL for file URLs (from generate_file_url function)
