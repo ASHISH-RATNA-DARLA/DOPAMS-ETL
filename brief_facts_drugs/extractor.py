@@ -31,17 +31,24 @@ def _get_thread_safe_llm():
     """Return a per-thread ChatOllama instance (created lazily, cached per thread)."""
     if not hasattr(_thread_local, 'llm'):
         from langchain_ollama import ChatOllama
+        import httpx
         llm_service = get_llm('extraction')
         base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         if base_url.endswith("/api"):
             base_url = base_url.replace("/api", "")
+        
+        # Create httpx client with timeout to prevent hanging
+        timeout = float(os.getenv("LLM_TIMEOUT", "300"))
+        client = httpx.Client(timeout=timeout)
+        
         _thread_local.llm = ChatOllama(
             base_url=base_url,
             model=llm_service.model,
             temperature=llm_service.temperature,
             num_ctx=llm_service.context_window,
+            client=client,  # Pass timeout-aware client
         )
-        logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name}")
+        logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name} with {timeout}s timeout")
     return _thread_local.llm
 
 # =============================================================================
@@ -367,10 +374,12 @@ R19:purchase-price-is-NOT-worth|"purchased at Rs.10,000/- per KG" or "bought for
 R20:per-kg-rate-is-NOT-worth|"at the rate of Rs.10,000/- per KG"→this is a RATE, not a value for specific seized quantity|do NOT multiply rate × quantity to compute worth—only extract worth when explicitly stated
 R21:W/Rs-pattern|"W/Rs:" "W/Rs." "W/Rs" are abbreviations for "Worth Rupees"→ALWAYS extract the number following this pattern as seizure_worth|common formats: "W/Rs: 10,000/-", "W/Rs. 80,000/-", "W/Rs 2,52,800/-"
 
-## Drug Knowledge Base
-{drug_knowledge_base}
-If text matches any raw_name or standard_name → set primary_drug_name to the corresponding standard_name.
-If not in KB → set primary_drug_name to capitalized raw extraction.
+## Drug Name Extraction (Use Your Trained Knowledge)
+Extract drug names as they appear in the text. Use your trained pharmacological and legal knowledge of NDPS Act drugs:
+- Common Indian narcotics: Ganja, Charas, Heroin, Opium, Cocaine, MDMA, LSD, etc.
+- Chemical synonyms: Cannabis/Hemp/Bhang (= Ganja), Smack/Brown Sugar (= Heroin)
+- Capitalize consistently (e.g., "Ganja" not "ganja", "Heroin" not "heroin")
+Primary drug names will be standardized post-extraction using an authoritative drug knowledge base.
 
 ## Output Schema
 {{"drugs": [{{"raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{"source_sentence":str}}]}}
@@ -1108,38 +1117,26 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
         logger.info("Pre-processor filtered out ALL sections (no drug content detected). Returning empty.")
         return []
 
-    # ── Step 1: Token budget check ──
+    # ── Step 1: Token budget check (KB NOT sent to LLM) ──
     est_input_tokens = _estimate_tokens(filtered_text)
-    # Prompt template + KB overhead ≈ 800 tokens; LLM context window = 16384
+    # Prompt template overhead ≈ 800 tokens (NO KB in prompt); LLM context window = 16384
     CONTEXT_WINDOW = 16384
     PROMPT_OVERHEAD = 800
-    kb_token_est = _estimate_tokens("\n".join(
-        f"{c.get('raw_name','')}{c.get('standard_name','')}{c.get('category_group','')}"
-        for c in drug_categories
-    )) if drug_categories else 0
-    available_for_input = CONTEXT_WINDOW - PROMPT_OVERHEAD - kb_token_est
+    # KB is NOT sent to LLM — it's only used for post-extraction mapping via _apply_kb_mapping()
+    available_for_input = CONTEXT_WINDOW - PROMPT_OVERHEAD
+    
     if est_input_tokens > available_for_input:
         logger.warning(
             f"Token budget tight: input ~{est_input_tokens} tokens, "
             f"available ~{available_for_input} (window={CONTEXT_WINDOW}, "
-            f"prompt={PROMPT_OVERHEAD}, KB={kb_token_est}). Text may be truncated by LLM."
+            f"prompt={PROMPT_OVERHEAD}). Text may be truncated by LLM."
         )
     else:
         logger.info(f"Token budget OK: input ~{est_input_tokens}/{available_for_input} available tokens.")
         
-    # Format the drug categories knowledge base as pipe-delimited CSV (TOON-optimized)
-    kb_lines = []
-    if drug_categories:
-        kb_lines.append("raw_name|standard_name|category")
-        for cat in drug_categories:
-            raw = cat.get('raw_name', 'Unknown')
-            std = cat.get('standard_name', 'Unknown')
-            grp = cat.get('category_group', '-')
-            kb_lines.append(f"{raw}|{std}|{grp}")
-    else:
-        kb_lines.append("(No KB provided, use standard extraction)")
-    
-    formatted_kb = "\n".join(kb_lines)
+    # Don't format KB for LLM — KB is only used for post-extraction mapping
+    # This speeds up requests and prevents LLM context window issues
+    formatted_kb = "(No KB provided — LLM uses trained knowledge. KB mapping applied post-extraction.)"
     
     parser = JsonOutputParser(pydantic_object=CrimeReportExtraction)
     prompt = ChatPromptTemplate.from_template(EXTRACTION_PROMPT)
@@ -1153,7 +1150,7 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
         chain = prompt | llm | parser
         
         input_data = {"text": filtered_text, "drug_knowledge_base": formatted_kb}
-        logger.info(f"[Extractor] Sending to LLM — text_len={len(filtered_text)} chars, KB_entries={len(kb_lines)-1}")
+        logger.info(f"[Extractor] Sending to LLM — text_len={len(filtered_text)} chars (NO KB in prompt)")
         t_invoke = _time.time()
         response = invoke_extraction_with_retry(chain, input_data, max_retries=1)
         logger.info(f"[Extractor] LLM invoke completed in {_time.time()-t_invoke:.2f}s")

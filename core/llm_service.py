@@ -152,22 +152,38 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) 
     """
     Executes a LangChain extraction chain with retry on ANY error.
     Catches both JSON parsing errors and connection/HTTP errors.
+    Includes timeout protection to prevent hanging.
     """
     from langchain_core.exceptions import OutputParserException
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
     
     retries = 0
     last_error = None
+    timeout_seconds = float(os.getenv("LLM_TIMEOUT", "300"))
     
     import time as _time
+    
+    def _invoke_with_timeout(chain_obj, data):
+        """Invoke chain with timeout using ThreadPoolExecutor."""
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(chain_obj.invoke, data)
+                return future.result(timeout=timeout_seconds)
+        except FuturesTimeoutError:
+            raise TimeoutError(f"LLM chain.invoke() timed out after {timeout_seconds}s")
+    
     # Run once normally
     try:
         logger.info(f"[LLM] Invoking chain (attempt 1)...")
         t0 = _time.time()
-        result = chain.invoke(input_data)
+        result = _invoke_with_timeout(chain, input_data)
         logger.info(f"[LLM] chain.invoke() returned in {_time.time()-t0:.2f}s")
         if result:
             return result
         logger.warning("LLM returned None/empty on first attempt.")
+    except TimeoutError as e:
+        logger.warning(f"LLM invoke timed out on first attempt: {e}")
+        last_error = e
     except OutputParserException as e:
         logger.warning(f"JSON Parsing failed on first attempt: {e}")
         last_error = e
@@ -197,10 +213,13 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) 
         try:
             import time
             time.sleep(1 * retries)   # Back-off: 1s, 2s, ...
-            result = chain.invoke(retry_data)
+            result = _invoke_with_timeout(chain, retry_data)
             if result:
                 logger.info(f"Retry {retries} succeeded.")
                 return result
+        except TimeoutError as e:
+            logger.error(f"LLM invoke timed out on retry {retries}: {e}")
+            last_error = e
         except OutputParserException as e:
             logger.error(f"JSON Parsing failed on retry {retries}: {e}")
             last_error = e
