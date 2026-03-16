@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import (get_db_connection, fetch_crimes_by_ids, insert_drug_facts,
                 fetch_unprocessed_crimes, fetch_drug_categories, ensure_connection,
-                batch_insert_drug_facts, fetch_ignored_checklist, is_drug_ignored)
+                batch_insert_drug_facts)
 from extractor import extract_drug_info
 
 # Configure logging
@@ -25,7 +25,7 @@ logging.basicConfig(
 #   80 GB VRAM → 10 workers
 import os
 # Optimized for 64GB RAM server with decent VRAM
-PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "3"))
+PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "6"))
 
 
 def main():
@@ -40,10 +40,6 @@ def main():
         # 1.5 Fetch Knowledge Base (one-time)
         drug_categories = fetch_drug_categories(conn)
         logging.info(f"Loaded {len(drug_categories)} drug categories from knowledge base.")
-
-        # 1.6 Fetch Ignored Checklist (one-time)
-        ignored_checklist = fetch_ignored_checklist(conn)
-        logging.info(f"Loaded {len(ignored_checklist)} ignored drug terms for validation.")
 
     except Exception as e:
         logging.error(f"Failed to connect to DB: {e}")
@@ -65,7 +61,7 @@ def main():
             # Manual Mode: Process specific IDs from file
             logging.info(f"Read {len(crime_ids)} IDs from {input_file}. Fetching from DB...")
             crimes = fetch_crimes_by_ids(conn, crime_ids)
-            process_crimes_parallel(conn, crimes, drug_categories, ignored_checklist)
+            process_crimes_parallel(conn, crimes, drug_categories)
         else:
             # Dynamic Mode: Process ALL unprocessed crimes in batches
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
@@ -82,7 +78,7 @@ def main():
                         break
 
                     logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                    process_crimes_parallel(conn, crimes, drug_categories, ignored_checklist)
+                    process_crimes_parallel(conn, crimes, drug_categories)
                     total_processed += len(crimes)
                     logging.info(f"Batch complete. Total processed so far: {total_processed}")
                 except Exception as e:
@@ -158,7 +154,7 @@ def _extract_single_crime(crime, drug_categories):
         return (crime_id, None)
 
 
-def process_crimes_parallel(conn, crimes, drug_categories=None, ignored_checklist=None):
+def process_crimes_parallel(conn, crimes, drug_categories=None):
     """
     Process a batch of crimes with parallel LLM extraction and batched DB writes.
 
@@ -171,19 +167,14 @@ def process_crimes_parallel(conn, crimes, drug_categories=None, ignored_checklis
 
     - LLM calls happen in N parallel threads (I/O-bound, waiting for Ollama HTTP)
     - DB writes are batched in the main thread (single connection, no lock contention)
-    - Strict validation: Only inserts drugs with confidence >= 50% OR NOT in ignored_checklist
-    - NO_DRUGS_DETECTED placeholders are NEVER inserted (crimes with no drugs are simply skipped)
     """
     if drug_categories is None:
         drug_categories = []
-    if ignored_checklist is None:
-        ignored_checklist = []
 
     batch_start = time.time()
     total_crimes = len(crimes)
     total_inserted = 0
     total_skipped = 0
-    total_ignored = 0
     pending_inserts = []  # collect (crime_id, drug_data_dict) tuples
 
     # --- Phase 1: Parallel LLM extraction ---
@@ -199,57 +190,22 @@ def process_crimes_parallel(conn, crimes, drug_categories=None, ignored_checklis
                 cid, valid_drugs = future.result()
 
                 if valid_drugs is None:
-                    # Extraction error — SKIP (don't insert placeholder)
-                    logging.warning(f"Crime {cid}: extraction returned None → skipping (no placeholder)")
+                    # Extraction error — insert placeholder
+                    pending_inserts.append((cid, _NO_DRUGS_PLACEHOLDER.copy()))
                     total_skipped += 1
                 elif len(valid_drugs) == 0:
-                    # No drugs found — SKIP (don't insert placeholder)
-                    logging.info(f"Crime {cid}: no drugs extracted → skipping (no placeholder, strict policy)")
+                    # No drugs found — insert placeholder
+                    pending_inserts.append((cid, _NO_DRUGS_PLACEHOLDER.copy()))
                     total_skipped += 1
                 else:
-                    # STRICT VALIDATION: Check each drug against ignored checklist
-                    valid_for_insert = []
                     for drug_data in valid_drugs:
-                        raw_name = drug_data.get('raw_drug_name', '')
-                        confidence = float(drug_data.get('confidence_score', 0))
-                        
-                        # Check if drug is in ignored checklist with >80% match
-                        is_ignored, matched_term, similarity = is_drug_ignored(raw_name, ignored_checklist, threshold=0.80)
-                        
-                        if is_ignored:
-                            logging.info(
-                                f"Crime {cid}: '{raw_name}' matched ignored list '{matched_term}' "
-                                f"({similarity:.0%}) → REJECTING (strict policy)"
-                            )
-                            total_ignored += 1
-                        elif confidence < 0.50:
-                            # Low confidence AND not in KB mapping → SKIP
-                            logging.info(
-                                f"Crime {cid}: '{raw_name}' skipped (low confidence {confidence:.0%}, not in KB)"
-                            )
-                            total_skipped += 1
-                        else:
-                            # Valid extraction: confidence >= 50% AND not in ignored list
-                            valid_for_insert.append(drug_data)
-                    
-                    if valid_for_insert:
-                        for drug_data in valid_for_insert:
-                            pending_inserts.append((cid, drug_data))
-                        total_inserted += len(valid_for_insert)
-                        logging.info(
-                            f"Crime {cid}: {len(valid_for_insert)}/{len(valid_drugs)} drug entries "
-                            f"queued for insert (after strict validation)."
-                        )
-                    else:
-                        logging.info(
-                            f"Crime {cid}: all {len(valid_drugs)} drugs rejected by strict validation → skipping"
-                        )
-                        total_skipped += 1
+                        pending_inserts.append((cid, drug_data))
+                    total_inserted += len(valid_drugs)
+                    logging.info(f"Crime {cid}: {len(valid_drugs)} drug entries queued for insert.")
 
             except Exception as e:
                 logging.error(f"Crime {crime_id}: future error: {e}")
-                # SKIP on error (don't insert placeholder)
-                logging.warning(f"Crime {crime_id}: error handling → skipping (no placeholder)")
+                pending_inserts.append((crime_id, _NO_DRUGS_PLACEHOLDER.copy()))
                 total_skipped += 1
 
     # --- Phase 2: Batched DB writes (single thread, single connection) ---
@@ -274,8 +230,7 @@ def process_crimes_parallel(conn, crimes, drug_categories=None, ignored_checklis
     logging.info(
         f"Batch done: {total_crimes} crimes in {elapsed:.1f}s "
         f"({rate:.1f} crimes/s) — "
-        f"{total_inserted} valid drugs inserted, {total_ignored} ignored (matched >80%), "
-        f"{total_skipped} skipped (no drugs/low confidence/errors). STRICT POLICY: NO placeholders."
+        f"{total_inserted} drug entries, {total_skipped} no-drug placeholders."
     )
 
 
