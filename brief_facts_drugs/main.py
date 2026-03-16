@@ -190,12 +190,12 @@ def process_crimes_parallel(conn, crimes, drug_categories=None):
                 cid, valid_drugs = future.result()
 
                 if valid_drugs is None:
-                    # Extraction error — insert placeholder
-                    pending_inserts.append((cid, _NO_DRUGS_PLACEHOLDER.copy()))
+                    # Extraction error — SKIP (don't insert placeholder)
+                    logging.warning(f"Crime {cid}: extraction returned None → skipping (no placeholder)")
                     total_skipped += 1
                 elif len(valid_drugs) == 0:
-                    # No drugs found — insert placeholder
-                    pending_inserts.append((cid, _NO_DRUGS_PLACEHOLDER.copy()))
+                    # No drugs found — SKIP (don't insert placeholder)
+                    logging.info(f"Crime {cid}: no drugs extracted → skipping (no placeholder)")
                     total_skipped += 1
                 else:
                     for drug_data in valid_drugs:
@@ -205,7 +205,8 @@ def process_crimes_parallel(conn, crimes, drug_categories=None):
 
             except Exception as e:
                 logging.error(f"Crime {crime_id}: future error: {e}")
-                pending_inserts.append((crime_id, _NO_DRUGS_PLACEHOLDER.copy()))
+                # SKIP on error (don't insert placeholder)
+                logging.warning(f"Crime {crime_id}: error handling → skipping (no placeholder)")
                 total_skipped += 1
 
     # --- Phase 2: Batched DB writes (single thread, single connection) ---

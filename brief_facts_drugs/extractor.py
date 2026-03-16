@@ -121,13 +121,16 @@ def _score_drug_relevance(section: str) -> int:
     return score
 
 
-def preprocess_brief_facts(text: str, relevance_threshold: int = 50) -> Tuple[str, dict]:
+def preprocess_brief_facts(text: str, relevance_threshold: int = 30) -> Tuple[str, dict]:
     """
     Pre-process brief_facts text before sending to LLM.
 
     1. Splits multi-FIR concatenated text into individual sections.
     2. Scores each section for drug-relevance.
     3. Returns only the drug-relevant text and metadata about what was filtered.
+    
+    NOTE: threshold lowered from 50→30 to catch more drug sections (2 Tier-2 keywords).
+          This reduces false negatives where valid drugs were filtered out.
 
     Args:
         text: Raw brief_facts string (may contain 1 or many FIRs).
@@ -166,12 +169,23 @@ def preprocess_brief_facts(text: str, relevance_threshold: int = 50) -> Tuple[st
         logger.info(f"Pre-processor: Single FIR detected ({_estimate_tokens(text)} est. tokens). No filtering needed.")
         return text, meta
 
-    # Score each section
+    # Score each section for drug relevance
     scored = []
     for i, section in enumerate(sections):
         score = _score_drug_relevance(section)
         kept = score >= relevance_threshold
         scored.append((i, section, score, kept))
+    
+    # ✅ AUDIT: Log what's being filtered to help identify missed drugs
+    if scored:
+        kept_count = sum(1 for s in scored if s[3])
+        dropped_count = sum(1 for s in scored if not s[3])
+        if dropped_count > 0:
+            logger.debug(
+                f"Preprocessing: kept {kept_count}/{len(scored)} sections "
+                f"(threshold={relevance_threshold}). Dropped sections scores: "
+                f"{[s[2] for s in scored if not s[3]]}"
+            )
 
     kept_sections = [s for s in scored if s[3]]
     dropped_sections = [s for s in scored if not s[3]]
@@ -344,12 +358,13 @@ R10:container-vs-content|"3 packets,50g"→50|"3×50g each"→150
 R11:skip "unknown"/"unidentified" drug names
 R12:drug_form∈{{solid,liquid,count}}|liquid drugs(oil,syrup,solution)→raw_unit MUST be ml/litres even if source says grams
 R13:plant/cultivation seizures|"8 ganja plants"→raw_quantity=8,raw_unit="plants",drug_form="count"|plants ARE valid drug seizures under NDPS Act—ALWAYS extract them
-R14:is_commercial(bool)|if brief facts explicitly says "commercial quantity" or "above commercial quantity"→true|if not mentioned→false|do NOT guess—only set true when TEXT states it
-R15:decimal-quantity|"1.200 Kg" or "1.500 Kgs"→the dot is a DECIMAL separator→raw_quantity=1.2 or 1.5, NOT 1200 or 1500|Indian FIR quantities under 100 Kg use decimals, not thousands separators|same for grams: "6.585 grams"→6.585
-R16:cash-is-NOT-worth|"seized Rs.500/- from his possession" or "amount of Rs 500/-"→this is CASH/CURRENCY seized, NOT drug seizure worth|do NOT assign cash amounts to seizure_worth|seizure_worth is ONLY the estimated VALUE of the DRUG itself
-R17:purchase-price-is-NOT-worth|"purchased at Rs.10,000/- per KG" or "bought for Rs.5,000/-"→this is PURCHASE PRICE, NOT seizure worth|seizure_worth must come from "worth Rs.", "W/Rs:", "valued at", "worth of Rs.", "worth about Rs." patterns ONLY
-R18:per-kg-rate-is-NOT-worth|"at the rate of Rs.10,000/- per KG"→this is a RATE, not a value for specific seized quantity|do NOT multiply rate × quantity to compute worth—only extract worth when explicitly stated
-R19:W/Rs-pattern|"W/Rs:" "W/Rs." "W/Rs" are abbreviations for "Worth Rupees"→ALWAYS extract the number following this pattern as seizure_worth|common formats: "W/Rs: 10,000/-", "W/Rs. 80,000/-", "W/Rs 2,52,800/-"
+R14:PACKET EDGE CASE|"3 packets of 50g each"→raw_quantity=150,raw_unit="grams",drug_form="solid"|"5 packets"(no weight)→raw_quantity=5,raw_unit="packets",drug_form="count"|CRITICAL: if packet count and per-packet weight BOTH given→MULTIPLY for total weight|if only packet count given(no per-packet weight)→treat as count|Examples:"10 packets @5g each"→50g total|"15 packets"(no mention of grams)→count_total=15
+R15:is_commercial(bool)|if brief facts explicitly says "commercial quantity" or "above commercial quantity"→true|if not mentioned→false|do NOT guess—only set true when TEXT states it
+R17:decimal-quantity|"1.200 Kg" or "1.500 Kgs"→the dot is a DECIMAL separator→raw_quantity=1.2 or 1.5, NOT 1200 or 1500|Indian FIR quantities under 100 Kg use decimals, not thousands separators|same for grams: "6.585 grams"→6.585
+R18:cash-is-NOT-worth|"seized Rs.500/- from his possession" or "amount of Rs 500/-"→this is CASH/CURRENCY seized, NOT drug seizure worth|do NOT assign cash amounts to seizure_worth|seizure_worth is ONLY the estimated VALUE of the DRUG itself
+R19:purchase-price-is-NOT-worth|"purchased at Rs.10,000/- per KG" or "bought for Rs.5,000/-"→this is PURCHASE PRICE, NOT seizure worth|seizure_worth must come from "worth Rs.", "W/Rs:", "valued at", "worth of Rs.", "worth about Rs." patterns ONLY
+R20:per-kg-rate-is-NOT-worth|"at the rate of Rs.10,000/- per KG"→this is a RATE, not a value for specific seized quantity|do NOT multiply rate × quantity to compute worth—only extract worth when explicitly stated
+R21:W/Rs-pattern|"W/Rs:" "W/Rs." "W/Rs" are abbreviations for "Worth Rupees"→ALWAYS extract the number following this pattern as seizure_worth|common formats: "W/Rs: 10,000/-", "W/Rs. 80,000/-", "W/Rs 2,52,800/-"
 
 ## Drug Knowledge Base
 {drug_knowledge_base}
@@ -397,10 +412,24 @@ Input: "seized 20g Heroin from A1, 30g Heroin from A2, 30g Cocaine from A3. Tota
   {{{{"raw_drug_name":"Cocaine","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Cocaine","drug_form":"solid","accused_id":"A3","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Cocaine from A3"}}}}}}}}
 ]}}}}
 
+### Example 6 — PACKET EDGE CASE: packets WITH per-packet weight
+Input: "seized 8 packets of Ganja, each containing 50 grams from A1"
+Expected: raw_quantity=400.0 (8 × 50), raw_unit="grams", drug_form="solid"
+{{{{"drugs":[
+  {{{{"raw_drug_name":"Ganja","raw_quantity":400.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":90,"extraction_metadata":{{{{"source_sentence":"seized 8 packets of Ganja, each containing 50 grams from A1"}}}}}}}
+]}}}}
+
+### Example 7 — PACKET EDGE CASE: packets WITHOUT weight (count form)
+Input: "apprehended A1 with 15 packets of MDMA but weight not determined"
+Expected: raw_quantity=15.0, raw_unit="packets", drug_form="count"
+{{{{"drugs":[
+  {{{{"raw_drug_name":"MDMA","raw_quantity":15.0,"raw_unit":"packets","primary_drug_name":"MDMA","drug_form":"count","accused_id":"A1","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":75,"extraction_metadata":{{{{"source_sentence":"apprehended A1 with 15 packets of MDMA"}}}}}}}
+]}}}}
+
 ## Input Text
 {text}
 
-EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. Extract seizure_worth from "worth Rs.", "W/Rs:", "valued at", "worth of Rs." mentions — map each worth to its specific drug. Set worth_scope to indicate if the value is individual, drug_total, or overall_total. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". RETURN VALID JSON ONLY. NO MARKDOWN.
+EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. Extract seizure_worth from "worth Rs.", "W/Rs:", "valued at", "worth of Rs." mentions — map each worth to its specific drug. Set worth_scope to indicate if the value is individual, drug_total, or overall_total. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". FOR PACKET HANDLING: If text says "X packets of Y grams each" → multiply X×Y for raw_quantity with appropriate unit. If "X packets" with NO weight mentioned → raw_quantity=X, raw_unit="packets", drug_form="count". RETURN VALID JSON ONLY. NO MARKDOWN.
 """
 
 def truncate_string(s: str, max_len: int = 50) -> str:
@@ -410,6 +439,90 @@ def truncate_string(s: str, max_len: int = 50) -> str:
     if len(s) <= max_len:
         return s
     return s[:max_len]
+
+def handle_packet_extraction(drugs: List[DrugExtraction], source_text: str) -> List[DrugExtraction]:
+    """
+    PACKET EDGE CASE HANDLER
+    
+    Processes packet-specific scenarios:
+    1. If raw_unit contains "packet(s)" AND quantity mentions per-packet weight:
+       - Extract per-packet weight
+       - Multiply packet_count × per_packet_weight for total
+       - Update raw_quantity and raw_unit accordingly
+    
+    2. If raw_unit contains "packet(s)" and NO per-packet weight:
+       - Keep as count (drug_form="count")
+       - raw_unit="packets", raw_quantity=packet count
+    
+    Examples:
+    - "10 packets @ 5g each" → raw_quantity=50, raw_unit="grams"
+    - "15 packets (no weight)" → raw_quantity=15, raw_unit="packets", drug_form="count"
+    - "3 packets of 100g each" → raw_quantity=300, raw_unit="grams"
+    """
+    for drug in drugs:
+        try:
+            if not drug.raw_unit:
+                continue
+            
+            unit_lower = drug.raw_unit.lower().strip()
+            
+            # Check if this is a packet unit
+            if 'packet' not in unit_lower:
+                continue
+            
+            # If raw_unit is just "packets", leave as count unless source text has weight info
+            raw_qty = float(drug.raw_quantity) if drug.raw_quantity else 0.0
+            
+            # Look for per-packet weight patterns in source text near this drug
+            # Patterns: "X packets of Yg each", "X packets @ Yg", "X packets, Yg per packet"
+            drug_name = drug.raw_drug_name if drug.raw_drug_name else ""
+            
+            # Search for patterns like "N packets of Mg each" or "N packets @ Mg"
+            packet_weight_patterns = [
+                rf'{drug_name}\s*.*?(\d+(?:\.\d+)?)\s*packets?\s+(?:of|@|contains?|\\+)\s*(\d+(?:\.\d+)?)\s*(g|gm|gms|gram|grams|mg|kg|kgs|kilogram|ml|milliliter|liter)',
+                rf'(\d+(?:\.\d+)?)\s*packets?\s+(?:of|@|contains?)\s*(\d+(?:\.\d+)?)\s*(g|gm|gms|gram|grams|mg|kg|kgs|kilogram|ml|milliliter|liter)\s+(?:each)?',
+                rf'(\d+(?:\.\d+)?)\s*packets?\s+.*?(\d+(?:\.\d+)?)\s*(g|gm|gms|gram|grams|mg|kg|kgs|kilogram|ml|milliliter|liter)\s+per\s+packet',
+            ]
+            
+            found_weight = False
+            for pattern in packet_weight_patterns:
+                match = re.search(pattern, source_text, re.IGNORECASE)
+                if match:
+                    # Extract packet count and per-packet weight
+                    groups = match.groups()
+                    if len(groups) >= 3:
+                        packet_count = float(groups[-3]) if groups[-3] else raw_qty
+                        per_packet_weight = float(groups[-2]) if groups[-2] else 0.0
+                        weight_unit = groups[-1].lower()
+                        
+                        if per_packet_weight > 0 and packet_count > 0:
+                            total_weight = packet_count * per_packet_weight
+                            drug.raw_quantity = total_weight
+                            drug.raw_unit = weight_unit
+                            drug.drug_form = "solid" if weight_unit in {'g', 'gm', 'gms', 'gram', 'grams', 'mg', 'kg', 'kgs'} else ("liquid" if weight_unit in {'ml', 'milliliter', 'liter'} else "Unknown")
+                            
+                            logger.info(
+                                f"Packet handler: {drug.raw_drug_name} — "
+                                f"{packet_count} packets × {per_packet_weight}{weight_unit} each = "
+                                f"{total_weight}{weight_unit}"
+                            )
+                            found_weight = True
+                            break
+            
+            # If no per-packet weight found, keep as count
+            if not found_weight and raw_qty > 0:
+                if drug.drug_form != "count":
+                    drug.drug_form = "count"
+                    logger.debug(
+                        f"Packet handler: {drug.raw_drug_name} — "
+                        f"No per-packet weight found, treating {raw_qty} packets as count"
+                    )
+        
+        except Exception as e:
+            logger.warning(f"Packet handler error for {drug.raw_drug_name}: {e}")
+            continue
+    
+    return drugs
 
 def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
     """
@@ -987,8 +1100,9 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
             except Exception as e:
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
         
-        # Post-process (Unit Calc + Worth Distribution + Commercial Check + Dedup)
-        standardized = standardize_units(valid_drugs)
+        # Post-process: Packet handling → Unit Calc → Worth Distribution → Commercial Check → Dedup
+        packet_handled = handle_packet_extraction(valid_drugs, preprocessed_text)
+        standardized = standardize_units(packet_handled)
         worth_distributed = _distribute_seizure_worth(standardized)
         commercial_checked = _apply_commercial_quantity_check(worth_distributed)
         return deduplicate_extractions(commercial_checked)
