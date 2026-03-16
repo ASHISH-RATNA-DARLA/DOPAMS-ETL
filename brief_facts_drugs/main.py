@@ -25,7 +25,7 @@ logging.basicConfig(
 #   80 GB VRAM → 10 workers
 import os
 # Optimized for 64GB RAM server with decent VRAM
-PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "6"))
+PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "3"))
 
 
 def main():

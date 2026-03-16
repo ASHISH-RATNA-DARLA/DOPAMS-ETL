@@ -158,9 +158,13 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) 
     retries = 0
     last_error = None
     
+    import time as _time
     # Run once normally
     try:
+        logger.info(f"[LLM] Invoking chain (attempt 1)...")
+        t0 = _time.time()
         result = chain.invoke(input_data)
+        logger.info(f"[LLM] chain.invoke() returned in {_time.time()-t0:.2f}s")
         if result:
             return result
         logger.warning("LLM returned None/empty on first attempt.")

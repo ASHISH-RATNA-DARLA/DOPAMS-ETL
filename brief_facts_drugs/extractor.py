@@ -1145,12 +1145,18 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
     prompt = ChatPromptTemplate.from_template(EXTRACTION_PROMPT)
     
     try:
+        import time as _time
         # Use thread-safe LLM instance (each thread gets its own ChatOllama)
+        t_llm_get = _time.time()
         llm = _get_thread_safe_llm()
+        logger.debug(f"[Extractor] LLM instance ready in {_time.time()-t_llm_get:.3f}s (thread={__import__('threading').current_thread().name})")
         chain = prompt | llm | parser
         
         input_data = {"text": filtered_text, "drug_knowledge_base": formatted_kb}
+        logger.info(f"[Extractor] Sending to LLM — text_len={len(filtered_text)} chars, KB_entries={len(kb_lines)-1}")
+        t_invoke = _time.time()
         response = invoke_extraction_with_retry(chain, input_data, max_retries=1)
+        logger.info(f"[Extractor] LLM invoke completed in {_time.time()-t_invoke:.2f}s")
         
         if not response:
             logger.warning("LLM returned empty response (all retries failed). Returning empty.")
