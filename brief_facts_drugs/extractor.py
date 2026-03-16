@@ -2,6 +2,7 @@
 import re
 import logging
 import threading
+import difflib
 from typing import List, Optional, Tuple
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
@@ -948,6 +949,60 @@ def _collapse_collective_seizures(drugs: List[DrugExtraction]) -> List[DrugExtra
     return result
 
 
+def _apply_kb_mapping(drugs: List[DrugExtraction], drug_categories: List[dict] = None) -> List[DrugExtraction]:
+    """
+    Apply KB category learning to improve drug name mapping.
+    Updates primary_drug_name and extraction_metadata with KB category information.
+    
+    This enhances the LLM's drug extraction by:
+    1. Mapping raw_drug_name to KB standard_name with fuzzy matching
+    2. Learning category_group from KB
+    3. Increasing confidence if KB match found
+    4. Storing mapping information in extraction_metadata
+    """
+    if not drugs or not drug_categories:
+        return drugs
+    
+    for drug in drugs:
+        try:
+            raw_name = drug.raw_drug_name or "Unknown"
+            
+            # Map raw name to KB category with fuzzy matching
+            mapped_name, category_group, kb_confidence = _map_drug_to_kb_category(raw_name, drug_categories)
+            
+            # Update drug with mapped information
+            original_primary = drug.primary_drug_name or raw_name
+            drug.primary_drug_name = mapped_name
+            
+            # Update extraction metadata with KB mapping info
+            if not drug.extraction_metadata:
+                drug.extraction_metadata = {}
+            
+            if kb_confidence > 0:
+                drug.extraction_metadata['kb_mapped'] = True
+                drug.extraction_metadata['kb_original_name'] = original_primary
+                drug.extraction_metadata['kb_category'] = category_group
+                drug.extraction_metadata['kb_confidence'] = kb_confidence
+                
+                # Slightly boost confidence if KB matched
+                if drug.confidence_score and drug.confidence_score < 0.90:
+                    drug.confidence_score = min(0.90, drug.confidence_score + 0.05)
+                
+                logger.debug(
+                    f"KB mapping applied: '{raw_name}' → '{mapped_name}' "
+                    f"(category: {category_group}, kb_confidence: {kb_confidence})"
+                )
+            else:
+                drug.extraction_metadata['kb_mapped'] = False
+                logger.debug(f"No KB match for '{raw_name}' (will be flagged for ignored checklist)")
+        
+        except Exception as e:
+            logger.warning(f"KB mapping error for {drug.raw_drug_name}: {e}")
+            continue
+    
+    return drugs
+
+
 def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 100) -> List[DrugExtraction]:
     """
     Remove duplicate drug extractions and cap at max_per_crime.
@@ -990,10 +1045,58 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
     return deduped
 
 
+def _map_drug_to_kb_category(raw_name: str, drug_categories: List[dict] = None) -> tuple:
+    """
+    Enhanced KB mapping with fuzzy matching to learn raw_name → category mappings.
+    
+    Returns:
+        (primary_drug_name, category_group, confidence_score)
+        confidence_score: 0.95 if exact match, 0.80-0.94 if fuzzy match >80%, 0.0 if no match
+    """
+    if not drug_categories or not raw_name:
+        return (raw_name, "Unknown", 0.0)
+    
+    raw_name_lower = str(raw_name).strip().lower()
+    best_match = None
+    best_ratio = 0.0
+    best_category = "Unknown"
+    
+    for cat in drug_categories:
+        kb_raw = (cat.get('raw_name', '') or '').strip().lower()
+        kb_standard = (cat.get('standard_name', '') or '').strip().lower()
+        kb_category = (cat.get('category_group', '') or 'Unknown')
+        
+        # Direct exact match
+        if raw_name_lower == kb_raw or raw_name_lower == kb_standard:
+            return (cat.get('standard_name', raw_name), kb_category, 0.95)
+        
+        # Fuzzy match against raw and standard names
+        for kb_name in [kb_raw, kb_standard]:
+            if not kb_name:
+                continue
+            ratio = difflib.SequenceMatcher(None, raw_name_lower, kb_name).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_match = cat.get('standard_name', raw_name)
+                best_category = kb_category
+    
+    # Return fuzzy match if >80%, else return raw name with no category
+    if best_ratio >= 0.80:
+        confidence = round(0.80 + (best_ratio - 0.80) * 0.15, 2)  # 0.80-0.95 range
+        logger.debug(
+            f"KB mapping: '{raw_name}' → '{best_match}' ({best_category}) "
+            f"with {best_ratio:.0%} similarity (confidence {confidence})"
+        )
+        return (best_match, best_category, confidence)
+    
+    return (raw_name, "Unknown", 0.0)
+
+
 def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[DrugExtraction]:
     """
     Extracts a list of drug information objects from the given text.
     Includes multi-FIR pre-processing to filter out non-drug-related FIR sections.
+    Enhanced KB mapping with category learning from drug_categories table.
     """
     if drug_categories is None:
         drug_categories = []
@@ -1100,8 +1203,9 @@ def extract_drug_info(text: str, drug_categories: List[dict] = None) -> List[Dru
             except Exception as e:
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
         
-        # Post-process: Packet handling → Unit Calc → Worth Distribution → Commercial Check → Dedup
-        packet_handled = handle_packet_extraction(valid_drugs, preprocessed_text)
+        # Post-process: KB Mapping → Packet handling → Unit Calc → Worth Distribution → Commercial Check → Dedup
+        kb_mapped = _apply_kb_mapping(valid_drugs, drug_categories)
+        packet_handled = handle_packet_extraction(kb_mapped, filtered_text)
         standardized = standardize_units(packet_handled)
         worth_distributed = _distribute_seizure_worth(standardized)
         commercial_checked = _apply_commercial_quantity_check(worth_distributed)

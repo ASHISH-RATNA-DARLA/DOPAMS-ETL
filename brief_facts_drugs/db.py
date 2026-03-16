@@ -127,6 +127,61 @@ def insert_drug_facts(conn, crime_id, drug_data):
     conn.commit()
 
 
+def fetch_ignored_checklist(conn):
+    """
+    Fetches all terms from the drug_ignore_list table.
+    Returns list of dicts with 'id', 'term', 'reason'.
+    """
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            query = "SELECT id, term, reason FROM public.drug_ignore_list ORDER BY term"
+            cur.execute(query)
+            return cur.fetchall()
+    except Exception as e:
+        logger.warning(f"Could not fetch drug_ignore_list: {e}")
+        return []
+
+
+def is_drug_ignored(drug_name: str, ignore_list: list, threshold: float = 0.80) -> tuple:
+    """
+    Checks if a drug name matches an entry in the ignore_list with fuzzy matching.
+    
+    Args:
+        drug_name: The drug name to check (raw extraction)
+        ignore_list: List of dicts with 'term' and 'reason' keys
+        threshold: Similarity threshold (0.0-1.0, default 0.80 = 80%)
+    
+    Returns:
+        (is_ignored: bool, matched_term: str, similarity_score: float)
+        If no match found, returns (False, None, 0.0)
+    """
+    import difflib
+    
+    if not drug_name or not ignore_list:
+        return (False, None, 0.0)
+    
+    drug_name_lower = str(drug_name).strip().lower()
+    best_match = None
+    best_ratio = 0.0
+    
+    for ignore_entry in ignore_list:
+        term = ignore_entry.get('term', '').strip().lower()
+        if not term:
+            continue
+        
+        ratio = difflib.SequenceMatcher(None, drug_name_lower, term).ratio()
+        
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = term
+    
+    if best_ratio >= threshold:
+        logger.info(f"Drug '{drug_name}' matched ignore list '{best_match}' with {best_ratio:.2%} similarity")
+        return (True, best_match, best_ratio)
+    
+    return (False, None, best_ratio)
+
+
 def batch_insert_drug_facts(conn, inserts):
     """
     Batch-insert multiple drug rows in a single transaction.
