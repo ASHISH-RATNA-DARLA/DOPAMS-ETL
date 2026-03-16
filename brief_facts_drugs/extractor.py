@@ -417,14 +417,14 @@ Input: "seized 20g Heroin from A1, 30g Heroin from A2, 30g Cocaine from A3. Tota
 Input: "seized 8 packets of Ganja, each containing 50 grams from A1"
 Expected: raw_quantity=400.0 (8 × 50), raw_unit="grams", drug_form="solid"
 {{"drugs":[
-  {{"raw_drug_name":"Ganja","raw_quantity":400.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":90,"extraction_metadata":{{"source_sentence":"seized 8 packets of Ganja, each containing 50 grams from A1"}}}
+  {{"raw_drug_name":"Ganja","raw_quantity":400.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":90,"extraction_metadata":{{"source_sentence":"seized 8 packets of Ganja, each containing 50 grams from A1"}}}}
 ]}}
 
 ### Example 7 — PACKET EDGE CASE: packets WITHOUT weight (count form)
 Input: "apprehended A1 with 15 packets of MDMA but weight not determined"
 Expected: raw_quantity=15.0, raw_unit="packets", drug_form="count"
 {{"drugs":[
-  {{"raw_drug_name":"MDMA","raw_quantity":15.0,"raw_unit":"packets","primary_drug_name":"MDMA","drug_form":"count","accused_id":"A1","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":75,"extraction_metadata":{{"source_sentence":"apprehended A1 with 15 packets of MDMA"}}}
+  {{"raw_drug_name":"MDMA","raw_quantity":15.0,"raw_unit":"packets","primary_drug_name":"MDMA","drug_form":"count","accused_id":"A1","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":75,"extraction_metadata":{{"source_sentence":"apprehended A1 with 15 packets of MDMA"}}}}
 ]}}
 
 ## Input Text
