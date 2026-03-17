@@ -88,16 +88,10 @@ def _prepare_insert_values(crime_id, drug_data):
     """Prepare the values tuple for a single drug insert. Shared by single and batch insert."""
     import json
 
-    # Preserve the LLM-extracted accused_id in extraction_metadata for audit,
-    # even though the DB column is set to NULL to avoid FK constraint issues.
     metadata = drug_data.get('extraction_metadata', {})
-    llm_accused_id = drug_data.get('accused_id')
-    if llm_accused_id and str(llm_accused_id).strip():
-        metadata['accused_ref'] = str(llm_accused_id).strip()
 
     return (
         crime_id,
-        None,  # DB column stays NULL (FK constraint); accused ref stored in extraction_metadata
         drug_data.get('raw_drug_name'),
         drug_data.get('raw_quantity'),
         drug_data.get('raw_unit'),
@@ -120,10 +114,10 @@ def insert_drug_facts(conn, crime_id, drug_data):
     with conn.cursor() as cur:
         query = sql.SQL("""
             INSERT INTO {table} 
-            (crime_id, accused_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form,
+            (crime_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form,
              weight_g, weight_kg, volume_ml, volume_l, count_total,
              confidence_score, extraction_metadata, is_commercial, seizure_worth)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
 
         cur.execute(query, _prepare_insert_values(crime_id, drug_data))
@@ -141,10 +135,10 @@ def batch_insert_drug_facts(conn, inserts):
 
     query = sql.SQL("""
         INSERT INTO {table}
-        (crime_id, accused_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form,
+        (crime_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form,
          weight_g, weight_kg, volume_ml, volume_l, count_total,
          confidence_score, extraction_metadata, is_commercial, seizure_worth)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
 
     try:

@@ -104,7 +104,7 @@ def main():
 # ---------------------------------------------------------------------------
 _NO_DRUGS_PLACEHOLDER = {
     "raw_drug_name": "NO_DRUGS_DETECTED", "raw_quantity": 0, "raw_unit": "None",
-    "primary_drug_name": "NO_DRUGS_DETECTED", "drug_form": "None", "accused_id": None,
+    "primary_drug_name": "NO_DRUGS_DETECTED", "drug_form": "None",
     "weight_g": 0, "weight_kg": 0, "volume_ml": 0, "volume_l": 0, "count_total": 0,
     "confidence_score": 1.00, "extraction_metadata": {"source_sentence": "Placeholder for zero detections"},
     "is_commercial": False, "seizure_worth": 0.0

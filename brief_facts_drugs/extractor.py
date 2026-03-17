@@ -238,7 +238,6 @@ class DrugExtraction(BaseModel):
         default="Unknown",
         description="solid, liquid, or count forms."
     )
-    accused_id: Optional[str] = Field(default=None)
     confidence_score: Optional[float] = Field(default=0.80, description="Confidence out of 1.0 (e.g. 0.95)")
     seizure_worth: Optional[float] = 0.0
     worth_scope: Optional[str] = Field(
