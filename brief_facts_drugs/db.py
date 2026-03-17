@@ -1,4 +1,3 @@
-
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
@@ -36,6 +35,7 @@ def ensure_connection(conn):
             pass
         return get_db_connection()
 
+
 def fetch_drug_categories(conn):
     """
     Fetches the verified knowledge base of drug categories.
@@ -55,17 +55,52 @@ def fetch_drug_categories(conn):
         logger.warning(f"Could not fetch drug_categories: {e}")
         return []
 
+
+def fetch_drug_ignore_list(conn):
+    """
+    Fetches the drug ignore list from DB.
+
+    Returns a dict of {lowercased_term: reason} for all entries in
+    public.drug_ignore_list.
+
+    Usage in pipeline:
+      - Build ignore_set = set(ignore_dict.keys()) for O(1) exact lookups.
+      - Apply ONLY against primary_drug_name (after KB lookup has standardized
+        it), NEVER as substring match against raw_drug_name — see analysis in
+        docs for why (e.g. 'powder' is a substring of 'dry mixed heroin powder').
+
+    Safe to call at startup and cache for the entire run; the table changes
+    infrequently and a restart is acceptable to pick up new entries.
+    """
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            query = """
+                SELECT term, reason
+                FROM public.drug_ignore_list
+                ORDER BY id
+            """
+            cur.execute(query)
+            rows = cur.fetchall()
+            result = {row['term'].lower().strip(): (row['reason'] or '') for row in rows if row['term']}
+            logger.info(f"Loaded {len(result)} terms from drug_ignore_list.")
+            return result
+    except Exception as e:
+        logger.warning(f"Could not fetch drug_ignore_list: {e}")
+        return {}
+
+
 def fetch_crimes_by_ids(conn, crime_ids):
     """
     Fetches specific crimes based on a list of IDs.
     """
     if not crime_ids:
         return []
-        
+
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = "SELECT crime_id, brief_facts FROM crimes WHERE crime_id = ANY(%s)"
         cur.execute(query, (crime_ids,))
         return cur.fetchall()
+
 
 def fetch_unprocessed_crimes(conn, limit=100):
     """
@@ -73,13 +108,13 @@ def fetch_unprocessed_crimes(conn, limit=100):
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = sql.SQL("""
-            SELECT c.crime_id, c.brief_facts 
+            SELECT c.crime_id, c.brief_facts
             FROM crimes c
             LEFT JOIN {table} d ON c.crime_id = d.crime_id
             WHERE d.crime_id IS NULL
             LIMIT %s
         """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
-        
+
         cur.execute(query, (limit,))
         return cur.fetchall()
 
@@ -113,7 +148,7 @@ def insert_drug_facts(conn, crime_id, drug_data):
     """Inserts extracted drug information into the database (single row)."""
     with conn.cursor() as cur:
         query = sql.SQL("""
-            INSERT INTO {table} 
+            INSERT INTO {table}
             (crime_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form,
              weight_g, weight_kg, volume_ml, volume_l, count_total,
              confidence_score, extraction_metadata, is_commercial, seizure_worth)
@@ -158,4 +193,3 @@ def batch_insert_drug_facts(conn, inserts):
         conn.rollback()
         logger.error(f"Batch insert failed, rolling back: {e}")
         raise
-

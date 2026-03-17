@@ -1,12 +1,11 @@
-
 import sys
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import (get_db_connection, fetch_crimes_by_ids, insert_drug_facts,
                 fetch_unprocessed_crimes, fetch_drug_categories, ensure_connection,
-                batch_insert_drug_facts)
-from extractor import extract_drug_info
+                batch_insert_drug_facts, fetch_drug_ignore_list)
+from extractor import extract_drug_info, build_drug_keywords
 
 # Configure logging
 logging.basicConfig(
@@ -37,12 +36,35 @@ def main():
         conn = get_db_connection()
         logging.info("Database connection established.")
 
-        # 1.5 Fetch Knowledge Base (one-time)
+        # 1.5 Fetch all reference tables once at startup
         drug_categories = fetch_drug_categories(conn)
         logging.info(f"Loaded {len(drug_categories)} drug categories from knowledge base.")
 
+        # Ignore list: {lowercased_term: reason}
+        # Used for exact-match filtering on primary_drug_name AFTER KB lookup.
+        # NOTE: Never apply as substring — see analysis notes in db.py.
+        ignore_dict = fetch_drug_ignore_list(conn)
+        ignore_set = set(ignore_dict.keys())  # O(1) lookup set passed to workers
+        logging.info(f"Loaded {len(ignore_set)} terms from drug_ignore_list.")
+
+        # KB exact-match lookup dict: {raw_name_lower: standard_name}
+        # Built once here, passed read-only to all worker threads (thread-safe).
+        # Used by resolve_primary_drug_name() in extractor.py for deterministic
+        # name standardization independent of LLM accuracy.
+        kb_lookup = {
+            row['raw_name'].lower().strip(): row['standard_name']
+            for row in drug_categories
+        }
+        logging.info(f"Built KB lookup dict with {len(kb_lookup)} raw-name entries.")
+
+        # Dynamic keyword set for the preprocessor FIR section scorer.
+        # Replaces static _DRUG_KEYWORDS_TIER1 — now derived from the actual KB
+        # so every drug in drug_categories is automatically detectable.
+        dynamic_drug_keywords = build_drug_keywords(drug_categories)
+        logging.info(f"Built dynamic drug keyword set with {len(dynamic_drug_keywords)} tokens.")
+
     except Exception as e:
-        logging.error(f"Failed to connect to DB: {e}")
+        logging.error(f"Failed to connect to DB or load reference data: {e}")
         sys.exit(1)
 
     # 2. Processing Loop
@@ -61,11 +83,13 @@ def main():
             # Manual Mode: Process specific IDs from file
             logging.info(f"Read {len(crime_ids)} IDs from {input_file}. Fetching from DB...")
             crimes = fetch_crimes_by_ids(conn, crime_ids)
-            process_crimes_parallel(conn, crimes, drug_categories)
+            process_crimes_parallel(conn, crimes, drug_categories,
+                                     ignore_set=ignore_set,
+                                     kb_lookup=kb_lookup,
+                                     dynamic_drug_keywords=dynamic_drug_keywords)
         else:
             # Dynamic Mode: Process ALL unprocessed crimes in batches
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
-            # Increased batch size for 64GB server throughput
             batch_size = int(os.getenv("BATCH_SIZE", "15"))
             total_processed = 0
 
@@ -78,7 +102,10 @@ def main():
                         break
 
                     logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                    process_crimes_parallel(conn, crimes, drug_categories)
+                    process_crimes_parallel(conn, crimes, drug_categories,
+                                             ignore_set=ignore_set,
+                                             kb_lookup=kb_lookup,
+                                             dynamic_drug_keywords=dynamic_drug_keywords)
                     total_processed += len(crimes)
                     logging.info(f"Batch complete. Total processed so far: {total_processed}")
                 except Exception as e:
@@ -110,19 +137,44 @@ _NO_DRUGS_PLACEHOLDER = {
     "is_commercial": False, "seizure_worth": 0.0
 }
 
-# Drug names that must be rejected before any insert
-INVALID_DRUG_NAMES = {
-    'unknown', 'unidentified', 'unknown drug', 'unknown substance',
-    'unknown tablet', 'unknown powder', 'unknown liquid', 'n/a', 'none', ''
-}
+# ---------------------------------------------------------------------------
+# INVALID_DRUG_NAMES is intentionally REMOVED.
+#
+# Previously this was a 10-term hardcoded set. Analysis showed 9 of those
+# 10 terms are already in drug_ignore_list in the DB. The DB table is now
+# the single source of truth — loaded at startup as ignore_set and passed
+# into _extract_single_crime(). Adding a new term to the DB table is all
+# that's needed; no code changes required.
+#
+# The only term that was in INVALID_DRUG_NAMES but not the DB was ''.
+# That edge case is handled by the `if not primary` guard below.
+# ---------------------------------------------------------------------------
 
 
-def _extract_single_crime(crime, drug_categories):
+def _extract_single_crime(crime, drug_categories, ignore_set=None,
+                           kb_lookup=None, dynamic_drug_keywords=None):
     """
     Worker function: preprocess + LLM extract for ONE crime.
     Runs in a thread — no DB writes here (those happen in the main thread).
-    Returns (crime_id, list_of_valid_drug_dicts) or (crime_id, None) on error.
+
+    Args:
+        crime:                  dict with crime_id and brief_facts
+        drug_categories:        list of KB dicts (for LLM prompt formatting)
+        ignore_set:             set of lowercased terms from drug_ignore_list
+                                — exact-matched against primary_drug_name only
+        kb_lookup:              dict {raw_name_lower: standard_name} for
+                                deterministic name resolution
+        dynamic_drug_keywords:  set of tokens for preprocessor FIR scoring
+
+    Returns:
+        (crime_id, list_of_valid_drug_dicts)  — valid list (may be empty)
+        (crime_id, None)                       — on extraction error
     """
+    if ignore_set is None:
+        ignore_set = set()
+    if kb_lookup is None:
+        kb_lookup = {}
+
     crime_id = crime['crime_id']
     facts_text = crime['brief_facts']
 
@@ -133,19 +185,33 @@ def _extract_single_crime(crime, drug_categories):
 
     try:
         t0 = time.time()
-        extractions = extract_drug_info(facts_text, drug_categories)
+        extractions = extract_drug_info(
+            facts_text,
+            drug_categories,
+            ignore_set=ignore_set,
+            kb_lookup=kb_lookup,
+            dynamic_drug_keywords=dynamic_drug_keywords,
+        )
         elapsed = time.time() - t0
-        logging.info(f"[Worker] Crime {crime_id}: LLM extraction took {elapsed:.1f}s, got {len(extractions)} raw entries.")
+        logging.info(
+            f"[Worker] Crime {crime_id}: LLM extraction took {elapsed:.1f}s, "
+            f"got {len(extractions)} entries after all filters."
+        )
 
-        # Filter invalid / low-confidence
+        # Final gate: confidence threshold + empty primary name guard
         valid = []
         for drug in extractions:
-            if drug.primary_drug_name.strip().lower() in INVALID_DRUG_NAMES:
+            primary = (drug.primary_drug_name or '').strip()
+            if not primary:
+                logging.info(f"[Worker] Crime {crime_id}: skipping entry with empty primary_drug_name")
                 continue
             if drug.confidence_score >= 0.50:
                 valid.append(drug.model_dump())
             else:
-                logging.info(f"[Worker] Crime {crime_id}: skipping low confidence ({drug.confidence_score:.0%}) {drug.primary_drug_name}")
+                logging.info(
+                    f"[Worker] Crime {crime_id}: skipping low confidence "
+                    f"({drug.confidence_score:.0%}) '{drug.primary_drug_name}'"
+                )
 
         return (crime_id, valid)
 
@@ -154,7 +220,9 @@ def _extract_single_crime(crime, drug_categories):
         return (crime_id, None)
 
 
-def process_crimes_parallel(conn, crimes, drug_categories=None):
+def process_crimes_parallel(conn, crimes, drug_categories=None,
+                              ignore_set=None, kb_lookup=None,
+                              dynamic_drug_keywords=None):
     """
     Process a batch of crimes with parallel LLM extraction and batched DB writes.
 
@@ -167,9 +235,14 @@ def process_crimes_parallel(conn, crimes, drug_categories=None):
 
     - LLM calls happen in N parallel threads (I/O-bound, waiting for Ollama HTTP)
     - DB writes are batched in the main thread (single connection, no lock contention)
+    - ignore_set, kb_lookup, dynamic_drug_keywords are read-only → thread-safe
     """
     if drug_categories is None:
         drug_categories = []
+    if ignore_set is None:
+        ignore_set = set()
+    if kb_lookup is None:
+        kb_lookup = {}
 
     batch_start = time.time()
     total_crimes = len(crimes)
@@ -180,7 +253,14 @@ def process_crimes_parallel(conn, crimes, drug_categories=None):
     # --- Phase 1: Parallel LLM extraction ---
     with ThreadPoolExecutor(max_workers=PARALLEL_LLM_WORKERS) as executor:
         futures = {
-            executor.submit(_extract_single_crime, crime, drug_categories): crime['crime_id']
+            executor.submit(
+                _extract_single_crime,
+                crime,
+                drug_categories,
+                ignore_set,
+                kb_lookup,
+                dynamic_drug_keywords,
+            ): crime['crime_id']
             for crime in crimes
         }
 
@@ -236,4 +316,3 @@ def process_crimes_parallel(conn, crimes, drug_categories=None):
 
 if __name__ == "__main__":
     main()
-
