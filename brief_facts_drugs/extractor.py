@@ -8,6 +8,7 @@ from langchain_core.output_parsers import JsonOutputParser
 import sys
 import os
 import re
+import httpx
 
 def _safe_prompt_template(template: str) -> str:
     """Escape all braces except those intended for LangChain formatting."""
@@ -42,13 +43,18 @@ def _get_thread_safe_llm():
         base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         if base_url.endswith("/api"):
             base_url = base_url.replace("/api", "")
+        
+        timeout_seconds = float(os.getenv("LLM_TIMEOUT", "300"))
+        http_client = httpx.Client(timeout=timeout_seconds)
+        
         _thread_local.llm = ChatOllama(
             base_url=base_url,
             model=llm_service.model,
             temperature=llm_service.temperature,
             num_ctx=llm_service.context_window,
+            client=http_client,
         )
-        logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name}")
+        logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name} (HTTP timeout: {timeout_seconds}s)")
     return _thread_local.llm
 
 
