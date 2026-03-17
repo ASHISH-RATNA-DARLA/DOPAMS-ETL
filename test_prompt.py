@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
-from brief_facts_drugs.extractor import EXTRACTION_PROMPT
+from brief_facts_drugs.extractor import EXTRACTION_PROMPT, _safe_prompt_template
 from langchain_core.prompts import ChatPromptTemplate
 
 try:
-    prompt = ChatPromptTemplate.from_template(EXTRACTION_PROMPT)
+    prompt = ChatPromptTemplate.from_template(_safe_prompt_template(EXTRACTION_PROMPT))
     print('SUCCESS: Prompt template created')
     print('Template variables:', prompt.input_variables)
 except Exception as e:

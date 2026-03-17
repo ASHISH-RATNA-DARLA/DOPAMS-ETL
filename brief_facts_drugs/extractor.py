@@ -7,6 +7,15 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 import sys
 import os
+import re
+
+def _safe_prompt_template(template: str) -> str:
+    """Escape all braces except those intended for LangChain formatting."""
+    # First, escape everything by doubling all { and }
+    escaped = template.replace("{", "{{").replace("}", "}}")
+    # Then restore the intended placeholders (only {text} is used in current EXTRACTION_PROMPT)
+    # The restore logic must use the now-escaped forms {{ and }}
+    return escaped.replace("{{text}}", "{text}")
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +396,7 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
 
 ## COMPRESSED RULES
 R5:zero-inference|extract only explicit/implied values|missing unit→confidence~60
-R6:KB-match|text matches KB raw/standard name→primary_drug_name=Standard Name|not in KB→capitalize raw
+R6:drug-name|set primary_drug_name to the most precise standard drug name you know from your training|use exact NDPS/pharmacological names (e.g. Alprazolam not "tablet", Tramadol not "painkiller", Ganja not "contraband")|capitalize properly|if truly unidentifiable→use capitalized raw text from FIR
 R7:audit|extraction_metadata.source_sentence=verbatim source snippet
 R8:precision|exact values,no rounding
 R9:confidence(int 0-100)|90-100:name+qty+unit clear|70-89:partial|50-69:qty/unit missing|<50:speculative
@@ -404,10 +413,8 @@ R19:per-kg-rate-is-NOT-worth|"at the rate of Rs.10,000/- per KG"→this is a RAT
 R20:non-drug-seizures|NEVER create entries for co-seized property that is NOT a narcotic/psychotropic substance under NDPS Act|SKIP entries for: vehicles (motorcycle, car, scooter, truck, auto, bike, two-wheeler, tractor), mobile phones, SIM cards, cash/currency (seized cash is NOT drug worth), weighing scales, packaging material, lighters, match boxes, rolling papers, OCB papers, empty sachets, empty covers, alcohol brands (whisky, beer, rum, vodka), cigarettes, tobacco products, chillum, bong, paraphernalia|RULE: if the item cannot be charged under NDPS Act as a narcotic or psychotropic substance — DO NOT extract it
 R21:multi-drug-in-one-sentence|if a single sentence mentions multiple distinct substances, each substance MUST be a separate entry|Example: "seized 60g Ganja, 5g Charas and 10 tablets Alprazolam" → 3 entries, NOT 1
 
-## Drug Knowledge Base
-{drug_knowledge_base}
-If text matches any raw_name or standard_name → set primary_drug_name to the corresponding standard_name.
-If not in KB → set primary_drug_name to capitalized raw extraction.
+## Drug Name Instruction
+Use your training knowledge to identify the drug. Set primary_drug_name to the correct pharmacological or NDPS standard name (e.g. "Ganja", "Heroin", "Alprazolam", "Tramadol", "Charas", "Methamphetamine", "Cocaine", "Opium"). Do NOT write vague terms like "tablet", "powder", "contraband", "narcotic" as the primary_drug_name — use the actual drug name. If the drug is genuinely unidentifiable, use the capitalized raw text from the FIR. Post-processing will standardise names against the verified drug database — your job is to extract every drug present.
 
 ## Output Schema
 {{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
@@ -464,40 +471,63 @@ EXTRACT EVERY DRUG SEIZURE. If seizure is collective with NO per-person breakdow
 """
 
 
-def _safe_prompt_template(template: str) -> str:
-    escaped = template.replace("{", "{{").replace("}", "}}")
-    escaped = escaped.replace("{{text}}", "{text}")
-    escaped = escaped.replace("{{drug_knowledge_base}}", "{drug_knowledge_base}")
-    return escaped
-
-
 # =============================================================================
 # Post-processing Step 1 (NEW): Resolve primary_drug_name via KB lookup
 # =============================================================================
-def resolve_primary_drug_name(drugs: List[DrugExtraction], kb_lookup: Dict[str, str]) -> List[DrugExtraction]:
+def resolve_primary_drug_name(
+    drugs: List[DrugExtraction],
+    kb_lookup: Dict[str, str],
+    conn=None,
+) -> List[DrugExtraction]:
     """
-    Deterministic KB-based name resolution — runs AFTER LLM extraction.
+    Three-tier KB name resolution — runs AFTER LLM extraction.
 
-    Why: The LLM's KB matching is probabilistic. This step makes it deterministic:
-    if raw_drug_name exactly matches a KB raw_name, we OVERRIDE primary_drug_name
-    with the authoritative standard_name regardless of what the LLM returned.
+    The LLM now extracts freely (no KB in prompt) using its own training
+    knowledge. This step standardises primary_drug_name against drug_categories
+    so downstream analytics use consistent canonical names.
 
-    Matching priority:
-    1. Exact lowercase match:  raw_drug_name.lower() == kb_raw_name
-    2. Substring match:        any kb_raw_name is contained in raw_drug_name.lower()
-       (handles cases like "60 Grams floating and flowering dry Ganja" containing "dry ganja")
-    3. Reverse substring:      raw_drug_name.lower() is contained in any kb_raw_name
-       (handles abbreviations / short names)
-    4. No match → keep LLM's primary_drug_name as-is
+    Matching tiers (applied in order, first match wins):
 
-    Also removes the fragile hardcoded cannabis-variant check that was in
-    standardize_units() — the KB lookup handles it properly via the 11 Ganja
-    entries in drug_categories.
+    Tier 1 — Exact lowercase match against kb_lookup dict (in-memory, O(1))
+        raw_drug_name.lower() == any kb_raw_name
+        e.g. "dry ganja" → "Ganja"
 
-    Thread-safety: kb_lookup is a read-only dict — safe for concurrent use.
+    Tier 2 — Substring match against kb_lookup (in-memory, O(n))
+        any kb_raw_name found inside raw_drug_name.lower(), or vice versa
+        e.g. "60 Grams floating and flowering dry Ganja" contains "dry ganja"
+        e.g. "nitravet" is contained in "nitravet 10 mg tablets"
+
+    Tier 3 — pg_trgm fuzzy match via DB (only when conn provided, only on miss)
+        Calls fuzzy_match_drug_name(conn, raw_drug_name, threshold=0.35)
+        Uses the GIN index on drug_categories(raw_name) — fast single lookup
+        Catches misspellings and transliterations the LLM got right but KB
+        doesn't have as exact text: "ganza"→"Ganja", "heroien"→"Heroin",
+        "kokain"→"Cocaine", "smak"→"Heroin", "alprazolam tab"→"Alprazolam"
+
+    No match on any tier → keep LLM's primary_drug_name unchanged.
+    This is the correct behaviour: the LLM may have identified a valid drug
+    (e.g. a new synthetic) that isn't in the KB yet.
+
+    Args:
+        drugs:      List of DrugExtraction objects post-LLM.
+        kb_lookup:  {raw_name_lower: standard_name} dict — read-only, thread-safe.
+        conn:       Optional DB connection for Tier 3 pg_trgm fallback.
+                    Pass None to skip Tier 3 (name stays as LLM output).
+
+    Thread-safety: kb_lookup is read-only. conn is per-thread (from thread-local
+    pool or passed explicitly) — do not share across threads.
     """
-    if not kb_lookup:
+    if not kb_lookup and conn is None:
         return drugs
+
+    # Import here to avoid circular import — db.py imports from extractor indirectly
+    fuzzy_fn = None
+    if conn is not None:
+        try:
+            from db import fuzzy_match_drug_name
+            fuzzy_fn = fuzzy_match_drug_name
+        except ImportError:
+            logger.debug("fuzzy_match_drug_name not importable — Tier 3 disabled")
 
     for drug in drugs:
         raw = (drug.raw_drug_name or '').lower().strip()
@@ -505,31 +535,49 @@ def resolve_primary_drug_name(drugs: List[DrugExtraction], kb_lookup: Dict[str, 
             continue
 
         resolved = None
+        tier_used = None
 
-        # 1. Exact match
-        if raw in kb_lookup:
+        # ── Tier 1: Exact match ──
+        if kb_lookup and raw in kb_lookup:
             resolved = kb_lookup[raw]
+            tier_used = "exact"
 
-        # 2. Any KB key is a substring of the raw name
-        if not resolved:
+        # ── Tier 2: Substring match ──
+        if not resolved and kb_lookup:
+            # KB key inside raw name (e.g. "dry ganja" in "floating dry ganja 60g")
             for kb_raw, kb_std in kb_lookup.items():
                 if kb_raw in raw:
                     resolved = kb_std
+                    tier_used = "substring(kb-in-raw)"
                     break
+            # Raw name inside KB key (e.g. "nitravet" in "nitravet 10 mg tablets")
+            if not resolved and len(raw) >= 4:
+                for kb_raw, kb_std in kb_lookup.items():
+                    if raw in kb_raw:
+                        resolved = kb_std
+                        tier_used = "substring(raw-in-kb)"
+                        break
 
-        # 3. Raw name is a substring of any KB key (short name / abbreviation)
-        if not resolved and len(raw) >= 4:
-            for kb_raw, kb_std in kb_lookup.items():
-                if raw in kb_raw:
-                    resolved = kb_std
-                    break
+        # ── Tier 3: pg_trgm fuzzy match ──
+        if not resolved and fuzzy_fn is not None:
+            fuzzy_result = fuzzy_fn(conn, drug.raw_drug_name)
+            if fuzzy_result:
+                resolved = fuzzy_result
+                tier_used = "pgtrgm"
 
         if resolved and resolved != drug.primary_drug_name:
             logger.debug(
-                f"KB resolve: '{drug.raw_drug_name}' → '{resolved}' "
+                f"KB resolve [{tier_used}]: '{drug.raw_drug_name}' → '{resolved}' "
                 f"(was '{drug.primary_drug_name}')"
             )
             drug.primary_drug_name = resolved
+        elif not resolved:
+            # No KB match — LLM's primary_drug_name is kept as-is.
+            # This is correct: the LLM may know drugs not yet in the KB.
+            logger.debug(
+                f"KB resolve [no match]: '{drug.raw_drug_name}' "
+                f"kept as '{drug.primary_drug_name}' (LLM knowledge)"
+            )
 
     return drugs
 
@@ -990,6 +1038,7 @@ def extract_drug_info(
     ignore_set: Set[str] = None,
     kb_lookup: Dict[str, str] = None,
     dynamic_drug_keywords: Set[str] = None,
+    conn=None,
 ) -> List[DrugExtraction]:
     """
     Extracts a list of drug information objects from the given text.
@@ -1000,8 +1049,8 @@ def extract_drug_info(
       Step 1  — Token budget check.
       Step 2  — LLM extraction via EXTRACTION_PROMPT (with R20/R21 added).
       Step 3  — Input sanitization (None guards, worth_scope validation).
-      Step 4  — resolve_primary_drug_name(): deterministic KB override of
-                primary_drug_name — fixes LLM mis-mappings.
+      Step 4  — resolve_primary_drug_name(): 3-tier KB standardisation:
+                Tier1 exact match, Tier2 substring, Tier3 pg_trgm fuzzy (DB).
       Step 5  — filter_non_drug_entries(): drop vehicles, alcohol, paraphernalia
                 etc. using DB ignore_set + hardcoded safety net.
       Step 6  — standardize_units(): unit → weight_g/kg, volume_ml/l, count_total.
@@ -1011,12 +1060,16 @@ def extract_drug_info(
 
     Args:
         text:                   Raw brief_facts text for one crime.
-        drug_categories:        List of KB dicts (raw_name, standard_name, category_group).
+        drug_categories:        List of KB dicts (raw_name, standard_name) — used only
+                                to build kb_lookup and dynamic_drug_keywords at startup.
+                                NOT injected into the LLM prompt.
         ignore_set:             Set of lowercased terms from drug_ignore_list DB table.
                                 Exact-matched against primary_drug_name post-KB-resolve.
         kb_lookup:              Dict {raw_name_lower: standard_name} for deterministic
-                                name resolution (Step 4).
+                                name resolution (Step 4, Tier 1+2).
         dynamic_drug_keywords:  KB-derived token set for preprocessor scoring (Step 0).
+        conn:                   Optional DB connection for Step 4 Tier 3 pg_trgm fallback.
+                                Pass per-thread connection — not shared across threads.
 
     Returns:
         List of DrugExtraction objects. Empty list if no drugs found or error.
@@ -1039,45 +1092,36 @@ def extract_drug_info(
         return []
 
     # ── Step 1: Token budget check ──
-    est_input_tokens = _estimate_tokens(filtered_text)
-    CONTEXT_WINDOW   = 16384
-    PROMPT_OVERHEAD  = 900   # slightly higher now with R20/R21 additions
-    kb_token_est     = _estimate_tokens("\n".join(
-        f"{c.get('raw_name','')}{c.get('standard_name','')}{c.get('category_group','')}"
-        for c in drug_categories
-    )) if drug_categories else 0
-    available_for_input = CONTEXT_WINDOW - PROMPT_OVERHEAD - kb_token_est
+    # KB is no longer injected into the prompt — LLM extracts freely using its
+    # own training knowledge. This frees ~3,700 tokens (the 330-row KB table),
+    # giving 15,484 tokens for brief_facts text vs 11,763 previously.
+    est_input_tokens    = _estimate_tokens(filtered_text)
+    CONTEXT_WINDOW      = 16384
+    PROMPT_OVERHEAD     = 900   # rules (R1-R21) + examples + output schema
+    available_for_input = CONTEXT_WINDOW - PROMPT_OVERHEAD
     if est_input_tokens > available_for_input:
         logger.warning(
             f"Token budget tight: input ~{est_input_tokens} tokens, "
             f"available ~{available_for_input} (window={CONTEXT_WINDOW}, "
-            f"prompt={PROMPT_OVERHEAD}, KB={kb_token_est}). Text may be truncated by LLM."
+            f"prompt={PROMPT_OVERHEAD}). Text may be truncated by LLM."
         )
     else:
         logger.info(f"Token budget OK: input ~{est_input_tokens}/{available_for_input} available tokens.")
 
-    # ── Step 2: Format KB for prompt ──
-    kb_lines = []
-    if drug_categories:
-        kb_lines.append("raw_name|standard_name|category")
-        for cat in drug_categories:
-            raw = cat.get('raw_name', 'Unknown')
-            std = cat.get('standard_name', 'Unknown')
-            grp = cat.get('category_group', '-')
-            kb_lines.append(f"{raw}|{std}|{grp}")
-    else:
-        kb_lines.append("(No KB provided, use standard extraction)")
-    formatted_kb = "\n".join(kb_lines)
-
+    # ── Step 2: LLM call — no KB injected into prompt ──
+    # The KB is NOT sent to the LLM. The LLM uses its own training knowledge
+    # to identify drugs and set primary_drug_name. Post-processing
+    # (resolve_primary_drug_name + fuzzy_match_drug_name) standardises names
+    # against drug_categories using exact match, substring, and pg_trgm.
     parser = JsonOutputParser(pydantic_object=CrimeReportExtraction)
     prompt  = ChatPromptTemplate.from_template(_safe_prompt_template(EXTRACTION_PROMPT))
 
     try:
-        # ── Step 2 cont: LLM call (thread-safe per-thread instance) ──
+        # LLM call (thread-safe per-thread instance)
         llm   = _get_thread_safe_llm()
         chain = prompt | llm | parser
 
-        input_data = {"text": filtered_text, "drug_knowledge_base": formatted_kb}
+        input_data = {"text": filtered_text}
         response   = invoke_extraction_with_retry(chain, input_data, max_retries=1)
 
         if not response:
@@ -1125,7 +1169,7 @@ def extract_drug_info(
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
 
         # ── Step 4: Deterministic KB name resolution ──
-        kb_resolved = resolve_primary_drug_name(valid_drugs, kb_lookup)
+        kb_resolved = resolve_primary_drug_name(valid_drugs, kb_lookup, conn=conn)
 
         # ── Step 5: Drop non-drug entries (ignore list + safety net) ──
         filtered = filter_non_drug_entries(kb_resolved, ignore_set)

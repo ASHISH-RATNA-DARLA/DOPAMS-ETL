@@ -39,21 +39,81 @@ def ensure_connection(conn):
 def fetch_drug_categories(conn):
     """
     Fetches the verified knowledge base of drug categories.
-    Returns raw_name, standard_name, and category_group for LLM prompt context.
+
+    Returns raw_name and standard_name only — category_group is no longer
+    sent to the LLM (KB removed from prompt to free ~3,700 tokens of context).
+    The KB is now used exclusively for Python-side name standardisation via
+    resolve_primary_drug_name() and fuzzy_match_drug_name().
     """
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             query = """
-                SELECT raw_name, standard_name, category_group
+                SELECT raw_name, standard_name
                 FROM public.drug_categories
                 WHERE is_verified = true
-                ORDER BY category_group, standard_name
+                ORDER BY standard_name
             """
             cur.execute(query)
             return cur.fetchall()
     except Exception as e:
         logger.warning(f"Could not fetch drug_categories: {e}")
         return []
+
+
+def fuzzy_match_drug_name(conn, raw_drug_name: str, threshold: float = 0.35) -> str:
+    """
+    pg_trgm fuzzy match: find the best KB standard_name for a raw drug name
+    that did NOT match the kb_lookup dict exactly or by substring.
+
+    Called in resolve_primary_drug_name() as the final fallback after exact
+    and substring matching fail — catches misspellings, transliterations, and
+    regional aliases not in the KB (e.g. 'ganza'→'Ganja', 'heroien'→'Heroin',
+    'kokain'→'Cocaine', 'smak'→'Heroin').
+
+    Args:
+        conn:           Active DB connection (read-only query, no transaction).
+        raw_drug_name:  The raw drug name string extracted by the LLM.
+        threshold:      Minimum pg_trgm similarity score (0.0–1.0).
+                        0.35 is intentionally conservative — high enough to
+                        catch clear misspellings, low enough to avoid false
+                        positives on short or ambiguous strings.
+
+    Returns:
+        The best-matching standard_name string if similarity >= threshold,
+        otherwise None (caller keeps LLM's primary_drug_name unchanged).
+
+    Performance:
+        Uses the GIN trigram index idx_drug_categories_raw_name already
+        present on public.drug_categories(raw_name). Each call is a single
+        indexed lookup — typically < 2 ms. Called only for entries that
+        failed exact + substring match, so the hot path (known drugs) never
+        touches the DB for this query.
+    """
+    if not raw_drug_name or not raw_drug_name.strip():
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT standard_name,
+                       similarity(raw_name, %s) AS sim
+                FROM public.drug_categories
+                WHERE is_verified = true
+                  AND similarity(raw_name, %s) >= %s
+                ORDER BY sim DESC
+                LIMIT 1
+                """,
+                (raw_drug_name.lower().strip(),
+                 raw_drug_name.lower().strip(),
+                 threshold)
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0]  # standard_name
+            return None
+    except Exception as e:
+        logger.debug(f"fuzzy_match_drug_name error for '{raw_drug_name}': {e}")
+        return None
 
 
 def fetch_drug_ignore_list(conn):

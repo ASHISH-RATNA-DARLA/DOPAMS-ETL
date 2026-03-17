@@ -152,19 +152,22 @@ _NO_DRUGS_PLACEHOLDER = {
 
 
 def _extract_single_crime(crime, drug_categories, ignore_set=None,
-                           kb_lookup=None, dynamic_drug_keywords=None):
+                           kb_lookup=None, dynamic_drug_keywords=None,
+                           db_conn=None):
     """
     Worker function: preprocess + LLM extract for ONE crime.
     Runs in a thread — no DB writes here (those happen in the main thread).
 
     Args:
         crime:                  dict with crime_id and brief_facts
-        drug_categories:        list of KB dicts (for LLM prompt formatting)
+        drug_categories:        list of KB dicts (raw_name, standard_name)
         ignore_set:             set of lowercased terms from drug_ignore_list
                                 — exact-matched against primary_drug_name only
         kb_lookup:              dict {raw_name_lower: standard_name} for
-                                deterministic name resolution
+                                deterministic name resolution (Tier 1+2)
         dynamic_drug_keywords:  set of tokens for preprocessor FIR scoring
+        db_conn:                per-thread DB connection for pg_trgm Tier 3
+                                fuzzy name matching in resolve_primary_drug_name
 
     Returns:
         (crime_id, list_of_valid_drug_dicts)  — valid list (may be empty)
@@ -191,6 +194,7 @@ def _extract_single_crime(crime, drug_categories, ignore_set=None,
             ignore_set=ignore_set,
             kb_lookup=kb_lookup,
             dynamic_drug_keywords=dynamic_drug_keywords,
+            conn=db_conn,
         )
         elapsed = time.time() - t0
         logging.info(
@@ -236,6 +240,9 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
     - LLM calls happen in N parallel threads (I/O-bound, waiting for Ollama HTTP)
     - DB writes are batched in the main thread (single connection, no lock contention)
     - ignore_set, kb_lookup, dynamic_drug_keywords are read-only → thread-safe
+    - Each worker thread gets its own DB connection for pg_trgm fuzzy matching
+      (resolve_primary_drug_name Tier 3). Connections are opened once per thread
+      via threading.local() and reused across crimes in the same thread.
     """
     if drug_categories is None:
         drug_categories = []
@@ -243,6 +250,19 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
         ignore_set = set()
     if kb_lookup is None:
         kb_lookup = {}
+
+    # Thread-local DB connection for pg_trgm fuzzy matching
+    # Each worker thread opens one connection — reused across all crimes in that thread
+    import threading
+    _tl = threading.local()
+    def get_worker_conn():
+        if not hasattr(_tl, 'conn') or _tl.conn is None:
+            try:
+                _tl.conn = get_db_connection()
+            except Exception as e:
+                logger.warning(f"Worker thread could not open DB connection for pgtrgm: {e}")
+                _tl.conn = None
+        return _tl.conn
 
     batch_start = time.time()
     total_crimes = len(crimes)
@@ -260,6 +280,7 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
                 ignore_set,
                 kb_lookup,
                 dynamic_drug_keywords,
+                get_worker_conn(),        # per-thread conn for pg_trgm Tier 3
             ): crime['crime_id']
             for crime in crimes
         }
