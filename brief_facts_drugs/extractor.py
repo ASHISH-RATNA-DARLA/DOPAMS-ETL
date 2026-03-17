@@ -719,7 +719,7 @@ def _distribute_seizure_worth(drugs: List[DrugExtraction]) -> List[DrugExtractio
                     d.seizure_worth = round((qty / total_qty) * total_worth, 2)
                     logger.info(
                         f"Worth distribution (drug_total): {drug_name} — "
-                        f"{d.accused_id or 'null'}: {qty}g/{total_qty}g × "
+                        f"{qty}g/{total_qty}g × "
                         f"₹{total_worth} = ₹{d.seizure_worth}"
                     )
             elif total_qty == 0 and total_worth > 0:
@@ -729,7 +729,7 @@ def _distribute_seizure_worth(drugs: List[DrugExtraction]) -> List[DrugExtractio
                     d.seizure_worth = equal_share
                     logger.info(
                         f"Worth distribution (drug_total, equal): {drug_name} — "
-                        f"{d.accused_id or 'null'}: ₹{equal_share} (1/{len(group)} of ₹{total_worth})"
+                        f"₹{equal_share} (1/{len(group)} of ₹{total_worth})"
                     )
 
     # --- Rules 5-6: overall_total → split proportionally across ALL entries ---
@@ -749,7 +749,7 @@ def _distribute_seizure_worth(drugs: List[DrugExtraction]) -> List[DrugExtractio
                 d.seizure_worth = round((qty / total_qty) * total_worth, 2)
                 logger.info(
                     f"Worth distribution (overall_total): "
-                    f"{d.primary_drug_name} {d.accused_id or 'null'}: "
+                    f"{d.primary_drug_name}: "
                     f"{qty}/{total_qty} × ₹{total_worth} = ₹{d.seizure_worth}"
                 )
         elif total_qty == 0 and total_worth > 0:
@@ -773,88 +773,24 @@ def _distribute_seizure_worth(drugs: List[DrugExtraction]) -> List[DrugExtractio
 
 def _collapse_collective_seizures(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
     """
-    Detect and collapse collective seizures: when multiple accused have the
-    EXACT SAME drug, quantity, and unit, it means the LLM duplicated a single
-    collective seizure across each accused.  Collapse to 1 entry with
-    accused_id = None and all accused refs stored in extraction_metadata.
-
-    Trigger: 3+ entries share (primary_drug_name, raw_quantity, raw_unit)
-    with DIFFERENT accused_ids.  This pattern only happens with collective
-    seizures — individual per-accused seizures would have different quantities.
+    No-op function: collective seizure detection was based on accused_id field
+    which no longer exists. Accused information is not stored in the database.
     """
-    if len(drugs) < 3:
-        return drugs
-
-    from collections import defaultdict
-
-    # Group by (drug, qty, unit) — ignore accused_id
-    groups = defaultdict(list)
-    for drug in drugs:
-        gkey = (
-            (drug.primary_drug_name or '').lower().strip(),
-            round(float(drug.raw_quantity or 0), 2),
-            re.sub(r'[^a-z]', '', (drug.raw_unit or '').lower().strip()),
-        )
-        groups[gkey].append(drug)
-
-    result = []
-    for gkey, group in groups.items():
-        # Collect distinct accused_ids in this group
-        accused_ids = set(
-            d.accused_id.strip() for d in group
-            if d.accused_id and d.accused_id.strip()
-        )
-
-        if len(accused_ids) >= 3 and len(group) == len(accused_ids):
-            # Collective seizure detected — collapse to 1 entry
-            best = max(group, key=lambda d: d.confidence_score or 0)
-            accused_list = sorted(accused_ids)
-            logger.info(
-                f"Collective seizure detected: {len(accused_ids)} accused "
-                f"({', '.join(accused_list)}) × {best.primary_drug_name} "
-                f"{best.raw_quantity} {best.raw_unit} → collapsing to 1 entry "
-                f"with accused_id=null"
-            )
-            best.accused_id = None
-            meta = best.extraction_metadata or {}
-            meta['collective_accused'] = accused_list
-            meta['collapse_reason'] = (
-                f"Same drug/qty/unit across {len(accused_ids)} accused "
-                f"with no per-accused breakdown in source text"
-            )
-            best.extraction_metadata = meta
-            result.append(best)
-        else:
-            # Individual seizures — keep all
-            result.extend(group)
-
-    if len(result) < len(drugs):
-        logger.info(f"Collective collapse: {len(drugs)} → {len(result)} entries")
-
-    return result
+    return drugs
 
 
 def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 100) -> List[DrugExtraction]:
     """
     Remove duplicate drug extractions and cap at max_per_crime.
-    Also collapses collective seizures (same drug/qty/unit across 3+ accused).
-    Deduplicates by (accused_id, primary_drug_name, raw_drug_name, raw_quantity, raw_unit).
-    This preserves:
-      - Same drug, different accused  (A1 Ganja 100g + A2 Ganja 100g → 2 entries)
-      - Same accused, different drugs  (A1 Ganja 180g + A1 MDMA 10 nos → 2 entries)
-      - Same accused, same drug, different quantity (A1 Ganja 180g + A1 Ganja 50g → 2 entries)
+    Deduplicates by (primary_drug_name, raw_drug_name, raw_quantity, raw_unit).
     Keeps the highest confidence entry when exact duplicates exist.
     """
     if not drugs:
         return drugs
 
-    # Step 1: Collapse collective seizures BEFORE dedup
-    drugs = _collapse_collective_seizures(drugs)
-
     seen = {}
     for drug in drugs:
         key = (
-            (drug.accused_id or '').lower().strip(),
             (drug.primary_drug_name or '').lower().strip(),
             (drug.raw_drug_name or '').lower().strip(),
             round(float(drug.raw_quantity or 0), 2),
