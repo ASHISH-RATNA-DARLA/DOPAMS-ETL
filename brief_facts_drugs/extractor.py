@@ -464,6 +464,13 @@ EXTRACT EVERY DRUG SEIZURE. If seizure is collective with NO per-person breakdow
 """
 
 
+def _safe_prompt_template(template: str) -> str:
+    escaped = template.replace("{", "{{").replace("}", "}}")
+    escaped = escaped.replace("{{text}}", "{text}")
+    escaped = escaped.replace("{{drug_knowledge_base}}", "{drug_knowledge_base}")
+    return escaped
+
+
 # =============================================================================
 # Post-processing Step 1 (NEW): Resolve primary_drug_name via KB lookup
 # =============================================================================
@@ -1063,7 +1070,7 @@ def extract_drug_info(
     formatted_kb = "\n".join(kb_lines)
 
     parser = JsonOutputParser(pydantic_object=CrimeReportExtraction)
-    prompt  = ChatPromptTemplate.from_template(EXTRACTION_PROMPT)
+    prompt  = ChatPromptTemplate.from_template(_safe_prompt_template(EXTRACTION_PROMPT))
 
     try:
         # ── Step 2 cont: LLM call (thread-safe per-thread instance) ──
