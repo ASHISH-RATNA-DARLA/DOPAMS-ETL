@@ -12,6 +12,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Parallelism configuration
@@ -240,9 +241,8 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
     - LLM calls happen in N parallel threads (I/O-bound, waiting for Ollama HTTP)
     - DB writes are batched in the main thread (single connection, no lock contention)
     - ignore_set, kb_lookup, dynamic_drug_keywords are read-only → thread-safe
-    - Each worker thread gets its own DB connection for pg_trgm fuzzy matching
-      (resolve_primary_drug_name Tier 3). Connections are opened once per thread
-      via threading.local() and reused across crimes in the same thread.
+    - Worker threads DO NOT hold DB connections (Tier 3 fuzzy matching disabled)
+      This eliminates connection pool leakage and keeps pools stable under load.
     """
     if drug_categories is None:
         drug_categories = []
@@ -250,19 +250,6 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
         ignore_set = set()
     if kb_lookup is None:
         kb_lookup = {}
-
-    # Thread-local DB connection for pg_trgm fuzzy matching
-    # Each worker thread opens one connection — reused across all crimes in that thread
-    import threading
-    _tl = threading.local()
-    def get_worker_conn():
-        if not hasattr(_tl, 'conn') or _tl.conn is None:
-            try:
-                _tl.conn = get_db_connection()
-            except Exception as e:
-                logger.warning(f"Worker thread could not open DB connection for pgtrgm: {e}")
-                _tl.conn = None
-        return _tl.conn
 
     batch_start = time.time()
     total_crimes = len(crimes)
@@ -280,7 +267,7 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
                 ignore_set,
                 kb_lookup,
                 dynamic_drug_keywords,
-                get_worker_conn(),        # per-thread conn for pg_trgm Tier 3
+                db_conn=None,               # Workers do not hold DB connections
             ): crime['crime_id']
             for crime in crimes
         }

@@ -183,6 +183,8 @@ class PostgreSQLConnectionPool:
 
         try:
             conn = self.pool.getconn()
+            stats = self.stats()
+            logger.debug(f"[POOL] getconn → in_use={stats.get('in_use')}, available={stats.get('available')}")
         except psycopg2.pool.PoolError as e:
             stats = self.stats()
             logger.error(
@@ -208,6 +210,8 @@ class PostgreSQLConnectionPool:
         if conn and self.pool:
             try:
                 self.pool.putconn(conn)
+                stats = self.stats()
+                logger.debug(f"[POOL] putconn → in_use={stats.get('in_use')}, available={stats.get('available')}")
             except Exception as e:
                 logger.error(f"Error returning connection to pool: {e}")
                 try:
