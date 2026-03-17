@@ -280,35 +280,35 @@ EXTRACTION_PROMPT_VERBOSE = """You are an expert forensic data analyst. Your tas
 9. Confidence 0-100: 90-100 all clear, 70-89 partial, 50-69 missing info, <50 speculative.
 10. Accused vs Customers: Only extract persons who POSSESSED/TRANSPORTED drugs at arrest. Skip customers/buyers mentioned in confessions.
 11. Seized Quantity ONLY: Extract ONLY the quantity physically SEIZED at arrest. Do NOT extract purchased amounts, sold amounts, or post-sampling breakdowns (samples S1/S2, remaining property P1).
-12. Collective vs Individual: If seizure is ONE TOTAL from a group with NO per-accused split → 1 entry, accused_id=null. If per-accused amounts given → separate entries.
+12. Collective vs Individual: If seizure is ONE TOTAL from a group with NO per-accused split → 1 entry. If per-accused amounts given → separate entries.
 13. Plant/Cultivation Seizures: "8 ganja plants" → raw_quantity=8, raw_unit="plants", drug_form="count". Plants ARE valid drug seizures under NDPS Act — ALWAYS extract them.
 Container vs Content: "3 packets, 50g" → 50. "3 packets of 50g each" → 150.
 Skip unknown/unidentified drug names. drug_form ∈ solid/liquid/count. seizure_worth = float rupees.
 Drug Knowledge Base: {drug_knowledge_base}
 Input: {text}
-Return valid JSON matching: drugs:[{{raw_drug_name,raw_quantity,raw_unit,primary_drug_name,drug_form,accused_id,seizure_worth,worth_scope,confidence_score,extraction_metadata:{{source_sentence}}}}]
+Return valid JSON matching: drugs:[{{raw_drug_name,raw_quantity,raw_unit,primary_drug_name,drug_form,seizure_worth,worth_scope,confidence_score,extraction_metadata:{{source_sentence}}}}]
 """
 
 EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting structured drug seizure data from police brief facts.
 
 ## CORE RULES (STRICT — read carefully)
-1. **One Row Per Accused-Drug Combination:** Each unique (accused, drug) pair MUST be a separate JSON entry.
+1. **One Row Per Drug Seizure:** Each unique drug seizure incident MUST be a separate JSON entry.
    - A1 has Ganja AND Cocaine → 2 entries
-   - A1 has Ganja AND A2 has Ganja → 2 entries
-   - 6 persons each have 100g Ganja → 6 separate entries, NOT 1
-   - NEVER merge accused. NEVER skip an accused because another has the same drug/quantity.
-2. **Accused Identification:** Normalize ALL accused references to A1, A2, A3... by order of appearance.
-   Formats: "A1"/"A-1", "Accused 1"/"Accused No. 1", numbered "1)"/"2)", or by name.
-   If seizure is collective/unattributed → accused_id = null.
+   - A1 has Ganja AND A2 has Ganja → 2 entries (same drug, different persons, seized separately)
+   - 6 persons each have 100g Ganja seized together → 1 entry (collective seizure)
+   - NEVER merge or combine seizures that should be separate.
+2. **Collective vs Attributed Seizures:** Normalize the context:
+   - Attributed seizures (per-person amounts clearly separate) → create multiple entries
+   - Collective seizures (GROUP total, no per-person breakdown) → 1 entry for the total
 3. **Ignore Totals:** Only per-accused quantities. "A1 180g + A2 80g, total 260g" → 180g(A1) + 80g(A2). Do NOT add 260g entry.
 4. **Per-accused entries ≠ duplicates.** 3 accused × 100g Ganja = 3 valid entries. A duplicate is ONLY same accused + same drug + same qty repeated in different sentences.
 
 5. **Accused vs Customers/Buyers:** Only extract entries for persons who POSSESSED or TRANSPORTED drugs at the time of seizure. Do NOT create entries for customers, buyers, or associates merely mentioned in confessions as people the accused sold to. "sold to Sidhu, Karthik, Faraz" → these are NOT accused with seizures; skip them.
 
 6. **Collective vs Individual Seizures:**
-   - If the text specifies SEPARATE quantities per accused ("A1 had 180g, A2 had 80g") → create one entry per accused with their individual quantity.
-   - If the text describes ONE TOTAL seizure from a GROUP without per-accused breakdown ("apprehended 6 persons... seized total 520 KGs dry ganja") → create ONLY **1 entry** with `accused_id = null` and the total quantity. Do NOT duplicate the total across each accused.
-   - Example: "A1, A2, A3 caught with 520 KG ganja" → 1 entry: accused_id=null, raw_quantity=520, raw_unit="KGs"
+   - If the text specifies SEPARATE quantities per person ("A1 had 180g, A2 had 80g") → create one entry per person with their individual quantity.
+   - If the text describes ONE TOTAL seizure from a GROUP without per-person breakdown ("apprehended 6 persons... seized total 520 KGs dry ganja") → create ONLY **1 entry** with the total quantity. Do NOT duplicate the total across each person.
+   - Example: "A1, A2, A3 caught with 520 KG ganja" → 1 entry: raw_quantity=520, raw_unit="KGs"
    - Example: "seized 100g from A1 and 200g from A2" → 2 entries with individual quantities.
 
 7. **Seized Quantity ONLY:** Extract ONLY the quantity physically SEIZED/RECOVERED at the time of arrest. Do NOT extract:
@@ -317,7 +317,7 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
    - **Post-sampling breakdowns** — forensic samples (S1/S2) and remaining property (P1) are PARTS of the total seizure; do NOT extract them as separate entries.
    - Example: "purchased 20 boxes (100g), sold 5 boxes (25g), seized 15 boxes (75g), drew 2 boxes sample (10g), remaining 13 boxes (65g) as P1" → extract ONLY **75g** (the total seized amount). Do NOT add entries for 100g, 65g, 25g, or 10g.
 
-**REMEMBER Rule 6**: If the FIR lists multiple accused BUT the seizure is described as a SINGLE TOTAL ("seized total 520 KGs"), produce ONLY 1 entry with accused_id=null. Do NOT clone the total for each accused.
+**REMEMBER Rule 6**: If the FIR lists multiple accused BUT the seizure is described as a SINGLE TOTAL ("seized total 520 KGs"), produce ONLY 1 entry with that total. Do NOT clone the total for each person.
 
 8. **Seizure Worth (MANDATORY):** Extract the monetary value ("worth") of EACH drug as `seizure_worth` in **rupees (float)**.
    - Look for patterns: "worth Rs.", "W/Rs:", "valued at Rs.", "worth about Rs.", "worth approximately", "market value", "valued", "costing Rs.", "worth of Rs."
@@ -356,50 +356,50 @@ If text matches any raw_name or standard_name → set primary_drug_name to the c
 If not in KB → set primary_drug_name to capitalized raw extraction.
 
 ## Output Schema
-{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "accused_id":"A1|A2|...|null", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
+{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
 
 ## Examples
 ### Example 1 — per-accused with individual worth, commercial mentioned in text
 Input: "seized 100g Ganja worth Rs.50,000 from 1) Anil Kumar, 100g worth Rs.50,000 from 2) Jagadish, 100g worth Rs.50,000 from 3) Abhya Kumar. The total seized quantity is above commercial quantity under NDPS Act."
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja worth Rs.50,000"}}}}}}}},
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"2) Jagadish 100 grams of Ganja worth Rs.50,000"}}}}}}}},
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja worth Rs.50,000"}}}}}}}}
+  {{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"1) Anil Kumar 100 Grams of ganja worth Rs.50,000"}}}}}}}}}, 
+  {{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"2) Jagadish 100 grams of Ganja worth Rs.50,000"}}}}}}}}}, 
+  {{{"raw_drug_name":"Dry Ganja","raw_quantity":100.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":50000.0,"worth_scope":"individual","is_commercial":true,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"3) Abhya Kumar 100 grams of Ganja worth Rs.50,000"}}}}}}}}
 ]}}}}
 
-### Example 2 — collective seizure with worth → 1 entry, accused_id=null
-Input: "apprehended A1 Sandeep, A2 Vinod, A3 Dhanaraj... Seized total 252 bundles wg 520 KGs dry ganja worth Rs.52,00,000"
-{{{{"drugs":[
-  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","accused_id":null,"seizure_worth":5200000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
+### Example 2 — collective seizure with worth → 1 entry (group total)
+Input: "apprehended Sandeep, Vinod, Dhanaraj... Seized total 252 bundles wg 520 KGs dry ganja worth Rs.52,00,000"
+{{{{{"drugs":[
+  {{{{"raw_drug_name":"Dry Ganja","raw_quantity":520.0,"raw_unit":"KGs","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":5200000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"Seized total 252 bundles wg 520 KGs dry ganja worth about Rs.52,00,000"}}}}}}}}
 ]}}}}
 
 ### Example 3 — multiple drugs, each with its own worth
-Input: "seized 500g Ganja worth Rs.5,00,000 and 50g Charas worth Rs.2,00,000 from A1"
-{{{{"drugs":[
-  {{{{"raw_drug_name":"Ganja","raw_quantity":500.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":500000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 500g Ganja worth Rs.5,00,000"}}}}}}}},
-  {{{{"raw_drug_name":"Charas","raw_quantity":50.0,"raw_unit":"grams","primary_drug_name":"Charas","drug_form":"solid","accused_id":"A1","seizure_worth":200000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"50g Charas worth Rs.2,00,000"}}}}}}}}
+Input: "seized 500g Ganja worth Rs.5,00,000 and 50g Charas worth Rs.2,00,000"
+{{{{{"drugs":[
+  {{{{"raw_drug_name":"Ganja","raw_quantity":500.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":500000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 500g Ganja worth Rs.5,00,000"}}}}}}}},
+  {{{{"raw_drug_name":"Charas","raw_quantity":50.0,"raw_unit":"grams","primary_drug_name":"Charas","drug_form":"solid","seizure_worth":200000.0,"worth_scope":"individual","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"50g Charas worth Rs.2,00,000"}}}}}}}}
 ]}}}}
 
 ### Example 4 — per-accused quantities with collective total worth (drug_total)
 Input: "found 300 Grms of Ganja from A1, 200 grms from A2 and 200 grms from A3. The seized total Ganja of 700 Grms worth of Rs.20,000/-"
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Ganja","raw_quantity":300.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A1","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"found 300 Grms of Ganja from A1"}}}}}}}},
-  {{{{"raw_drug_name":"Ganja","raw_quantity":200.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A2","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"200 grms from A2"}}}}}}}},
-  {{{{"raw_drug_name":"Ganja","raw_quantity":200.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","accused_id":"A3","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"200 grms from A3"}}}}}}}}
+  {{{"raw_drug_name":"Ganja","raw_quantity":300.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"found 300 Grms of Ganja from A1"}}}}}}}}}, 
+  {{{"raw_drug_name":"Ganja","raw_quantity":200.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"200 grms from A2"}}}}}}}}}, 
+  {{{"raw_drug_name":"Ganja","raw_quantity":200.0,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":20000.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"200 grms from A3"}}}}}}}}
 ]}}}}
 
 ### Example 5 — multiple drugs + accused with one overall total worth
 Input: "seized 20g Heroin from A1, 30g Heroin from A2, 30g Cocaine from A3. Total seizure worth Rs.1,00,000"
 {{{{"drugs":[
-  {{{{"raw_drug_name":"Heroin","raw_quantity":20.0,"raw_unit":"grams","primary_drug_name":"Heroin","drug_form":"solid","accused_id":"A1","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 20g Heroin from A1"}}}}}}}},
-  {{{{"raw_drug_name":"Heroin","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Heroin","drug_form":"solid","accused_id":"A2","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Heroin from A2"}}}}}}}},
-  {{{{"raw_drug_name":"Cocaine","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Cocaine","drug_form":"solid","accused_id":"A3","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Cocaine from A3"}}}}}}}}
+  {{{"raw_drug_name":"Heroin","raw_quantity":20.0,"raw_unit":"grams","primary_drug_name":"Heroin","drug_form":"solid","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"seized 20g Heroin from A1"}}}}}}}}}, 
+  {{{"raw_drug_name":"Heroin","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Heroin","drug_form":"solid","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Heroin from A2"}}}}}}}}}, 
+  {{{"raw_drug_name":"Cocaine","raw_quantity":30.0,"raw_unit":"grams","primary_drug_name":"Cocaine","drug_form":"solid","seizure_worth":100000.0,"worth_scope":"overall_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{{{{"source_sentence":"30g Cocaine from A3"}}}}}}}}
 ]}}}}
 
 ## Input Text
 {text}
 
-EXTRACT EVERY ACCUSED-DRUG COMBINATION. If seizure is collective with NO per-accused breakdown, use accused_id=null. Extract seizure_worth from "worth Rs.", "W/Rs:", "valued at", "worth of Rs." mentions — map each worth to its specific drug. Set worth_scope to indicate if the value is individual, drug_total, or overall_total. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". RETURN VALID JSON ONLY. NO MARKDOWN.
+EXTRACT EVERY DRUG SEIZURE. If seizure is collective with NO per-person breakdown, produce ONE entry with the total quantity. Extract seizure_worth from "worth Rs.", "W/Rs:", "valued at", "worth of Rs." mentions — map each worth to its specific drug. Set worth_scope to indicate if the value is individual, drug_total, or overall_total. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". RETURN VALID JSON ONLY. NO MARKDOWN.
 """
 
 def truncate_string(s: str, max_len: int = 50) -> str:
