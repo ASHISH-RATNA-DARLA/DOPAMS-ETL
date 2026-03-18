@@ -3749,6 +3749,13 @@ ALTER TABLE ONLY public.brief_facts_crime_summaries
 ALTER TABLE ONLY public.brief_facts_drug
     ADD CONSTRAINT brief_facts_drug_pkey PRIMARY KEY (id);
 
+--
+-- Idempotency guard for ETL: prevent exact-duplicate rows on reruns.
+--
+ALTER TABLE ONLY public.brief_facts_drug
+    ADD CONSTRAINT uq_brief_facts_drug_dedup UNIQUE
+    (crime_id, raw_drug_name, raw_quantity, raw_unit, primary_drug_name, drug_form, extraction_metadata);
+
 
 --
 -- TOC entry 4078 (class 2606 OID 1639319)

@@ -704,8 +704,27 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
 
             # 1. Base classification on Unit first (most reliable)
             if unit in {'g', 'gm', 'gms', 'gram', 'grams', 'grm', 'grms', 'gr'}:
-                drug.weight_g = qty
-                drug.weight_kg = qty / 1000.0
+                # FIR unit sanity: Some FIRs write "Wg. 24.925 grms" when the value is
+                # effectively kilograms (worth and context imply kg, not grams).
+                #
+                # NDPS officer policy: prefer avoiding false negatives. If a grams unit
+                # would imply an absurd Rs/gram (e.g. > 1000 Rs/g) AND the sentence is a
+                # weight ("Wg.") style seizure line, treat qty as kilograms.
+                source = (drug.extraction_metadata or {}).get("source_sentence", "") if isinstance(drug.extraction_metadata, dict) else ""
+                source_l = str(source).lower()
+                worth = float(drug.seizure_worth or 0.0)
+                rs_per_gram = (worth / qty) if qty > 0 else 0.0
+                if qty > 0 and worth > 0 and rs_per_gram > 1000 and ('wg' in source_l or 'w/g' in source_l):
+                    logger.warning(
+                        f"[UnitSanity] Interpreting '{drug.raw_drug_name}' qty={qty} as KG (not grams) "
+                        f"based on worth Rs.{worth:.0f} and source_sentence='{source}'."
+                    )
+                    drug.raw_unit = "KGs"
+                    drug.weight_g = qty * 1000.0
+                    drug.weight_kg = qty
+                else:
+                    drug.weight_g = qty
+                    drug.weight_kg = qty / 1000.0
             elif unit in {'kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'}:
                 drug.weight_g = qty * 1000.0
                 drug.weight_kg = qty

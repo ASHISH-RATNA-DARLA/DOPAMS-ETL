@@ -107,6 +107,23 @@ def main():
             from concurrent.futures import ThreadPoolExecutor as _PrefetchPool
             next_crimes = None
 
+            def _prefetch_unprocessed_crimes(limit: int):
+                """
+                Prefetch in a separate thread using a separate DB connection.
+                psycopg2 connections are not thread-safe; never share `conn` across threads.
+                """
+                prefetch_conn = None
+                try:
+                    prefetch_conn = get_db_connection()
+                    prefetch_conn = ensure_connection(prefetch_conn)
+                    return fetch_unprocessed_crimes(prefetch_conn, limit=limit)
+                finally:
+                    try:
+                        if prefetch_conn is not None:
+                            prefetch_conn.close()
+                    except Exception:
+                        pass
+
             with _PrefetchPool(max_workers=1) as prefetch_pool:
                 while True:
                     try:
@@ -127,8 +144,7 @@ def main():
 
                         # Fire prefetch for NEXT batch immediately — runs during LLM + write
                         next_fetch = prefetch_pool.submit(
-                            fetch_unprocessed_crimes,
-                            ensure_connection(conn),
+                            _prefetch_unprocessed_crimes,
                             batch_size
                         )
 
@@ -337,6 +353,33 @@ def process_crimes_parallel(conn, crimes, drug_categories=None,
 
     # --- Phase 2: Batched DB writes (single thread, single connection) ---
     if pending_inserts:
+        # De-duplicate exact row repeats (e.g. reruns or repeated futures)
+        # Keep multiplicity only when fields differ (multiple drugs / multiple accused rules).
+        deduped = []
+        seen = set()
+        for cid, drug_data in pending_inserts:
+            meta = drug_data.get("extraction_metadata", {}) if isinstance(drug_data, dict) else {}
+            src = meta.get("source_sentence") if isinstance(meta, dict) else None
+            key = (
+                cid,
+                str(drug_data.get("raw_drug_name")),
+                str(drug_data.get("raw_quantity")),
+                str(drug_data.get("raw_unit")),
+                str(drug_data.get("primary_drug_name")),
+                str(drug_data.get("drug_form")),
+                str(drug_data.get("weight_kg")),
+                str(drug_data.get("volume_l")),
+                str(drug_data.get("count_total")),
+                str(drug_data.get("seizure_worth")),
+                str(src),
+            )
+            if key in seen:
+                logging.warning(f"Dedup: dropping exact duplicate insert row for crime_id={cid}")
+                continue
+            seen.add(key)
+            deduped.append((cid, drug_data))
+        pending_inserts = deduped
+
         logging.info(f"Writing {len(pending_inserts)} rows to DB in batch...")
         try:
             conn = ensure_connection(conn)

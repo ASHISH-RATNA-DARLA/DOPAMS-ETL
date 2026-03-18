@@ -214,6 +214,7 @@ def insert_drug_facts(conn, crime_id, drug_data):
              weight_g, weight_kg, volume_ml, volume_l, count_total,
              confidence_score, extraction_metadata, is_commercial, seizure_worth)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
         """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
 
         cur.execute(query, _prepare_insert_values(crime_id, drug_data))
@@ -235,6 +236,7 @@ def batch_insert_drug_facts(conn, inserts):
          weight_g, weight_kg, volume_ml, volume_l, count_total,
          confidence_score, extraction_metadata, is_commercial, seizure_worth)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT DO NOTHING
     """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
 
     try:
