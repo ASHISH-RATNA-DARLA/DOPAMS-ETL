@@ -27,6 +27,15 @@ import os
 # Optimized for 64GB RAM server with decent VRAM
 PARALLEL_LLM_WORKERS = int(os.getenv("PARALLEL_LLM_WORKERS", "6"))
 
+if PARALLEL_LLM_WORKERS > 1:
+    logging.warning(
+        f"PARALLEL_LLM_WORKERS={PARALLEL_LLM_WORKERS} — "
+        f"verify Ollama is running with OLLAMA_NUM_PARALLEL>={PARALLEL_LLM_WORKERS}. "
+        f"If Ollama uses default (1), all threads queue server-side and "
+        f"parallelism has ZERO effect. "
+        f"Start Ollama with: OLLAMA_NUM_PARALLEL={PARALLEL_LLM_WORKERS} ollama serve"
+    )
+
 
 def main():
     logging.info("Starting Drug Extraction Service...")
@@ -91,32 +100,62 @@ def main():
         else:
             # Dynamic Mode: Process ALL unprocessed crimes in batches
             logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
-            batch_size = int(os.getenv("BATCH_SIZE", "15"))
+            batch_size = int(os.getenv("BATCH_SIZE", "50"))
             total_processed = 0
 
-            while True:
-                try:
-                    conn = ensure_connection(conn)
-                    crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
-                    if not crimes:
-                        logging.info("No more unprocessed crimes found in DB. Exiting.")
-                        break
+            # Prefetch executor — single worker, overlaps next DB fetch with current batch write
+            from concurrent.futures import ThreadPoolExecutor as _PrefetchPool
+            next_crimes = None
 
-                    logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                    process_crimes_parallel(conn, crimes, drug_categories,
-                                             ignore_set=ignore_set,
-                                             kb_lookup=kb_lookup,
-                                             dynamic_drug_keywords=dynamic_drug_keywords)
-                    total_processed += len(crimes)
-                    logging.info(f"Batch complete. Total processed so far: {total_processed}")
-                except Exception as e:
-                    logging.error(f"Batch processing error: {e}. Attempting reconnection...")
+            with _PrefetchPool(max_workers=1) as prefetch_pool:
+                while True:
                     try:
-                        conn = get_db_connection()
-                        logging.info("Reconnected to database. Resuming...")
-                    except Exception as reconnect_err:
-                        logging.error(f"Reconnection failed: {reconnect_err}. Exiting.")
-                        break
+                        conn = ensure_connection(conn)
+
+                        # Use prefetched batch if available, else fetch now (first iteration)
+                        if next_crimes is not None:
+                            crimes = next_crimes
+                            next_crimes = None
+                        else:
+                            crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
+
+                        if not crimes:
+                            logging.info("No more unprocessed crimes found in DB. Exiting.")
+                            break
+
+                        logging.info(f"Processing batch of {len(crimes)} crimes.")
+
+                        # Fire prefetch for NEXT batch immediately — runs during LLM + write
+                        next_fetch = prefetch_pool.submit(
+                            fetch_unprocessed_crimes,
+                            ensure_connection(conn),
+                            batch_size
+                        )
+
+                        # Process current batch (LLM parallel + batch DB write)
+                        process_crimes_parallel(conn, crimes, drug_categories,
+                                                 ignore_set=ignore_set,
+                                                 kb_lookup=kb_lookup,
+                                                 dynamic_drug_keywords=dynamic_drug_keywords)
+                        total_processed += len(crimes)
+                        logging.info(f"Batch complete. Total processed so far: {total_processed}")
+
+                        # Collect prefetched next batch (should already be ready)
+                        try:
+                            next_crimes = next_fetch.result(timeout=30)
+                        except Exception as prefetch_err:
+                            logging.warning(f"Prefetch failed: {prefetch_err}. Will fetch inline.")
+                            next_crimes = None
+
+                    except Exception as e:
+                        logging.error(f"Batch processing error: {e}. Attempting reconnection...")
+                        next_crimes = None  # discard prefetch on error
+                        try:
+                            conn = get_db_connection()
+                            logging.info("Reconnected to database. Resuming...")
+                        except Exception as reconnect_err:
+                            logging.error(f"Reconnection failed: {reconnect_err}. Exiting.")
+                            break
 
     except KeyboardInterrupt:
         logging.info("Process interrupted by user.")

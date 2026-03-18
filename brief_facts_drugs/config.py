@@ -17,6 +17,6 @@ LLM_ENDPOINT = os.getenv("LLM_ENDPOINT")
 # Recommended for CPU: qwen2.5-coder:7b or qwen2.5-coder:14b
 # Recommended for Accuracy (Slow on CPU): qwen2.5-coder:32b
 LLM_MODEL = os.getenv("LLM_MODEL_EXTRACTION")
-LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW")) # Increased to handle long reports
+LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192")) # Increased to handle long reports
 
 

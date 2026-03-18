@@ -335,6 +335,12 @@ class CrimeReportExtraction(BaseModel):
 # =============================================================================
 # FALLBACK verbose prompt kept for reference / rollback.
 EXTRACTION_PROMPT_VERBOSE = """You are an expert forensic data analyst. Your task is to extract structured drug seizure information from police brief facts.
+# =============================================================
+# DO NOT USE IN PRODUCTION — KEPT FOR REFERENCE ONLY
+# {drug_knowledge_base} placeholder is no longer populated.
+# Using this prompt will raise KeyError and break extraction.
+# Active prompt is: EXTRACTION_PROMPT (below)
+# =============================================================
 ### I. Golden Rules
 1. One Row Per Accused-Drug Combination: Each unique (accused, drug) pair MUST be a separate JSON entry.
 2. Accused Identification: Normalize all accused references to A1, A2, A3... format.
@@ -351,7 +357,7 @@ EXTRACTION_PROMPT_VERBOSE = """You are an expert forensic data analyst. Your tas
 13. Plant/Cultivation Seizures: "8 ganja plants" → raw_quantity=8, raw_unit="plants", drug_form="count". Plants ARE valid drug seizures under NDPS Act — ALWAYS extract them.
 Container vs Content: "3 packets, 50g" → 50. "3 packets of 50g each" → 150.
 Skip unknown/unidentified drug names. drug_form ∈ solid/liquid/count. seizure_worth = float rupees.
-Drug Knowledge Base: {drug_knowledge_base}
+Drug Knowledge Base: {{drug_knowledge_base}}
 Input: {text}
 Return valid JSON matching: drugs:[{{raw_drug_name,raw_quantity,raw_unit,primary_drug_name,drug_form,seizure_worth,worth_scope,confidence_score,extraction_metadata:{{source_sentence}}}}]
 """
@@ -359,6 +365,7 @@ Return valid JSON matching: drugs:[{{raw_drug_name,raw_quantity,raw_unit,primary
 EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting structured drug seizure data from police brief facts.
 
 ## CORE RULES (STRICT — read carefully)
+0. **Zero Miss Policy:** You are acting as a 30-year NDPS officer. Every substance that could be charged under the NDPS Act MUST be extracted. A missed drug entry is a worse error than a false positive. When in doubt — extract it and set confidence_score accordingly.
 1. **One Row Per Drug Seizure:** Each unique drug seizure incident MUST be a separate JSON entry.
    - A1 has Ganja AND Cocaine → 2 entries
    - A1 has Ganja AND A2 has Ganja → 2 entries (same drug, different persons, seized separately)
@@ -402,7 +409,7 @@ EXTRACTION_PROMPT = """You are an expert forensic data analyst extracting struct
 
 ## COMPRESSED RULES
 R5:zero-inference|extract only explicit/implied values|missing unit→confidence~60
-R6:drug-name|set primary_drug_name to the most precise standard drug name you know from your training|use exact NDPS/pharmacological names (e.g. Alprazolam not "tablet", Tramadol not "painkiller", Ganja not "contraband")|capitalize properly|if truly unidentifiable→use capitalized raw text from FIR
+R6:drug-name|set primary_drug_name to the most precise standard drug name you know from your training|use exact NDPS/pharmacological names (e.g. Alprazolam not "tablet", Tramadol not "painkiller", Ganja not "contraband")|capitalize properly|if truly unidentifiable→use capitalized raw text from FIR|know common aliases (extract if seen): Ganja=marijuana/weed/bhang/grass/pot/dope/maal/stuff; Heroin=smack/brown sugar/H/no.4/harry; Cocaine=coke/snow/charlie/white; Methamphetamine=meth/ice/crystal/shabu/yaba; MDMA=ecstasy/molly/mandy/crystal mdma/mdma crystal; Alprazolam=xanax/niravam/alprax; Tramadol=ultram/tramazac/contramal/tydol; Pentazocine=fortwin/sosegon/talwin; Mephedrone=meow meow/M-cat/drone/4-MMC; Buprenorphine=buprenex/subutex/temgesic; Ketamine=special K/vitamin K/ket; Codeine=lean/purple drank (syrup); Opium=afeem/amal/chandu/doda; Poppy=khus khus/post/bhukki/doda/poppy husk/poppy straw; Nitrazepam=nitravet/nitavan/alodorm; Zolpidem=ambien/stilnox; Charas=hash/hashish/cream/resin/black/slate
 R7:audit|extraction_metadata.source_sentence=verbatim source snippet
 R8:precision|exact values,no rounding
 R9:confidence(int 0-100)|90-100:name+qty+unit clear|70-89:partial|50-69:qty/unit missing|<50:speculative
@@ -418,6 +425,10 @@ R18:purchase-price-is-NOT-worth|"purchased at Rs.10,000/- per KG" or "bought for
 R19:per-kg-rate-is-NOT-worth|"at the rate of Rs.10,000/- per KG"→this is a RATE, not a value for specific seized quantity|do NOT multiply rate × quantity to compute worth—only extract worth when explicitly stated
 R20:non-drug-seizures|NEVER create entries for co-seized property that is NOT a narcotic/psychotropic substance under NDPS Act|SKIP entries for: vehicles (motorcycle, car, scooter, truck, auto, bike, two-wheeler, tractor), mobile phones, SIM cards, cash/currency (seized cash is NOT drug worth), weighing scales, packaging material, lighters, match boxes, rolling papers, OCB papers, empty sachets, empty covers, alcohol brands (whisky, beer, rum, vodka), cigarettes, tobacco products, chillum, bong, paraphernalia|RULE: if the item cannot be charged under NDPS Act as a narcotic or psychotropic substance — DO NOT extract it
 R21:multi-drug-in-one-sentence|if a single sentence mentions multiple distinct substances, each substance MUST be a separate entry|Example: "seized 60g Ganja, 5g Charas and 10 tablets Alprazolam" → 3 entries, NOT 1
+R22:brand-names|extract brands as generic names: Spasmo Proxyvon/Spasmo-Proxylon→Pentazocine; Rumorf/Rumrof/Rumorf-30/Rumrof CR→Morphine; Nitravet/Nitavan→Nitrazepam; Tydol/Tramazac/Contramal→Tramadol; Fortwin/Sosegon→Pentazocine; Corex/Phensedyl→Codeine Syrup; any "SP capsule"/"SP tablet"→Pentazocine|raw_drug_name=brand from FIR, primary_drug_name=generic name
+R23:cannabis-edibles|chocolates/cookies/brownies/laddoos or any food described as cannabis/ganja/bhang-infused are valid NDPS seizures|extract with an appropriate edible form name (e.g. "Ganja Chocolates")|drug_form=count if pieces, solid if bulk weight|NEVER skip edibles
+R24:precursors|acetic anhydride, ephedrine, pseudoephedrine, phenylacetic acid, and other NDPS Table I/II precursors are extractable|primary_drug_name must be the chemical name exactly|do NOT confuse with cutting agents (sugar, starch)
+R25:source-sentence|extraction_metadata.source_sentence MUST be the verbatim sentence/clause that contains the drug mention|never summarize|if quantity spans two sentences, include both verbatim
 
 ## Drug Name Instruction
 Use your training knowledge to identify the drug. Set primary_drug_name to the correct pharmacological or NDPS standard name (e.g. "Ganja", "Heroin", "Alprazolam", "Tramadol", "Charas", "Methamphetamine", "Cocaine", "Opium"). Do NOT write vague terms like "tablet", "powder", "contraband", "narcotic" as the primary_drug_name — use the actual drug name. If the drug is genuinely unidentifiable, use the capitalized raw text from the FIR. Post-processing will standardise names against the verified drug database — your job is to extract every drug present.
@@ -805,7 +816,6 @@ COMMERCIAL_QUANTITY_KG = {
     'methamphetamine':  0.050,
     'amphetamine':      0.050,
     'mdma':             0.050,
-    'mdm':              0.050,
     'ecstasy':          0.050,
     'ephedrine':        1.0,
     'pseudoephedrine':  1.0,
@@ -848,6 +858,9 @@ def _apply_commercial_quantity_check(drugs: List[DrugExtraction]) -> List[DrugEx
     drug_groups = defaultdict(list)
     for drug in drugs:
         key = (drug.primary_drug_name or '').lower().strip()
+        # Backward-compat normalization: legacy DB rows used 'MDM' for MDMA.
+        # Canonical NDPS name is 'MDMA' (standard_name). Keep dict key as 'mdma'.
+        key = 'mdma' if key == 'mdm' else key
         drug_groups[key].append(drug)
 
     for drug_name, group in drug_groups.items():

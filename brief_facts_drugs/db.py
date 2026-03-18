@@ -172,6 +172,7 @@ def fetch_unprocessed_crimes(conn, limit=100):
             FROM crimes c
             LEFT JOIN {table} d ON c.crime_id = d.crime_id
             WHERE d.crime_id IS NULL
+            ORDER BY c.crime_id ASC
             LIMIT %s
         """).format(table=sql.Identifier(config.DRUG_TABLE_NAME))
 
