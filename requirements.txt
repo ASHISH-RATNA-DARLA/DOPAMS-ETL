@@ -7,6 +7,10 @@ pymongo>=4.6.0
 python-dotenv>=1.0.0
 python-dateutil>=2.8.2
 
+# System & Process Management (for parallel ETL execution)
+psutil>=6.0.0
+filelock>=3.13.0
+
 # Data Processing
 pandas>=2.1.0
 numpy>=1.26.0

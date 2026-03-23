@@ -83,14 +83,16 @@ cd /data-drive/etl-process-dev/etl_fsl_case_property && source /data-drive/etl-p
 Order 22 – refresh_views (1st)
 bash
 cd /data-drive/etl-process-dev/etl_refresh_views && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 views_refresh_sql.py > views_refresh_1.log 2>&1 &
-3 – brief_facts_accused
+
+Order 23 – brief_facts_accused
 bash
 cd /data-drive/etl-process-dev/brief_facts_accused && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 accused_type.py > accused_type.log 2>&1 &
 
 Order 24 – brief_facts_drugs
 bash
 cd /data-drive/etl-process-dev/brief_facts_drugs && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 main.py > brief_facts_drugs.log 2>&1 &
-5 – drug_standardization
+
+Order 25 – drug_standardization
 bash
 cd /data-drive/etl-process-dev/drug_standardization && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 drug_standardization.py > drug_standardization.log 2>&1 &
 
@@ -101,25 +103,24 @@ cd /data-drive/etl-process-dev/etl_refresh_views && source /data-drive/etl-proce
 Order 27 – update_file_id
 bash
 cd /data-drive/etl-process-dev/etl-files/etl_pipeline_files && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 main_standalone.py > update_file_id.log 2>&1 &
-8 – files_download_media_server
+
+Order 28 – files_download_media_server
 bash
 cd /data-drive/etl-process-dev/etl-files/etl_files_media_server && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 -m etl_files_media_server.main > files_download.log 2>&1 &
 
-Order 29 – update_file_extensions
+Order 29 – files_download_fir_copy (parallel)
+bash
+cd /data-drive/etl-process-dev/etl-files && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 etl-files.py --parallel > etl_files.log 2>&1 &
+
+Order 30 – update_file_extensions
 bash
 cd /data-drive/etl-process-dev/etl-files/update_file_urls_with_extensions && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 update_file_urls_with_extensions.py > update_file_extensions.log 2>&1 &
 
-Order 30
-cd /data-drive/etl-process-dev/etl-files/etl_pipeline_files && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 main_standalone.py > update_file_id.log 2>&1 &
-Order 27 – files_download_media_server
-bash
-cd /data-drive/etl-process-dev/etl-files/etl_files_media_server && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 -m etl_files_media_server.main > files_download.log 2>&1 &
-Order 28 – update_file_extensions
-bash
-cd /data-drive/etl-process-dev/etl-files/update_file_urls_with_extensions && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 update_file_urls_with_extensions.py > update_file_extensions.log 2>&1 &
-Order 29 – refresh_views (3rd / final)
+Order 31 – refresh_views (3rd / final)
 bash
 cd /data-drive/etl-process-dev/etl_refresh_views && source /data-drive/etl-process-dev/venv/bin/activate && nohup python3 views_refresh_sql.py > views_refresh_final.log 2>&1 &
+
+
 IMPORTANT
 
 These processes have dependencies — they must run sequentially in order (e.g., accused before persons, all data ETLs before refresh_views). Do NOT run them all in parallel. Wait for each one to finish before starting the next, or use a sequential wrapper script.
