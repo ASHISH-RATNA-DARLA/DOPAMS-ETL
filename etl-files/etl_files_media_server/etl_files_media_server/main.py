@@ -41,6 +41,7 @@ import os
 import sys
 import time
 import logging
+import argparse
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -275,9 +276,10 @@ def build_destination_path(file_id: str, source_type: str, source_field: str, re
 class FilesMediaServerETL:
     """ETL process to download files from API and save to Tomcat media folders."""
 
-    def __init__(self) -> None:
+    def __init__(self, repair: bool = False) -> None:
         self.db_conn: Optional[psycopg2.extensions.connection] = None
         self.db_cursor: Optional[psycopg2.extensions.cursor] = None
+        self.repair = repair
         self.stats = {
             "total_rows": 0,
             "total_with_file_id": 0,
@@ -406,12 +408,17 @@ class FilesMediaServerETL:
         conditions = [
             "file_id IS NOT NULL",
             "has_field IS TRUE",
-            "is_empty IS FALSE",
-            "(is_downloaded IS FALSE OR downloaded_at IS NULL)"
+            "is_empty IS FALSE"
         ]
+        
+        if not self.repair:
+            conditions.append("(is_downloaded IS FALSE OR downloaded_at IS NULL)")
 
         logger.info(f"📥 Fetching file metadata from table: {FILES_TABLE}")
-        logger.info("   🔄 Downloading files where: is_downloaded IS FALSE OR downloaded_at IS NULL")
+        if self.repair:
+            logger.info("   🔧 REPAIR MODE: Fetching ALL files with file_id (including those marked as downloaded)")
+        else:
+            logger.info("   🔄 Downloading files where: is_downloaded IS FALSE OR downloaded_at IS NULL")
         logger.info("   📌 Processing order: newest files first (created_at DESC)")
 
         sql = f"""
@@ -602,14 +609,18 @@ class FilesMediaServerETL:
 
                         if os.path.exists(dest_path):
                             existing_size = os.path.getsize(dest_path)
-                            logger.info(
-                                f"⏭️  File already exists on disk for file_id={file_id}: "
-                                f"path={dest_path}, size={existing_size} bytes (skipping download)"
-                            )
-                            self._mark_as_downloaded(file_id, success=True)
-                            self.stats["skipped_exists_on_disk"] += 1
-                            self._respect_rate_limit(start_time)
-                            return True
+                            if existing_size > 0:
+                                logger.info(
+                                    f"⏭️  File already exists on disk for file_id={file_id}: "
+                                    f"path={dest_path}, size={existing_size} bytes (skipping download)"
+                                )
+                                self._mark_as_downloaded(file_id, success=True)
+                                self.stats["skipped_exists_on_disk"] += 1
+                                self._respect_rate_limit(start_time)
+                                return True
+                            else:
+                                logger.warning(f"⚠️  File {dest_path} exists but is 0 bytes. Re-downloading...")
+                                os.remove(dest_path)
 
                         try:
                             with open(dest_path, "wb") as f:
@@ -665,20 +676,25 @@ class FilesMediaServerETL:
                             continue
 
                     else:
+                        try:
+                            error_body = resp.text[:200].replace("'", "''")
+                        except:
+                            error_body = "Could not read response body"
+                            
                         if resp.status_code == 400:
-                            error_msg = "HTTP 400 Bad Request - File does not exist or invalid file_id (permanent failure)"
-                            logger.error(f"❌ File does not exist (HTTP 400) for file_id={file_id} - marking as permanently failed")
+                            error_msg = f"HTTP 400 Bad Request - {error_body}"
+                            logger.error(f"❌ File does not exist (HTTP 400) for file_id={file_id}: {error_body}")
                         elif resp.status_code == 404:
-                            error_msg = "HTTP 404 Not Found - File does not exist (permanent failure)"
-                            logger.error(f"❌ File not found (HTTP 404) for file_id={file_id} - marking as permanently failed")
+                            error_msg = f"HTTP 404 Not Found - {error_body}"
+                            logger.error(f"❌ File not found (HTTP 404) for file_id={file_id}")
                         elif resp.status_code == 401:
-                            error_msg = "HTTP 401 Unauthorized - API key may be invalid"
-                            logger.error(f"❌ Authentication failed (HTTP 401) for file_id={file_id} - check API key")
+                            error_msg = f"HTTP 401 Unauthorized - {error_body}"
+                            logger.error(f"❌ Authentication failed (HTTP 401) for file_id={file_id}")
                         elif resp.status_code == 403:
-                            error_msg = "HTTP 403 Forbidden - Access denied"
+                            error_msg = f"HTTP 403 Forbidden - {error_body}"
                             logger.error(f"❌ Access denied (HTTP 403) for file_id={file_id}")
                         else:
-                            error_msg = f"HTTP {resp.status_code} - Not retriable"
+                            error_msg = f"HTTP {resp.status_code} - {error_body}"
                             logger.error(f"❌ {error_msg} for file_id={file_id}")
 
                         self._mark_as_downloaded(file_id, success=False, error_msg=error_msg)
@@ -856,7 +872,11 @@ class FilesMediaServerETL:
 
 
 def main() -> None:
-    etl = FilesMediaServerETL()
+    parser = argparse.ArgumentParser(description="DOPAMAS ETL - Files Media Server Downloader")
+    parser.add_argument("--repair", action="store_true", help="Repair mode: Check all files, including those marked as downloaded")
+    args = parser.parse_args()
+    
+    etl = FilesMediaServerETL(repair=args.repair)
     success = etl.run()
     sys.exit(0 if success else 1)
 
