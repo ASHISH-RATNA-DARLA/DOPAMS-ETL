@@ -22,6 +22,29 @@ class FilesLoader:
         self.connection = connection
         self.idempotency_checker = idempotency_checker
         self.logger = logger or logging.getLogger(__name__)
+
+    @staticmethod
+    def _build_record_key(record: Dict[str, Any]):
+        """
+        Build a deduplication key aligned with the files table uniqueness rules.
+
+        When file_id is NULL, the table also has a partial unique index on
+        (source_type, source_field, parent_id), so file_index must be ignored.
+        """
+        if record.get('file_id') is None:
+            return (
+                record['source_type'],
+                record['source_field'],
+                record['parent_id']
+            )
+
+        return (
+            record['source_type'],
+            record['source_field'],
+            record['parent_id'],
+            record.get('file_id'),
+            record.get('file_index')
+        )
     
     def load_files(self, file_records: List[Dict[str, Any]], skip_existing: bool = True) -> Dict[str, int]:
         """
@@ -43,14 +66,9 @@ class FilesLoader:
         
         # Filter records based on idempotency and deduplicate within batch
         for record in file_records:
-            # Create a unique key for deduplication
-            record_key = (
-                record['source_type'],
-                record['source_field'],
-                record['parent_id'],
-                record.get('file_id'),
-                record.get('file_index')
-            )
+            # Match the database uniqueness rules so we don't send duplicate rows
+            # into the same INSERT statement.
+            record_key = self._build_record_key(record)
             
             # Skip if we've already seen this record in this batch
             if record_key in seen_records:
@@ -70,18 +88,13 @@ class FilesLoader:
                 )
                 
                 if is_processed:
-                    # Check if the existing record needs created_at to be updated
-                    # If created_at is NULL, we should still try to update it
-                    # Let the record go through - ON CONFLICT DO UPDATE will handle it
-                    # This allows updating created_at for existing records that have NULL created_at
-                    # Note: We could check if created_at is NULL here, but it's simpler to let
-                    # ON CONFLICT handle it - it will only update if created_at IS NULL
-                    pass  # Don't skip - let ON CONFLICT DO UPDATE handle updating created_at
+                    stats['skipped'] += 1
+                    continue
             
             records_to_insert.append(record)
         
         if not records_to_insert:
-            self.logger.info(f"All {len(file_records)} records already processed, skipping")
+            self.logger.info(f"All {len(file_records)} records already processed or duplicated, skipping")
             return stats
         
         # Insert records
@@ -102,13 +115,8 @@ class FilesLoader:
                             file_index, identity_type, identity_number, created_at
                         )
                         VALUES %s
-                        ON CONFLICT (source_type, source_field, parent_id, file_id, file_index)
-                        DO UPDATE SET 
-                            created_at = COALESCE(files.created_at, EXCLUDED.created_at)
-                        WHERE files.created_at IS NULL
-                        -- Only update created_at if existing value is NULL
-                        -- This preserves existing API dates and only fills in missing ones
-                        -- NOTE: We explicitly set created_at in VALUES, so DEFAULT CURRENT_TIMESTAMP won't override it
+                        ON CONFLICT DO NOTHING
+                        RETURNING id
                     """
                     from datetime import datetime
                     values = []
@@ -192,8 +200,8 @@ class FilesLoader:
                             file_index, identity_type, identity_number
                         )
                         VALUES %s
-                        ON CONFLICT (source_type, source_field, parent_id, file_id, file_index)
-                        DO NOTHING
+                        ON CONFLICT DO NOTHING
+                        RETURNING id
                     """
                     values = [
                         (
@@ -207,12 +215,18 @@ class FilesLoader:
                         )
                         for r in records_to_insert
                     ]
-                
-                execute_values(cursor, insert_query, values)
+
+                # Intentionally omit the conflict target so PostgreSQL also ignores
+                # conflicts from the partial unique index used when file_id IS NULL.
+                inserted_rows = execute_values(cursor, insert_query, values, fetch=True) or []
                 self.connection.commit()
-                
-                stats['inserted'] = len(records_to_insert)
-                self.logger.info(f"Inserted {stats['inserted']} file records")
+
+                stats['inserted'] = len(inserted_rows)
+                stats['skipped'] += len(records_to_insert) - stats['inserted']
+                self.logger.info(
+                    f"Inserted {stats['inserted']} file records"
+                    f" ({len(records_to_insert) - stats['inserted']} duplicates skipped at insert time)"
+                )
         
         except Exception as e:
             self.connection.rollback()
@@ -221,5 +235,4 @@ class FilesLoader:
             raise
         
         return stats
-
 
