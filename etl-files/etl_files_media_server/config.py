@@ -2,11 +2,60 @@
 Configuration file for DOPAMAS ETL Pipeline
 """
 import os
+from pathlib import Path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+CONFIG_DIR = Path(__file__).resolve().parent
+ETL_FILES_DIR = CONFIG_DIR.parent
+REPO_ROOT = ETL_FILES_DIR.parent
+
+
+def load_environment():
+    """Load env vars from explicit, repo-level, or service-local env files."""
+    env_override = os.getenv("DOPAMS_ENV_FILE")
+    candidates = []
+
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+
+    candidates.extend(
+        [
+            REPO_ROOT / ".env.server",
+            REPO_ROOT / ".env",
+            CONFIG_DIR / ".env.server",
+            CONFIG_DIR / ".env",
+        ]
+    )
+
+    seen_paths = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        candidate_str = str(candidate)
+        if candidate_str in seen_paths:
+            continue
+
+        seen_paths.add(candidate_str)
+        if candidate.is_file():
+            load_dotenv(candidate_str, override=False)
+            return candidate_str
+
+    load_dotenv()
+    return None
+
+
+def get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+LOADED_ENV_FILE = load_environment()
 
 # Database Configuration
 DB_CONFIG = {
@@ -14,25 +63,29 @@ DB_CONFIG = {
     'database': os.getenv('POSTGRES_DB'),
     'user': os.getenv('POSTGRES_USER'),
     'password': os.getenv('POSTGRES_PASSWORD'),
-    'port': int(os.getenv('POSTGRES_PORT'))
+    'port': get_int_env('POSTGRES_PORT', 5432)
 }
 
 # API Configuration
 # API1 (original - port 3000): crimes, persons, property, interrogation
-API1_BASE_URL = os.getenv('DOPAMAS_API_URL')
+API1_BASE_URL = os.getenv('DOPAMAS_API_URL') or os.getenv('API1_BASE_URL')
 
 # API2 (new - port 3001): mo_seizures, chargesheets, fsl_case_property
 API2_HOST = os.getenv('API2_URL')
 API2_PORT = os.getenv('API2_PORT')
-API2_BASE_URL = f"http://{API2_HOST}:{API2_PORT}/api/DOPAMS"
+API2_BASE_URL = (
+    os.getenv('DOPAMAS_API_URL2')
+    or os.getenv('API2_BASE_URL')
+    or (f"http://{API2_HOST}:{API2_PORT}/api/DOPAMS" if API2_HOST and API2_PORT else None)
+)
 
 API_CONFIG = {
     'base_url': API1_BASE_URL,  # Default to API1 for backward compatibility
     'api1_base_url': API1_BASE_URL,
     'api2_base_url': API2_BASE_URL,
     'api_key': os.getenv('DOPAMAS_API_KEY'),
-    'timeout': int(os.getenv('API_TIMEOUT')),
-    'max_retries': int(os.getenv('API_MAX_RETRIES')),
+    'timeout': get_int_env('API_TIMEOUT', 180),
+    'max_retries': get_int_env('API_MAX_RETRIES', 3),
     
     # API1 Endpoints (port 3000)
     'crimes_url': f"{API1_BASE_URL}/crimes",
@@ -66,7 +119,7 @@ ETL_CONFIG = {
     'end_date': '2025-12-31T23:59:59+05:30',    # Placeholder for log headers (not used in actual processing)
     
     'chunk_days': 5,  # Fetch 5 days at a time
-    'chunk_overlap_days': int(os.getenv('CHUNK_OVERLAP_DAYS')),  # Overlap between chunks to ensure no data is missed
+    'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),  # Overlap between chunks to ensure no data is missed
     'batch_size': 100,  # Insert batch size
     'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS') == 'true'
 }
@@ -81,7 +134,7 @@ EMBEDDING_CONFIG = {
 
 # Logging Configuration
 LOG_CONFIG = {
-    'level': os.getenv('LOG_LEVEL'),
+    'level': os.getenv('LOG_LEVEL', 'INFO'),
     'format': '%(log_color)s%(asctime)s - %(levelname)s - %(message)s',
     'date_format': '%Y-%m-%d %H:%M:%S'
 }

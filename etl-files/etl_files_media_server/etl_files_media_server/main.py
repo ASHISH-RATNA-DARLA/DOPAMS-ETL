@@ -43,11 +43,19 @@ import time
 import logging
 import argparse
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Tuple
 
 import psycopg2
 import requests
 import colorlog
+
+# Allow running this file directly as a script as well as via `python -m`.
+CURRENT_DIR = Path(__file__).resolve().parent
+PARENT_DIR = CURRENT_DIR.parent
+PARENT_DIR_STR = str(PARENT_DIR)
+if PARENT_DIR_STR not in sys.path:
+    sys.path.insert(0, PARENT_DIR_STR)
 
 from config import DB_CONFIG, API_CONFIG, LOG_CONFIG
 
@@ -57,7 +65,7 @@ from config import DB_CONFIG, API_CONFIG, LOG_CONFIG
 # -----------------------------------------------------------------------------
 
 # Table name for files metadata
-FILES_TABLE = os.getenv("FILES_TABLE")
+FILES_TABLE = os.getenv("FILES_TABLE", "files")
 
 # Base path on the Tomcat media server - ALWAYS read from env
 BASE_MEDIA_PATH = os.getenv(
