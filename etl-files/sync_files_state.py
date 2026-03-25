@@ -11,18 +11,102 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load configuration
-load_dotenv(".env.server")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+
+
+def load_environment():
+    """
+    Load environment variables from the most likely repo-level env files.
+
+    Search order:
+    1. Explicit file from DOPAMS_ENV_FILE
+    2. Repo root .env.server
+    3. Repo root .env
+    4. Script directory .env.server
+    5. Script directory .env
+    """
+    env_override = os.getenv("DOPAMS_ENV_FILE")
+    candidates = []
+
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+
+    candidates.extend(
+        [
+            REPO_ROOT / ".env.server",
+            REPO_ROOT / ".env",
+            SCRIPT_DIR / ".env.server",
+            SCRIPT_DIR / ".env",
+        ]
+    )
+
+    checked_paths = []
+    seen_paths = set()
+
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        candidate_str = str(candidate)
+        if candidate_str in seen_paths:
+            continue
+
+        seen_paths.add(candidate_str)
+        checked_paths.append(candidate_str)
+
+        if candidate.is_file():
+            load_dotenv(candidate_str, override=False)
+            return candidate_str, checked_paths
+
+    return None, checked_paths
+
+
+LOADED_ENV_FILE, CHECKED_ENV_PATHS = load_environment()
+
+
+def get_postgres_port():
+    port_value = os.getenv("POSTGRES_PORT", "5432")
+    try:
+        return int(port_value)
+    except (TypeError, ValueError):
+        return None
+
 
 DB_CONFIG = {
-    'host': os.getenv('POSTGRES_HOST'),
-    'port': os.getenv('POSTGRES_PORT', 5432),
-    'database': os.getenv('POSTGRES_DB'),
-    'user': os.getenv('POSTGRES_USER'),
-    'password': os.getenv('POSTGRES_PASSWORD')
+    "host": os.getenv("POSTGRES_HOST"),
+    "port": get_postgres_port(),
+    "database": os.getenv("POSTGRES_DB"),
+    "user": os.getenv("POSTGRES_USER"),
+    "password": os.getenv("POSTGRES_PASSWORD"),
 }
 
 BASE_MEDIA_PATH = os.getenv("FILES_MEDIA_BASE_PATH", "/mnt/shared-etl-files")
 FILES_TABLE = os.getenv("FILES_TABLE", "files")
+
+
+def validate_db_config():
+    required = {
+        "POSTGRES_HOST": DB_CONFIG["host"],
+        "POSTGRES_DB": DB_CONFIG["database"],
+        "POSTGRES_USER": DB_CONFIG["user"],
+        "POSTGRES_PASSWORD": DB_CONFIG["password"],
+        "POSTGRES_PORT": DB_CONFIG["port"],
+    }
+
+    missing = [key for key, value in required.items() if value in (None, "")]
+    if not missing:
+        return True
+
+    print("Missing required database configuration.")
+    print(f"Missing variables: {', '.join(missing)}")
+    if LOADED_ENV_FILE:
+        print(f"Loaded env file: {LOADED_ENV_FILE}")
+    else:
+        print("No env file was loaded.")
+    print("Checked env paths:")
+    for env_path in CHECKED_ENV_PATHS:
+        print(f"  - {env_path}")
+    print("You can also set DOPAMS_ENV_FILE=/absolute/path/to/.env.server before running.")
+    return False
 
 def map_destination_subdir(source_type, source_field):
     source_type = (source_type or "").lower()
@@ -43,7 +127,13 @@ def map_destination_subdir(source_type, source_field):
     return mapping.get((source_type, source_field))
 
 def run_sync():
+    if not validate_db_config():
+        return
+
     print(f"Connecting to database {DB_CONFIG['database']} at {DB_CONFIG['host']}...")
+    if LOADED_ENV_FILE:
+        print(f"Loaded environment from {LOADED_ENV_FILE}")
+
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
