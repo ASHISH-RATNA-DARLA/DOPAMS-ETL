@@ -24,6 +24,8 @@ Do not make assumptions on important decisions — get clarification first.
 - Analyzed `etl_files_media_server/main.py` for downloader logic.
 - Identified potential cause for missing files: configuration changes and logic flaws.
 
-### [x] Step: Prioritization of Downloads
-- Updated `main.py` SQL query to prioritize `crime`, `chargesheets`, and `interrogation` source types.
+### [x] Step: Implementation of Audit Recommendations
+- Updated `main.py` with prioritization and detailed error logging.
+- Created `sync_files_state.py` for DB/FS synchronization.
+- Provided execution steps.
 
