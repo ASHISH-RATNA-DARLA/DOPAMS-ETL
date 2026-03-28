@@ -73,9 +73,9 @@ BASE_MEDIA_PATH = os.getenv(
     "/mnt/shared-etl-files",
 )
 
-# Files API rate limit: 10 requests per minute => ~1 request every 6 seconds
-FILES_API_MAX_RPM = 10
-SECONDS_PER_REQUEST = 60.0 / FILES_API_MAX_RPM  # 6.0 seconds
+# Files API rate limit: reduced to 5 requests per minute to avoid connection blocking
+FILES_API_MAX_RPM = 5
+SECONDS_PER_REQUEST = 60.0 / FILES_API_MAX_RPM  # 12.0 seconds
 
 # -----------------------------------------------------------------------------
 # Logging setup
@@ -433,7 +433,15 @@ class FilesMediaServerETL:
             SELECT source_type, source_field, file_id
             FROM {FILES_TABLE}
             WHERE {' AND '.join(conditions)}
-            ORDER BY created_at DESC NULLS LAST, source_type, file_id
+            ORDER BY 
+                CASE 
+                    WHEN source_type = 'crime' THEN 1
+                    WHEN source_type = 'chargesheets' THEN 2
+                    WHEN source_type = 'interrogation' THEN 3
+                    ELSE 4
+                END,
+                created_at DESC NULLS LAST, 
+                file_id
         """
         self.db_cursor.execute(sql)
 
@@ -507,34 +515,42 @@ class FilesMediaServerETL:
         """
         url = self.build_file_url(file_id)
         headers = {"x-api-key": API_CONFIG["api_key"]}
+        
+        # Retry logic for existence check to handle transient connection errors
+        for attempt in range(1, 4):
+            try:
+                response = requests.head(
+                    url,
+                    headers=headers,
+                    timeout=API_CONFIG.get("timeout", 30),
+                    allow_redirects=True
+                )
 
-        try:
-            response = requests.head(
-                url,
-                headers=headers,
-                timeout=API_CONFIG.get("timeout", 30),
-                allow_redirects=True
-            )
+                if response.status_code == 200:
+                    return (True, None)
+                elif response.status_code == 404:
+                    return (False, "HTTP 404 Not Found - File does not exist")
+                elif response.status_code == 400:
+                    return (False, "HTTP 400 Bad Request - File does not exist or invalid file_id")
+                elif response.status_code == 429:
+                    # Rate limited, wait and retry
+                    time.sleep(SECONDS_PER_REQUEST * attempt)
+                    continue
+                elif response.status_code in (401, 403):
+                    return (False, f"HTTP {response.status_code} - Authentication/Authorization failed")
+                else:
+                    return (True, None)
 
-            if response.status_code == 200:
-                return (True, None)
-            elif response.status_code == 404:
-                return (False, "HTTP 404 Not Found - File does not exist")
-            elif response.status_code == 400:
-                return (False, "HTTP 400 Bad Request - File does not exist or invalid file_id")
-            elif response.status_code == 429:
-                return (True, None)
-            elif response.status_code in (401, 403):
-                return (False, f"HTTP {response.status_code} - Authentication/Authorization failed")
-            else:
-                return (True, None)
-
-        except requests.exceptions.Timeout:
-            return (False, "Timeout while checking file existence")
-        except requests.exceptions.ConnectionError:
-            return (False, "Connection error while checking file existence")
-        except Exception as exc:
-            return (False, f"Error checking file: {str(exc)}")
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                if attempt < 3:
+                    logger.warning(f"⚠️  Existence check attempt {attempt} failed for {file_id}: {exc}. Retrying...")
+                    time.sleep(SECONDS_PER_REQUEST * attempt)
+                    continue
+                return (False, f"Connection error after {attempt} attempts: {str(exc)}")
+            except Exception as exc:
+                return (False, f"Error checking file: {str(exc)}")
+        
+        return (False, "Failed to check existence after retries")
 
     def download_single_file(
         self,
