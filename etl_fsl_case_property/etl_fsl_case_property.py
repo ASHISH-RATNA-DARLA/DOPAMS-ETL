@@ -8,7 +8,7 @@ import sys
 import time
 import requests
 import psycopg2
-from psycopg2.extras import execute_batch
+from psycopg2.extras import Json
 from datetime import datetime, timedelta, timezone
 from tqdm import tqdm
 import logging
@@ -62,6 +62,7 @@ else:
 FSL_CASE_PROPERTY_TABLE = TABLE_CONFIG.get('fsl_case_property', 'fsl_case_property')
 FSL_CASE_PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('fsl_case_property_media', 'fsl_case_property_media')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
+MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -150,6 +151,7 @@ class FSLCasePropertyETL:
             'total_records_no_change': 0,  # Records that exist but no changes needed
             'total_records_failed': 0,  # Records that failed to insert/update
             'total_records_failed_crime_id': 0,  # Records failed due to CRIME_ID not found
+            'total_records_failed_mo_id': 0,  # Records failed due to MO_ID not found for CRIME_ID
             'total_media_inserted': 0,  # Media files inserted
             'total_media_updated': 0,  # Media files updated
             'total_duplicates': 0,  # Duplicate records found within chunks
@@ -352,6 +354,8 @@ class FSLCasePropertyETL:
             'DATE_CUSTODY': 'date_custody',
             'DATE_SENT_TO_EXPERT': 'date_sent_to_expert',
             'COURT_ORDER_DATE': 'court_order_date',
+            'DATE_CREATED': 'date_created',
+            'DATE_MODIFIED': 'date_modified',
             'FORWARDING_THROUGH': 'forwarding_through',
             'COURT_NAME': 'court_name',
             'FSL_COURT_NAME': 'fsl_court_name',
@@ -372,9 +376,7 @@ class FSLCasePropertyETL:
             'RELEASE_ORDER_NO': 'release_order_no',
             'PLACE_CUSTODY': 'place_custody',
             'ASSIGN_CUSTODY': 'assign_custody',
-            'PROPERTY_RECEIVED_BACK': 'property_received_back',
-            'DATE_CREATED': 'date_created',
-            'DATE_MODIFIED': 'date_modified'
+            'PROPERTY_RECEIVED_BACK': 'property_received_back'
         }
         
         for api_field, db_column in field_mapping.items():
@@ -382,6 +384,63 @@ class FSLCasePropertyETL:
                 new_fields[api_field] = db_column
         
         return new_fields
+
+    def mo_id_exists_for_crime(self, crime_id: str, mo_id: Optional[str]) -> bool:
+        """Return True if mo_id is null/empty or found for the same crime in mo_seizures."""
+        if not mo_id:
+            return True
+        try:
+            self.db_cursor.execute(
+                f"""
+                SELECT 1
+                FROM {MO_SEIZURES_TABLE}
+                WHERE crime_id = %s
+                  AND mo_id = %s
+                LIMIT 1
+                """,
+                (crime_id, mo_id)
+            )
+            return self.db_cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error validating mo_id={mo_id} for crime_id={crime_id}: {e}")
+            self.db_conn.rollback()
+            return False
+
+    def normalize_media_items(self, media_items: List) -> List[Dict]:
+        """Normalize API MEDIA array/object/value into child-row payloads."""
+        normalized_items: List[Dict] = []
+
+        if media_items is None:
+            return normalized_items
+
+        if not isinstance(media_items, list):
+            media_items = [media_items]
+
+        for idx, media_item in enumerate(media_items):
+            item_payload = media_item if isinstance(media_item, dict) else {'value': media_item}
+
+            if isinstance(media_item, dict):
+                file_id_raw = (
+                    media_item.get('FILE_ID')
+                    or media_item.get('fileId')
+                    or media_item.get('file_id')
+                    or media_item.get('id')
+                    or media_item.get('ID')
+                )
+            else:
+                file_id_raw = media_item
+
+            if isinstance(file_id_raw, str):
+                file_id_raw = file_id_raw.strip()
+            file_id = file_id_raw if file_id_raw else None
+
+            normalized_items.append({
+                'media_index': idx,
+                'file_id': file_id,
+                'media_payload': item_payload
+            })
+
+        return normalized_items
     
     def add_column_to_table(self, column_name: str, column_type: str = 'TEXT'):
         """Add a new column to the fsl_case_property table."""
@@ -679,11 +738,20 @@ class FSLCasePropertyETL:
         
         # Helper function to parse boolean
         def parse_bool(value):
+            if value is None:
+                return None
             if isinstance(value, bool):
                 return value
             if isinstance(value, str):
-                return value.lower() in ('true', '1', 'yes', 't')
-            return bool(value) if value is not None else False
+                value = value.strip().lower()
+                if value in ('true', '1', 'yes', 't'):
+                    return True
+                if value in ('false', '0', 'no', 'f'):
+                    return False
+                return None
+            if isinstance(value, (int, float)):
+                return bool(value)
+            return None
         
         transformed = {
             'case_property_id': case_property_id,  # NOT NULL - required
@@ -709,7 +777,7 @@ class FSLCasePropertyETL:
             # FSL Information (all can be NULL)
             'fsl_no': normalize_value(case_property_raw.get('FSL_NO')),
             'fsl_request_id': normalize_value(case_property_raw.get('FSL_REQUEST_ID')),
-            'report_received': parse_bool(case_property_raw.get('REPORT_RECEIVED')) if case_property_raw.get('REPORT_RECEIVED') is not None else None,
+            'report_received': parse_bool(case_property_raw.get('REPORT_RECEIVED')),
             'opinion': normalize_value(case_property_raw.get('OPINION')),
             'opinion_furnished': normalize_value(case_property_raw.get('OPINION_FURNISHED')),
             'strength_of_evidence': normalize_value(case_property_raw.get('STRENGTH_OF_EVIDENCE')),
@@ -726,15 +794,15 @@ class FSLCasePropertyETL:
             'place_custody': normalize_value(case_property_raw.get('PLACE_CUSTODY')),
             'assign_custody': normalize_value(case_property_raw.get('ASSIGN_CUSTODY')),
             # Property Status (can be NULL)
-            'property_received_back': parse_bool(case_property_raw.get('PROPERTY_RECEIVED_BACK')) if case_property_raw.get('PROPERTY_RECEIVED_BACK') is not None else None,
+            'property_received_back': parse_bool(case_property_raw.get('PROPERTY_RECEIVED_BACK')),
             # Dates are always from API (never use CURRENT_TIMESTAMP)
             # If API doesn't provide dates, they will be NULL
             'date_created': normalize_value(case_property_raw.get('DATE_CREATED')),
             'date_modified': normalize_value(case_property_raw.get('DATE_MODIFIED')),
             # Store original CRIME_ID string for validation
             '_original_crime_id': crime_id_str,
-            # Store media files if present
-            '_media_files': case_property_raw.get('MEDIA_FILES', []) or case_property_raw.get('MEDIA', []) or []
+            # Store normalized media child rows from API snapshot
+            '_media_files': self.normalize_media_items(case_property_raw.get('MEDIA'))
         }
         logger.trace(f"Transformed case property: {json.dumps({k: v for k, v in transformed.items() if k not in ('_original_crime_id', '_media_files')}, indent=2, default=str)}")
         return transformed
@@ -894,22 +962,20 @@ class FSLCasePropertyETL:
         
         self.duplicates_log.flush()
     
-    def insert_media_files(self, case_property_id, media_files: List) -> int:
+    def insert_media_files(self, case_property_id, media_files: List[Dict]) -> int:
         """
-        Insert or update media files for a case property
-        Deletes existing media and inserts new ones (simple replace strategy)
+        Insert or update media files for a case property.
+        Uses replace strategy: delete existing rows then insert API snapshot rows.
         
         Args:
             case_property_id: MongoDB ObjectId (string) of the case property
-            media_files: List of media file IDs (can be strings, dicts with file_id, or UUIDs)
+            media_files: List of normalized media entries with media_index, file_id, media_payload
         
         Returns:
             Number of media files inserted
         """
-        if not case_property_id or not media_files:
+        if not case_property_id:
             return 0
-        
-        import uuid
         
         try:
             # Delete existing media files for this case property
@@ -919,40 +985,21 @@ class FSLCasePropertyETL:
             )
             
             inserted_count = 0
+            if not media_files:
+                return 0
             for media_item in media_files:
-                # Handle different media file formats
-                if isinstance(media_item, dict):
-                    file_id = media_item.get('file_id') or media_item.get('FILE_ID') or media_item.get('id') or media_item.get('ID')
-                    media_id_str = media_item.get('media_id') or media_item.get('MEDIA_ID')
-                elif isinstance(media_item, str):
-                    file_id = media_item if media_item.strip() else None
-                    media_id_str = None
-                else:
-                    file_id = str(media_item) if media_item else None
-                    media_id_str = None
-                
-                # Normalize file_id (empty strings to None - file_id can be NULL)
-                if file_id:
-                    file_id = file_id.strip() if isinstance(file_id, str) else file_id
-                    if file_id == '':
-                        file_id = None
-                
-                # Generate UUID for media_id (NOT NULL - always required)
-                if media_id_str:
-                    try:
-                        media_id = uuid.UUID(media_id_str) if isinstance(media_id_str, str) else media_id_str
-                    except (ValueError, TypeError):
-                        media_id = uuid.uuid4()
-                else:
-                    media_id = uuid.uuid4()
-                
-                # Convert UUID to string for psycopg2 (PostgreSQL will cast it to UUID type)
-                media_id_str_for_db = str(media_id)
-                
-                # Insert media file (file_id can be NULL, media_id is NOT NULL)
+                media_index = media_item.get('media_index', inserted_count)
+                file_id = media_item.get('file_id')
+                media_payload = media_item.get('media_payload')
+
+                # Insert media row with preserved payload snapshot
                 self.db_cursor.execute(
-                    f"INSERT INTO {FSL_CASE_PROPERTY_MEDIA_TABLE} (media_id, case_property_id, file_id) VALUES (%s::uuid, %s, %s)",
-                    (media_id_str_for_db, case_property_id, file_id)
+                    f"""
+                    INSERT INTO {FSL_CASE_PROPERTY_MEDIA_TABLE}
+                        (case_property_id, media_index, file_id, media_payload)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (case_property_id, media_index, file_id, Json(media_payload) if media_payload is not None else None)
                 )
                 inserted_count += 1
             
@@ -990,6 +1037,7 @@ class FSLCasePropertyETL:
         """
         case_property_id = case_property.get('case_property_id')
         crime_id = case_property.get('crime_id')
+        mo_id = case_property.get('mo_id')
         original_crime_id = case_property.get('_original_crime_id')
         media_files = case_property.get('_media_files', [])
         
@@ -1012,6 +1060,18 @@ class FSLCasePropertyETL:
             self.log_failed_record(case_property, reason, error_details)
             self.log_invalid_crime_id(case_property, original_crime_id or 'NULL', chunk_date_range)
             return False, reason
+
+        # Validate MO relationship logically (crime_id + mo_id) when mo_id is provided.
+        if mo_id and not self.mo_id_exists_for_crime(crime_id, mo_id):
+            reason = 'invalid_mo_id'
+            error_details = (
+                f"MO_ID {mo_id} not found in {MO_SEIZURES_TABLE} for CRIME_ID {crime_id}"
+            )
+            logger.warning(f"⚠️  {error_details}")
+            self.stats['total_records_failed'] += 1
+            self.stats['total_records_failed_mo_id'] += 1
+            self.log_failed_record(case_property, reason, error_details)
+            return False, reason
         
         try:
             logger.trace(f"Processing case property: case_property_id={case_property_id}, crime_id={crime_id}")
@@ -1026,13 +1086,8 @@ class FSLCasePropertyETL:
                     existing = None
                 
                 if existing:
-                    # Smart update: only update fields that need updating
-                    # Rules:
-                    # 1. If existing is NULL and new is not NULL → update
-                    # 2. If existing is not NULL and new is NULL → keep existing (don't update to NULL)
-                    # 3. If both are not NULL and different → update
-                    # 4. If both are not NULL and same → skip update (no change needed)
-                    # Special: date_created and date_modified always from API (even if NULL)
+                    # Source-of-truth overwrite model:
+                    # if API value differs from DB (including NULL transitions), update it.
                     
                     update_fields = []
                     update_values = []
@@ -1056,42 +1111,13 @@ class FSLCasePropertyETL:
                         existing_val = existing.get(db_field)
                         new_val = case_property.get(db_field)
                         
-                        # Special handling for date fields - always use API value
-                        if db_field in ('date_created', 'date_modified'):
-                            # Always update date fields from API (even if NULL)
-                            if existing_val != new_val:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                logger.trace(f"  Will update {db_field}: {existing_val} → {new_val} (API date)")
+                        if existing_val != new_val:
+                            update_fields.append(f"{db_field} = %s")
+                            update_values.append(new_val)
+                            changes.append(f"{db_field}: {existing_val} → {new_val}")
+                            logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
                         else:
-                            # Rule 1: Existing is NULL, new is not NULL → update
-                            if existing_val is None and new_val is not None:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: NULL → {new_val}")
-                                logger.trace(f"  Will update {db_field}: NULL → {new_val}")
-                            
-                            # Rule 2: Existing is not NULL, new is NULL → keep existing (skip)
-                            elif existing_val is not None and new_val is None:
-                                logger.trace(f"  Will keep existing {db_field}: {existing_val} (new value is NULL)")
-                                # Don't add to update - preserve existing value
-                            
-                            # Rule 3 & 4: Both are not NULL
-                            elif existing_val is not None and new_val is not None:
-                                # Rule 3: Different → update
-                                if existing_val != new_val:
-                                    update_fields.append(f"{db_field} = %s")
-                                    update_values.append(new_val)
-                                    changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                    logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
-                                # Rule 4: Same → skip (no change)
-                                else:
-                                    logger.trace(f"  No change for {db_field}: {existing_val}")
-                            
-                            # Both are NULL → no update needed
-                            else:
-                                logger.trace(f"  Both NULL for {db_field}, no update")
+                            logger.trace(f"  No change for {db_field}: {existing_val}")
                     
                     # Only update if there are changes
                     if update_fields:
@@ -1455,6 +1481,7 @@ class FSLCasePropertyETL:
         self.db_log.write(f"Total Records No Change: {self.stats['total_records_no_change']}\n")
         self.db_log.write(f"Total Records Failed: {self.stats['total_records_failed']}\n")
         self.db_log.write(f"  - Failed due to Invalid CRIME_ID: {self.stats['total_records_failed_crime_id']}\n")
+        self.db_log.write(f"  - Failed due to Invalid MO_ID: {self.stats['total_records_failed_mo_id']}\n")
         self.db_log.write(f"Total Records Duplicates (Processed): {self.stats['total_duplicates']}\n")
         self.db_log.write(f"Total Operations (Inserted + Updated + No Change): {self.stats['total_records_inserted'] + self.stats['total_records_updated'] + self.stats['total_records_no_change']}\n")
         db_total = self.stats.get('db_total_count', self.stats['total_records_inserted'])
@@ -1577,6 +1604,7 @@ class FSLCasePropertyETL:
             logger.info(f"  Total No Change:      {self.stats['total_records_no_change']}")
             logger.info(f"  Total Failed:         {self.stats['total_records_failed']}")
             logger.info(f"    - Invalid CRIME_ID:   {self.stats['total_records_failed_crime_id']}")
+            logger.info(f"    - Invalid MO_ID:      {self.stats['total_records_failed_mo_id']}")
             logger.info(f"  Total in DB:          {db_records_count}")
             logger.info(f"")
             logger.info(f"🔄 DUPLICATES:")

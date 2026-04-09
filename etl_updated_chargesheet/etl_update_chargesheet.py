@@ -62,7 +62,7 @@ else:
     logger.setLevel(log_level)
 
 # Target tables (allows redirecting ETL into test tables)
-UPDATE_CHARGESHEET_TABLE = TABLE_CONFIG.get('update_chargesheet', 'charge_sheet_updates')
+UPDATE_CHARGESHEET_TABLE = TABLE_CONFIG.get('update_chargesheets', TABLE_CONFIG.get('update_chargesheet', 'charge_sheet_updates'))
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
 # IST timezone offset (UTC+05:30)
@@ -143,6 +143,7 @@ class UpdatedChargesheetETL:
     
     def __init__(self):
         self._local = threading.local()
+        self._table_columns_cache = {}
         self.stats_lock = threading.Lock()
         self.log_lock = threading.Lock()
         self.schema_lock = threading.Lock()
@@ -658,6 +659,24 @@ class UpdatedChargesheetETL:
             except:
                 return value
         return value
+
+    def normalize_text_value(self, value):
+        """Normalize text values and convert blanks to NULL."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped if stripped else None
+        return value
+
+    def has_table_column(self, table_name: str, column_name: str) -> bool:
+        cache_key = (table_name, column_name)
+        if cache_key in self._table_columns_cache:
+            return self._table_columns_cache[cache_key]
+        columns = self.get_table_columns(table_name)
+        exists = column_name in columns
+        self._table_columns_cache[cache_key] = exists
+        return exists
     
     def transform_chargesheet(self, chargesheet_raw: Dict) -> Dict:
         """
@@ -672,7 +691,7 @@ class UpdatedChargesheetETL:
             Transformed chargesheet dict ready for database
         """
         # Get crime_id - API may use camelCase 'crimeId' or UPPERCASE 'CRIME_ID'
-        crime_id_str = chargesheet_raw.get('crimeId') or chargesheet_raw.get('CRIME_ID')
+        crime_id_str = self.normalize_text_value(chargesheet_raw.get('crimeId') or chargesheet_raw.get('CRIME_ID'))
         crime_id_valid = None
         
         if crime_id_str:
@@ -712,20 +731,23 @@ class UpdatedChargesheetETL:
             taken_on_file_court_case_no = None
         
         # Get update_charge_sheet_id (unique identifier)
-        update_id = chargesheet_raw.get('updateChargeSheetId') or chargesheet_raw.get('UPDATE_CHARGE_SHEET_ID') or chargesheet_raw.get('_id')
+        update_id = self.normalize_text_value(
+            chargesheet_raw.get('updateChargeSheetId') or chargesheet_raw.get('UPDATE_CHARGE_SHEET_ID') or chargesheet_raw.get('_id')
+        )
         
         transformed = {
             'update_charge_sheet_id': update_id,
             'crime_id': crime_id_valid,  # Validated crime_id (None if not found)
-            'charge_sheet_no': chargesheet_raw.get('chargeSheetNo') or chargesheet_raw.get('CHARGE_SHEET_NO'),
+            'charge_sheet_no': self.normalize_text_value(chargesheet_raw.get('chargeSheetNo') or chargesheet_raw.get('CHARGE_SHEET_NO')),
             'charge_sheet_date': self.normalize_date_value(chargesheet_raw.get('chargeSheetDate') or chargesheet_raw.get('CHARGE_SHEET_DATE')),
-            'charge_sheet_status': chargesheet_raw.get('chargeSheetStatus') or chargesheet_raw.get('CHARGE_SHEET_STATUS'),
+            'charge_sheet_status': self.normalize_text_value(chargesheet_raw.get('chargeSheetStatus') or chargesheet_raw.get('CHARGE_SHEET_STATUS')),
             # Flattened taken on file fields
             'taken_on_file_date': self.normalize_date_value(taken_on_file_date),
-            'taken_on_file_case_type': taken_on_file_case_type,
-            'taken_on_file_court_case_no': taken_on_file_court_case_no,
+            'taken_on_file_case_type': self.normalize_text_value(taken_on_file_case_type),
+            'taken_on_file_court_case_no': self.normalize_text_value(taken_on_file_court_case_no),
             # Date created (only field available, no date_modified)
             'date_created': self.normalize_date_value(chargesheet_raw.get('dateCreated') or chargesheet_raw.get('DATE_CREATED')),
+            'date_modified': self.normalize_date_value(chargesheet_raw.get('dateModified') or chargesheet_raw.get('DATE_MODIFIED')),
             # Store original CRIME_ID string for validation
             '_original_crime_id': crime_id_str
         }
@@ -765,7 +787,7 @@ class UpdatedChargesheetETL:
             return None
         query = f"""
             SELECT update_charge_sheet_id, crime_id, charge_sheet_no, charge_sheet_date, charge_sheet_status,
-                   taken_on_file_date, taken_on_file_case_type, taken_on_file_court_case_no, date_created
+                   taken_on_file_date, taken_on_file_case_type, taken_on_file_court_case_no, date_created{', date_modified' if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified') else ''}
             FROM {UPDATE_CHARGESHEET_TABLE}
             WHERE update_charge_sheet_id = %s
         """
@@ -793,7 +815,8 @@ class UpdatedChargesheetETL:
                 'taken_on_file_date': row[5],
                 'taken_on_file_case_type': row[6],
                 'taken_on_file_court_case_no': row[7],
-                'date_created': row[8]
+                'date_created': row[8],
+                'date_modified': row[9] if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified') else None
             }
         return None
     
@@ -967,13 +990,16 @@ class UpdatedChargesheetETL:
                         ('taken_on_file_court_case_no', 'taken_on_file_court_case_no'),
                         ('date_created', 'date_created')  # Always from API
                     ]
+
+                    if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified'):
+                        fields_to_check.append(('date_modified', 'date_modified'))
                     
                     for db_field, _ in fields_to_check:
                         existing_val = existing.get(db_field)
                         new_val = chargesheet.get(db_field)
                         
                         # Special handling for date_created - always use API value
-                        if db_field == 'date_created':
+                        if db_field in ('date_created', 'date_modified'):
                             # Always update date_created from API (even if NULL)
                             if existing_val != new_val:
                                 update_fields.append(f"{db_field} = %s")
@@ -1042,12 +1068,12 @@ class UpdatedChargesheetETL:
                 insert_query = f"""
                     INSERT INTO {UPDATE_CHARGESHEET_TABLE} (
                         update_charge_sheet_id, crime_id, charge_sheet_no, charge_sheet_date, charge_sheet_status,
-                        taken_on_file_date, taken_on_file_case_type, taken_on_file_court_case_no, date_created
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            taken_on_file_date, taken_on_file_case_type, taken_on_file_court_case_no, date_created{', date_modified' if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified') else ''}
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s{', %s' if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified') else ''}
                     )
                 """
-                self._cursor.execute(insert_query, (
+                    insert_values = (
                     update_charge_sheet_id,
                     crime_id,
                     chargesheet.get('charge_sheet_no'),
@@ -1057,7 +1083,10 @@ class UpdatedChargesheetETL:
                     chargesheet.get('taken_on_file_case_type'),
                     chargesheet.get('taken_on_file_court_case_no'),
                     chargesheet.get('date_created')
-                ))
+                )
+                    if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified'):
+                        insert_values = insert_values + (chargesheet.get('date_modified'),)
+                    self._cursor.execute(insert_query, insert_values)
                 with self.stats_lock:
                     self.stats['total_chargesheets_inserted'] += 1
                 logger.debug(f"Inserted chargesheet: update_charge_sheet_id={update_charge_sheet_id}, crime_id={crime_id}")

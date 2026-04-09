@@ -146,7 +146,10 @@ TABLE_CONFIG = {
     'chargesheet_files': _table_name('CHARGESHEET_FILES_TABLE', 'chargesheet_files'),
     'chargesheet_acts': _table_name('CHARGESHEET_ACTS_TABLE', 'chargesheet_acts'),
     'chargesheet_accused': _table_name('CHARGESHEET_ACCUSED_TABLE', 'chargesheet_accused'),
+    'chargesheet_media': _table_name('CHARGESHEET_MEDIA_TABLE', 'chargesheet_media'),
+    'chargesheet_acts_sections': _table_name('CHARGESHEET_ACTS_SECTIONS_TABLE', 'chargesheet_acts_sections'),
     'update_chargesheet': _table_name('UPDATE_CHARGESHEET_TABLE', 'charge_sheet_updates'),
+    'update_chargesheets': _table_name('UPDATE_CHARGESHEETS_TABLE', 'charge_sheet_updates'),
     # Interrogation Reports (IR) tables
     'interrogation_reports': _table_name('IR_TABLE', 'interrogation_reports'),
     'ir_family_history': _table_name('IR_FAMILY_HISTORY_TABLE', 'ir_family_history'),

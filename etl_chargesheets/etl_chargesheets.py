@@ -68,6 +68,8 @@ CHARGESHEETS_TABLE = TABLE_CONFIG.get('chargesheets', 'chargesheets')
 CHARGESHEET_FILES_TABLE = TABLE_CONFIG.get('chargesheet_files', 'chargesheet_files')
 CHARGESHEET_ACTS_TABLE = TABLE_CONFIG.get('chargesheet_acts', 'chargesheet_acts')
 CHARGESHEET_ACCUSED_TABLE = TABLE_CONFIG.get('chargesheet_accused', 'chargesheet_accused')
+CHARGESHEET_MEDIA_TABLE = TABLE_CONFIG.get('chargesheet_media', 'chargesheet_media')
+CHARGESHEET_ACTS_SECTIONS_TABLE = TABLE_CONFIG.get('chargesheet_acts_sections', 'chargesheet_acts_sections')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
 # IST timezone offset (UTC+05:30)
@@ -156,6 +158,7 @@ class ChargesheetsETL:
     
     def __init__(self):
         self._local = threading.local()
+        self._table_columns_cache = {}
         self.stats_lock = threading.Lock()
         self.log_lock = threading.Lock()
         self.schema_lock = threading.Lock()
@@ -730,6 +733,34 @@ class ChargesheetsETL:
         if isinstance(value, str):
             return value.lower() in ('true', '1', 'yes', 'on')
         return bool(value)
+
+    def normalize_text_value(self, value):
+        """Normalize text values from API and convert blanks to NULL."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped if stripped else None
+        return value
+
+    def has_table_column(self, table_name: str, column_name: str) -> bool:
+        """Return whether a table has a given column, cached per run."""
+        cache_key = (table_name, column_name)
+        if cache_key in self._table_columns_cache:
+            return self._table_columns_cache[cache_key]
+        columns = self.get_table_columns(table_name)
+        exists = column_name in columns
+        self._table_columns_cache[cache_key] = exists
+        return exists
+
+    def normalize_sections(self, section_value):
+        """Return a list of non-empty section strings."""
+        if section_value is None:
+            return []
+        if isinstance(section_value, list):
+            return [self.normalize_text_value(item) for item in section_value if self.normalize_text_value(item) is not None]
+        normalized = self.normalize_text_value(section_value)
+        return [normalized] if normalized is not None else []
     
     def transform_chargesheet(self, chargesheet_raw: Dict) -> Dict:
         """
@@ -745,10 +776,16 @@ class ChargesheetsETL:
             Transformed chargesheet dict ready for database
         """
         logger.trace(f"Transforming chargesheet: crimeId={chargesheet_raw.get('crimeId')}")
+
+        charge_sheet_id = self.normalize_text_value(
+            chargesheet_raw.get('chargeSheetId')
+            or chargesheet_raw.get('CHARGE_SHEET_ID')
+            or chargesheet_raw.get('_id')
+        )
         
         # Get crime_id from API and validate it exists in crimes table
         # API uses camelCase: 'crimeId'
-        crime_id_str = chargesheet_raw.get('crimeId')
+        crime_id_str = self.normalize_text_value(chargesheet_raw.get('crimeId') or chargesheet_raw.get('CRIME_ID'))
         crime_id_valid = None
         
         if crime_id_str:
@@ -766,17 +803,31 @@ class ChargesheetsETL:
                 self._conn.rollback()
         
         # Handle uploadChargeSheet.fileId for files
-        upload_charge_sheet = chargesheet_raw.get('uploadChargeSheet', {})
-        file_id = upload_charge_sheet.get('fileId') if isinstance(upload_charge_sheet, dict) else None
-        files_list = [{'fileId': file_id}] if file_id else []
+        upload_charge_sheet = chargesheet_raw.get('uploadChargeSheet')
+        files_list = []
+        if isinstance(upload_charge_sheet, dict):
+            file_id = self.normalize_text_value(upload_charge_sheet.get('fileId') or upload_charge_sheet.get('FILE_ID'))
+            files_list = [{'fileId': file_id}] if file_id else []
+        elif isinstance(upload_charge_sheet, list):
+            for item in upload_charge_sheet:
+                if isinstance(item, dict):
+                    file_id = self.normalize_text_value(item.get('fileId') or item.get('FILE_ID'))
+                else:
+                    file_id = self.normalize_text_value(item)
+                if file_id:
+                    files_list.append({'fileId': file_id})
+        elif upload_charge_sheet:
+            file_id = self.normalize_text_value(upload_charge_sheet)
+            files_list = [{'fileId': file_id}] if file_id else []
         
         transformed = {
+            'charge_sheet_id': charge_sheet_id,
             'crime_id': crime_id_valid,  # Validated crime_id (None if not found in crimes table)
-            'chargesheet_no': chargesheet_raw.get('chargeSheetNo'),
-            'chargesheet_no_icjs': chargesheet_raw.get('chargeSheetNoForIcjs'),
+            'chargesheet_no': self.normalize_text_value(chargesheet_raw.get('chargeSheetNo')),
+            'chargesheet_no_icjs': self.normalize_text_value(chargesheet_raw.get('chargeSheetNoForIcjs')),
             'chargesheet_date': self.normalize_date_value(chargesheet_raw.get('chargeSheetDate')),
-            'chargesheet_type': chargesheet_raw.get('chargeSheetType'),
-            'court_name': chargesheet_raw.get('courtName'),
+            'chargesheet_type': self.normalize_text_value(chargesheet_raw.get('chargeSheetType')),
+            'court_name': self.normalize_text_value(chargesheet_raw.get('courtName')),
             'is_ccl': self.normalize_boolean_value(chargesheet_raw.get('isCcl')),
             'is_esigned': self.normalize_boolean_value(chargesheet_raw.get('isEsigned')),
             'date_created': self.normalize_date_value(chargesheet_raw.get('dateCreated')),
@@ -791,13 +842,17 @@ class ChargesheetsETL:
         logger.trace(f"Transformed chargesheet: {json.dumps({k: v for k, v in transformed.items() if k != '_original_crime_id'}, indent=2, default=str)}")
         return transformed
     
-    def chargesheet_exists(self, crime_id: str, chargesheet_no: Optional[str], chargesheet_date: Optional[datetime]) -> bool:
+    def chargesheet_exists(self, charge_sheet_id: Optional[str], crime_id: str, chargesheet_no: Optional[str], chargesheet_date: Optional[datetime]) -> bool:
         """Check if chargesheet already exists in database"""
-        logger.trace(f"Checking if chargesheet exists: crime_id={crime_id}, chargesheet_no={chargesheet_no}, chargesheet_date={chargesheet_date}")
-        
-        # Use crime_id + chargesheet_no + chargesheet_date as unique identifier
-        # If chargesheet_no is None, use only crime_id + chargesheet_date
-        if chargesheet_no:
+        logger.trace(f"Checking if chargesheet exists: charge_sheet_id={charge_sheet_id}, crime_id={crime_id}, chargesheet_no={chargesheet_no}, chargesheet_date={chargesheet_date}")
+
+        if charge_sheet_id and self.has_table_column(CHARGESHEETS_TABLE, 'charge_sheet_id'):
+            query = f"""
+                SELECT 1 FROM {CHARGESHEETS_TABLE}
+                WHERE charge_sheet_id = %s
+            """
+            self._cursor.execute(query, (charge_sheet_id,))
+        elif chargesheet_no:
             query = f"""
                 SELECT 1 FROM {CHARGESHEETS_TABLE} 
                 WHERE crime_id = %s AND chargesheet_no = %s AND chargesheet_date = %s
@@ -814,9 +869,19 @@ class ChargesheetsETL:
         logger.trace(f"Chargesheet exists: {exists}")
         return exists
     
-    def get_existing_chargesheet(self, crime_id: str, chargesheet_no: Optional[str], chargesheet_date: Optional[datetime]) -> Optional[Dict]:
+    def get_existing_chargesheet(self, charge_sheet_id: Optional[str], crime_id: str, chargesheet_no: Optional[str], chargesheet_date: Optional[datetime]) -> Optional[Dict]:
         """Get existing chargesheet record from database"""
-        if chargesheet_no:
+        has_api_key = self.has_table_column(CHARGESHEETS_TABLE, 'charge_sheet_id')
+
+        if charge_sheet_id and has_api_key:
+            query = f"""
+                SELECT id, charge_sheet_id, crime_id, chargesheet_no, chargesheet_no_icjs, chargesheet_date, chargesheet_type,
+                       court_name, is_ccl, is_esigned, date_created, date_modified
+                FROM {CHARGESHEETS_TABLE}
+                WHERE charge_sheet_id = %s
+            """
+            self._cursor.execute(query, (charge_sheet_id,))
+        elif chargesheet_no:
             query = f"""
                 SELECT id, crime_id, chargesheet_no, chargesheet_no_icjs, chargesheet_date, chargesheet_type,
                        court_name, is_ccl, is_esigned, date_created, date_modified
@@ -835,18 +900,43 @@ class ChargesheetsETL:
         
         row = self._cursor.fetchone()
         if row:
+            if has_api_key:
+                charge_sheet_id_value = row[1]
+                crime_id_index = 2
+                chargesheet_no_index = 3
+                chargesheet_no_icjs_index = 4
+                chargesheet_date_index = 5
+                chargesheet_type_index = 6
+                court_name_index = 7
+                is_ccl_index = 8
+                is_esigned_index = 9
+                date_created_index = 10
+                date_modified_index = 11
+            else:
+                charge_sheet_id_value = None
+                crime_id_index = 1
+                chargesheet_no_index = 2
+                chargesheet_no_icjs_index = 3
+                chargesheet_date_index = 4
+                chargesheet_type_index = 5
+                court_name_index = 6
+                is_ccl_index = 7
+                is_esigned_index = 8
+                date_created_index = 9
+                date_modified_index = 10
             return {
                 'id': row[0],
-                'crime_id': row[1],
-                'chargesheet_no': row[2],
-                'chargesheet_no_icjs': row[3],
-                'chargesheet_date': row[4],
-                'chargesheet_type': row[5],
-                'court_name': row[6],
-                'is_ccl': row[7],
-                'is_esigned': row[8],
-                'date_created': row[9],
-                'date_modified': row[10]
+                'charge_sheet_id': charge_sheet_id_value,
+                'crime_id': row[crime_id_index],
+                'chargesheet_no': row[chargesheet_no_index],
+                'chargesheet_no_icjs': row[chargesheet_no_icjs_index],
+                'chargesheet_date': row[chargesheet_date_index],
+                'chargesheet_type': row[chargesheet_type_index],
+                'court_name': row[court_name_index],
+                'is_ccl': row[is_ccl_index],
+                'is_esigned': row[is_esigned_index],
+                'date_created': row[date_created_index],
+                'date_modified': row[date_modified_index]
             }
         return None
     
@@ -941,6 +1031,7 @@ class ChargesheetsETL:
             Tuple of (success: bool, operation: str, chargesheet_id: str) where operation is 'inserted', 'updated', 'no_change', or 'skipped'
             chargesheet_id is returned as string for psycopg2 compatibility
         """
+        charge_sheet_id = chargesheet.get('charge_sheet_id')
         crime_id = chargesheet.get('crime_id')
         chargesheet_no = chargesheet.get('chargesheet_no')
         chargesheet_date = chargesheet.get('chargesheet_date')
@@ -959,12 +1050,12 @@ class ChargesheetsETL:
             return False, reason, None
         
         try:
-            logger.trace(f"Processing chargesheet: crime_id={crime_id}, chargesheet_no={chargesheet_no}, chargesheet_date={chargesheet_date}")
+            logger.trace(f"Processing chargesheet: charge_sheet_id={charge_sheet_id}, crime_id={crime_id}, chargesheet_no={chargesheet_no}, chargesheet_date={chargesheet_date}")
             
             # Check if chargesheet already exists
-            if self.chargesheet_exists(crime_id, chargesheet_no, chargesheet_date):
+            if self.chargesheet_exists(charge_sheet_id, crime_id, chargesheet_no, chargesheet_date):
                 # Get existing record to compare
-                existing = self.get_existing_chargesheet(crime_id, chargesheet_no, chargesheet_date)
+                existing = self.get_existing_chargesheet(charge_sheet_id, crime_id, chargesheet_no, chargesheet_date)
                 if not existing:
                     logger.warning(f"⚠️  Chargesheet exists check returned True but fetch returned None")
                     existing = None
@@ -992,13 +1083,21 @@ class ChargesheetsETL:
                         ('date_created', 'DATE_CREATED'),  # Always from API
                         ('date_modified', 'DATE_MODIFIED')  # Always from API
                     ]
+
+                    if self.has_table_column(CHARGESHEETS_TABLE, 'charge_sheet_id'):
+                        fields_to_check.insert(0, ('charge_sheet_id', 'charge_sheet_id'))
                     
                     for db_field, api_field in fields_to_check:
                         existing_val = existing.get(db_field)
                         new_val = chargesheet.get(db_field)
                         
+                        if db_field == 'charge_sheet_id':
+                            if existing_val != new_val:
+                                update_fields.append(f"{db_field} = %s")
+                                update_values.append(new_val)
+                                changes.append(f"{db_field}: {existing_val} → {new_val}")
                         # Special handling for date fields - always use API value
-                        if db_field in ('date_created', 'date_modified'):
+                        elif db_field in ('date_created', 'date_modified'):
                             if existing_val != new_val:
                                 update_fields.append(f"{db_field} = %s")
                                 update_values.append(new_val)
@@ -1029,9 +1128,9 @@ class ChargesheetsETL:
                         update_query = f"""
                             UPDATE {CHARGESHEETS_TABLE} SET
                                 {', '.join(update_fields)}
-                            WHERE id = %s
+                            WHERE {'charge_sheet_id = %s' if self.has_table_column(CHARGESHEETS_TABLE, 'charge_sheet_id') and charge_sheet_id else 'id = %s'}
                         """
-                        update_values.append(chargesheet_id)  # chargesheet_id is already a string
+                        update_values.append(charge_sheet_id if self.has_table_column(CHARGESHEETS_TABLE, 'charge_sheet_id') and charge_sheet_id else chargesheet_id)
                         self._cursor.execute(update_query, tuple(update_values))
                         with self.stats_lock:
                             self.stats['total_chargesheets_updated'] += 1
@@ -1056,17 +1155,14 @@ class ChargesheetsETL:
                 logger.trace(f"Inserting new chargesheet: crime_id={crime_id}, chargesheet_no={chargesheet_no}")
                 chargesheet_id = str(uuid.uuid4())  # Convert UUID to string for psycopg2
                 
-                insert_query = f"""
-                    INSERT INTO {CHARGESHEETS_TABLE} (
-                        id, crime_id, chargesheet_no, chargesheet_no_icjs, chargesheet_date,
-                        chargesheet_type, court_name, is_ccl, is_esigned,
-                        date_created, date_modified
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                self._cursor.execute(insert_query, (
-                    chargesheet_id,  # chargesheet_id is now a string
+                has_api_key = self.has_table_column(CHARGESHEETS_TABLE, 'charge_sheet_id')
+                insert_columns = [
+                    'id', 'crime_id', 'chargesheet_no', 'chargesheet_no_icjs', 'chargesheet_date',
+                    'chargesheet_type', 'court_name', 'is_ccl', 'is_esigned',
+                    'date_created', 'date_modified'
+                ]
+                insert_values = [
+                    chargesheet_id,
                     crime_id,
                     chargesheet_no,
                     chargesheet.get('chargesheet_no_icjs'),
@@ -1077,7 +1173,16 @@ class ChargesheetsETL:
                     chargesheet.get('is_esigned'),
                     chargesheet.get('date_created'),
                     chargesheet.get('date_modified')
-                ))
+                ]
+                if has_api_key:
+                    insert_columns.insert(1, 'charge_sheet_id')
+                    insert_values.insert(1, charge_sheet_id)
+
+                insert_query = f"""
+                    INSERT INTO {CHARGESHEETS_TABLE} ({', '.join(insert_columns)})
+                    VALUES ({', '.join(['%s'] * len(insert_columns))})
+                """
+                self._cursor.execute(insert_query, tuple(insert_values))
                 with self.stats_lock:
                     self.stats['total_chargesheets_inserted'] += 1
                 logger.debug(f"Inserted chargesheet: id={chargesheet_id}")
@@ -1110,198 +1215,182 @@ class ChargesheetsETL:
     
     def process_related_tables(self, chargesheet_id: str, chargesheet: Dict):
         """Process related tables: files, acts, accused"""
+        charge_sheet_api_id = chargesheet.get('charge_sheet_id')
+
+        self.delete_related_tables(chargesheet_id, charge_sheet_api_id)
+
         # Process files
         files = chargesheet.get('_files', [])
         for file_data in files:
-            self.insert_chargesheet_file(chargesheet_id, file_data)
+            self.insert_chargesheet_file(chargesheet_id, charge_sheet_api_id, file_data)
         
         # Process acts
         acts = chargesheet.get('_acts', [])
-        for act_data in acts:
-            self.insert_chargesheet_act(chargesheet_id, act_data)
+        for act_index, act_data in enumerate(acts):
+            self.insert_chargesheet_act(chargesheet_id, charge_sheet_api_id, act_index, act_data)
         
         # Process accused
         accused_list = chargesheet.get('_accused', [])
         for accused_data in accused_list:
-            self.insert_chargesheet_accused(chargesheet_id, accused_data)
+            self.insert_chargesheet_accused(chargesheet_id, charge_sheet_api_id, accused_data)
+
+    def delete_related_tables(self, chargesheet_id: str, charge_sheet_api_id: Optional[str]):
+        """Remove stale child rows before reloading the current API snapshot."""
+        try:
+            self._cursor.execute(f"DELETE FROM {CHARGESHEET_FILES_TABLE} WHERE chargesheet_id = %s", (chargesheet_id,))
+            self._cursor.execute(f"DELETE FROM {CHARGESHEET_ACTS_TABLE} WHERE chargesheet_id = %s", (chargesheet_id,))
+            self._cursor.execute(f"DELETE FROM {CHARGESHEET_ACCUSED_TABLE} WHERE chargesheet_id = %s", (chargesheet_id,))
+            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_MEDIA_TABLE, 'chargesheet_id'):
+                self._cursor.execute(f"DELETE FROM {CHARGESHEET_MEDIA_TABLE} WHERE chargesheet_id = %s", (charge_sheet_api_id,))
+            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_ACTS_SECTIONS_TABLE, 'chargesheet_id'):
+                self._cursor.execute(f"DELETE FROM {CHARGESHEET_ACTS_SECTIONS_TABLE} WHERE chargesheet_id = %s", (charge_sheet_api_id,))
+            self._conn.commit()
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to clear existing chargesheet children: {e}")
+            self._conn.rollback()
     
-    def insert_chargesheet_file(self, chargesheet_id: str, file_data: Dict):
+    def insert_chargesheet_file(self, chargesheet_id: str, charge_sheet_api_id: Optional[str], file_data: Dict):
         """Insert or update chargesheet file"""
         try:
             # API uses camelCase: 'fileId'
-            file_id = file_data.get('fileId') or file_data.get('FILE_ID')
+            file_id = self.normalize_text_value(file_data.get('fileId') or file_data.get('FILE_ID'))
             created_at = self.normalize_date_value(file_data.get('createdAt') or file_data.get('CREATED_AT'))
-            
-            # Check if file already exists
-            query = f"""
-                SELECT id FROM {CHARGESHEET_FILES_TABLE}
-                WHERE chargesheet_id = %s AND file_id = %s
-            """
-            self._cursor.execute(query, (chargesheet_id, file_id))
-            existing = self._cursor.fetchone()
-            
-            if existing:
-                update_query = f"""
-                    UPDATE {CHARGESHEET_FILES_TABLE} SET
-                        created_at = %s
-                    WHERE id = %s
-                """
-                self._cursor.execute(update_query, (created_at, existing[0]))
-                with self.stats_lock:
-                    self.stats['total_files_updated'] += 1
-            else:
-                insert_query = f"""
-                    INSERT INTO {CHARGESHEET_FILES_TABLE} (
-                        id, chargesheet_id, file_id, created_at
-                    ) VALUES (
-                        %s, %s, %s, %s
-                    )
-                """
-                self._cursor.execute(insert_query, (
+
+            self._cursor.execute(f"""
+                INSERT INTO {CHARGESHEET_FILES_TABLE} (
+                    id, chargesheet_id, file_id, created_at
+                ) VALUES (%s, %s, %s, %s)
+            """, (str(uuid.uuid4()), chargesheet_id, file_id, created_at))
+            with self.stats_lock:
+                self.stats['total_files_inserted'] += 1
+
+            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_MEDIA_TABLE, 'chargesheet_id'):
+                media_payload = json.dumps(file_data, ensure_ascii=False, default=str)
+                self._cursor.execute(f"""
+                    INSERT INTO {CHARGESHEET_MEDIA_TABLE} (
+                        id, chargesheet_id, media_index, file_id, media_payload, created_at, date_modified
+                    ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
+                """, (
                     str(uuid.uuid4()),
-                    chargesheet_id,
+                    charge_sheet_api_id,
+                    0,
                     file_id,
-                    created_at
+                    media_payload,
+                    created_at,
+                    created_at,
                 ))
-                with self.stats_lock:
-                    self.stats['total_files_inserted'] += 1
             
             self._conn.commit()
         except Exception as e:
             logger.error(f"❌ Error processing chargesheet file: {e}")
             self._conn.rollback()
     
-    def insert_chargesheet_act(self, chargesheet_id: str, act_data: Dict):
+    def insert_chargesheet_act(self, chargesheet_id: str, charge_sheet_api_id: Optional[str], act_index: int, act_data: Dict):
         """Insert or update chargesheet act"""
         try:
             # API uses camelCase and section is an array
-            section_array = act_data.get('section', [])
-            # Convert array to string (join with comma if array, otherwise use as-is)
-            if isinstance(section_array, list):
-                if section_array:
-                    # Join array elements with comma, truncate to 50 chars if needed (VARCHAR(50) limit)
-                    section = ', '.join(str(s) for s in section_array)[:50]
-                else:
-                    section = act_data.get('SECTION', '')
-            elif section_array:
-                # Already a string or other type
-                section = str(section_array)[:50]
+            section_values = self.normalize_sections(act_data.get('section') or act_data.get('SECTION'))
+            if section_values:
+                section = ', '.join(section_values)
             else:
-                # Fallback to uppercase field name
-                section = act_data.get('SECTION', '')[:50]
-            
-            act_description = act_data.get('actDescription') or act_data.get('ACT_DESCRIPTION')
+                section = None
+
+            act_description = self.normalize_text_value(act_data.get('actDescription') or act_data.get('ACT_DESCRIPTION'))
             rw_required = self.normalize_boolean_value(act_data.get('rwRequired') or act_data.get('RW_REQUIRED'))
-            section_description = act_data.get('sectionDescription') or act_data.get('SECTION_DESCRIPTION')
-            grave_particulars = act_data.get('graveParticulars') or act_data.get('GRAVE_PARTICULARS')
+            section_description = self.normalize_text_value(act_data.get('sectionDescription') or act_data.get('SECTION_DESCRIPTION'))
+            grave_particulars = self.normalize_text_value(act_data.get('graveParticulars') or act_data.get('GRAVE_PARTICULARS'))
             created_at = self.normalize_date_value(act_data.get('createdAt') or act_data.get('CREATED_AT'))
-            
-            # Skip if section is empty
+
             if not section:
                 logger.warning(f"⚠️  Skipping act with empty section for chargesheet_id={chargesheet_id}")
                 return
-            
-            query = f"""
-                SELECT id FROM {CHARGESHEET_ACTS_TABLE}
-                WHERE chargesheet_id = %s AND section = %s
-            """
-            self._cursor.execute(query, (chargesheet_id, section))
-            existing = self._cursor.fetchone()
-            
-            if existing:
-                update_query = f"""
-                    UPDATE {CHARGESHEET_ACTS_TABLE} SET
-                        act_description = %s, rw_required = %s, section_description = %s,
-                        grave_particulars = %s, created_at = %s
-                    WHERE id = %s
-                """
-                self._cursor.execute(update_query, (
-                    act_description, rw_required, section_description,
-                    grave_particulars, created_at, existing[0]
-                ))
-                with self.stats_lock:
-                    self.stats['total_acts_updated'] += 1
-            else:
-                insert_query = f"""
-                    INSERT INTO {CHARGESHEET_ACTS_TABLE} (
-                        id, chargesheet_id, act_description, section, rw_required,
-                        section_description, grave_particulars, created_at
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                self._cursor.execute(insert_query, (
-                    str(uuid.uuid4()),
-                    chargesheet_id,
-                    act_description,
-                    section,
-                    rw_required,
-                    section_description,
-                    grave_particulars,
-                    created_at
-                ))
-                with self.stats_lock:
-                    self.stats['total_acts_inserted'] += 1
+
+            self._cursor.execute(f"""
+                INSERT INTO {CHARGESHEET_ACTS_TABLE} (
+                    id, chargesheet_id, act_description, section, rw_required,
+                    section_description, grave_particulars, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()),
+                chargesheet_id,
+                act_description,
+                section,
+                rw_required,
+                section_description,
+                grave_particulars,
+                created_at,
+            ))
+            with self.stats_lock:
+                self.stats['total_acts_inserted'] += 1
+
+            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_ACTS_SECTIONS_TABLE, 'chargesheet_id'):
+                for section_index, section_item in enumerate(section_values or [None]):
+                    if section_item is None:
+                        continue
+                    self._cursor.execute(f"""
+                        INSERT INTO {CHARGESHEET_ACTS_SECTIONS_TABLE} (
+                            id, chargesheet_id, act_index, section_index, act_description, section,
+                            rw_required, section_description, grave_particulars, created_at, date_modified
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        str(uuid.uuid4()),
+                        charge_sheet_api_id,
+                        act_index,
+                        section_index,
+                        act_description,
+                        section_item,
+                        rw_required,
+                        section_description,
+                        grave_particulars,
+                        created_at,
+                        created_at,
+                    ))
             
             self._conn.commit()
         except Exception as e:
             logger.error(f"❌ Error processing chargesheet act: {e}")
             self._conn.rollback()
     
-    def insert_chargesheet_accused(self, chargesheet_id: str, accused_data: Dict):
+    def insert_chargesheet_accused(self, chargesheet_id: str, charge_sheet_api_id: Optional[str], accused_data: Dict):
         """Insert or update chargesheet accused"""
         try:
             # API uses camelCase
-            accused_person_id = accused_data.get('accusedPersonId') or accused_data.get('ACCUSED_PERSON_ID')
-            charge_status = accused_data.get('chargeStatus') or accused_data.get('CHARGE_STATUS')
-            requested_for_nbw = self.normalize_boolean_value(accused_data.get('requestedForNBW') or accused_data.get('REQUESTED_FOR_NBW'))
-            reason_for_no_charge = accused_data.get('reasonForNoCharge') or accused_data.get('REASON_FOR_NO_CHARGE')
+            accused_person_id = self.normalize_text_value(accused_data.get('accusedPersonId') or accused_data.get('ACCUSED_PERSON_ID'))
+            charge_status = self.normalize_text_value(accused_data.get('chargeStatus') or accused_data.get('CHARGE_STATUS'))
+            requested_for_nbw = self.normalize_boolean_value(
+                accused_data.get('requestedForNBW') if 'requestedForNBW' in accused_data else accused_data.get('REQUESTED_FOR_NBW')
+            )
+            reason_for_no_charge = self.normalize_text_value(accused_data.get('reasonForNoCharge') or accused_data.get('REASON_FOR_NO_CHARGE'))
             # API doesn't seem to have isPersonMasterPresent, default to True
-            is_person_master_present = self.normalize_boolean_value(accused_data.get('isPersonMasterPresent') or accused_data.get('IS_PERSON_MASTER_PRESENT', True))
+            is_person_master_present = self.normalize_boolean_value(
+                accused_data.get('isPersonMasterPresent') if 'isPersonMasterPresent' in accused_data else accused_data.get('IS_PERSON_MASTER_PRESENT', True)
+            )
             created_at = self.normalize_date_value(accused_data.get('createdAt') or accused_data.get('CREATED_AT'))
-            
-            # Check if accused already exists (by chargesheet_id + accused_person_id)
-            query = f"""
-                SELECT id FROM {CHARGESHEET_ACCUSED_TABLE}
-                WHERE chargesheet_id = %s AND accused_person_id = %s
-            """
-            self._cursor.execute(query, (chargesheet_id, accused_person_id))
-            existing = self._cursor.fetchone()
-            
-            if existing:
-                update_query = f"""
-                    UPDATE {CHARGESHEET_ACCUSED_TABLE} SET
-                        charge_status = %s, requested_for_nbw = %s, reason_for_no_charge = %s,
-                        is_person_master_present = %s, created_at = %s
-                    WHERE id = %s
-                """
-                self._cursor.execute(update_query, (
-                    charge_status, requested_for_nbw, reason_for_no_charge,
-                    is_person_master_present, created_at, existing[0]
-                ))
-                with self.stats_lock:
-                    self.stats['total_accused_updated'] += 1
-            else:
-                insert_query = f"""
-                    INSERT INTO {CHARGESHEET_ACCUSED_TABLE} (
-                        id, chargesheet_id, accused_person_id, charge_status, requested_for_nbw,
-                        reason_for_no_charge, is_person_master_present, created_at
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                self._cursor.execute(insert_query, (
-                    str(uuid.uuid4()),
-                    chargesheet_id,
-                    accused_person_id,
-                    charge_status,
-                    requested_for_nbw,
-                    reason_for_no_charge,
-                    is_person_master_present,
-                    created_at
-                ))
-                with self.stats_lock:
-                    self.stats['total_accused_inserted'] += 1
+
+            if not accused_person_id:
+                logger.warning(f"⚠️  Skipping accused row with empty accusedPersonId for chargesheet_id={chargesheet_id}")
+                return
+
+            self._cursor.execute(f"""
+                INSERT INTO {CHARGESHEET_ACCUSED_TABLE} (
+                    id, chargesheet_id, accused_person_id, charge_status, requested_for_nbw,
+                    reason_for_no_charge, is_person_master_present, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()),
+                chargesheet_id,
+                accused_person_id,
+                charge_status,
+                requested_for_nbw,
+                reason_for_no_charge,
+                is_person_master_present,
+                created_at,
+            ))
+            with self.stats_lock:
+                self.stats['total_accused_inserted'] += 1
+
+            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_ACCUSED_TABLE, 'chargesheet_id'):
+                pass
             
             self._conn.commit()
         except Exception as e:
@@ -1313,6 +1402,7 @@ class ChargesheetsETL:
         """Worker method to process a single chargesheet record in a thread"""
         try:
             chargesheet = self.transform_chargesheet(chargesheet_record)
+            charge_sheet_id = chargesheet.get('charge_sheet_id')
             crime_id = chargesheet.get('crime_id')
             chargesheet_no = chargesheet.get('chargesheet_no')
             chargesheet_date = chargesheet.get('chargesheet_date')
@@ -1337,7 +1427,7 @@ class ChargesheetsETL:
                 self.log_invalid_crime_id(chargesheet, original_crime_id, chunk_range)
                 return
 
-            unique_key = f"{crime_id}:{chargesheet_no}:{chargesheet_date}"
+            unique_key = charge_sheet_id or f"{crime_id}:{chargesheet_no}:{chargesheet_date}"
 
             with chunk_lock:
                 if unique_key in chunk_state['seen_keys']:
