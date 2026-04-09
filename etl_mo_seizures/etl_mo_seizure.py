@@ -69,6 +69,7 @@ else:
 
 # Target tables (allows redirecting ETL into test tables)
 MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
+MO_SEIZURE_MEDIA_TABLE = TABLE_CONFIG.get('mo_seizure_media', 'mo_seizure_media')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
 # IST timezone offset (UTC+05:30)
@@ -421,6 +422,8 @@ class MoSeizureETL:
                 # Determine column type based on field name
                 if column_name == 'seized_at':
                     column_type = 'TIMESTAMPTZ'
+                elif column_name in ('pos_latitude', 'pos_longitude'):
+                    column_type = 'DOUBLE PRECISION'
                 elif column_name in ('mo_seizure_id', 'crime_id', 'seq_no', 'mo_id'):
                     column_type = 'VARCHAR(50)'  # Matches primary key and foreign key types
                 elif column_name == 'type':
@@ -671,10 +674,77 @@ class MoSeizureETL:
         # Try to parse as datetime if it's a string
         if isinstance(value, str):
             try:
-                return parse_iso_date(value)
+                return parse_iso_date(value.strip())
             except:
                 return value
         return value
+
+    def normalize_text_value(self, value):
+        """Normalize optional text values by trimming whitespace and converting blanks to NULL."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped if stripped else None
+        return value
+
+    def normalize_coordinate_value(self, value):
+        """Normalize coordinate values to float for storage as numeric types."""
+        normalized = self.normalize_text_value(value)
+        if normalized is None:
+            return None
+        try:
+            return float(normalized)
+        except (TypeError, ValueError):
+            logger.warning(f"⚠️  Invalid coordinate value '{normalized}' - storing NULL")
+            return None
+
+    def normalize_media_entries(self, seizure_raw: Dict) -> List[Dict[str, Optional[str]]]:
+        """Normalize media fields into one row per media entry."""
+        def as_list(value):
+            if value is None:
+                return []
+            if isinstance(value, list):
+                return [self.normalize_text_value(item) for item in value]
+            return [self.normalize_text_value(value)]
+
+        file_ids = as_list(seizure_raw.get('MO_MEDIA_FILE_ID'))
+        media_urls = as_list(seizure_raw.get('MO_MEDIA_URL'))
+        media_names = as_list(seizure_raw.get('MO_MEDIA_NAME'))
+
+        if not any(item is not None for item in file_ids + media_urls + media_names):
+            return []
+
+        entry_count = max(len(file_ids), len(media_urls), len(media_names))
+        media_entries = []
+
+        for index in range(entry_count):
+            media_file_id = file_ids[index] if index < len(file_ids) else (file_ids[-1] if file_ids else None)
+            media_url = media_urls[index] if index < len(media_urls) else (media_urls[-1] if media_urls else None)
+            media_name = media_names[index] if index < len(media_names) else (media_names[-1] if media_names else None)
+
+            if media_file_id is None and media_url is None and media_name is None:
+                continue
+
+            media_entries.append({
+                'media_index': index,
+                'media_file_id': media_file_id,
+                'media_url': media_url,
+                'media_name': media_name,
+            })
+
+        return media_entries
+
+    def get_primary_media_entry(self, media_entries: List[Dict]) -> Dict[str, Optional[str]]:
+        """Return the first media entry for backward-compatible parent columns."""
+        if media_entries:
+            return media_entries[0]
+        return {
+            'media_index': 0,
+            'media_file_id': None,
+            'media_url': None,
+            'media_name': None,
+        }
     
     def transform_seizure(self, seizure_raw: Dict, cursor) -> Dict:
         """
@@ -714,35 +784,39 @@ class MoSeizureETL:
         seized_at = None
         if seized_date_str:
             seized_at = self.normalize_date_value(seized_date_str)
+
+        media_entries = self.normalize_media_entries(seizure_raw)
+        primary_media = self.get_primary_media_entry(media_entries)
         
         transformed = {
-            'mo_seizure_id': seizure_raw.get('MO_SEIZURE_ID'),  # PRIMARY KEY
+            'mo_seizure_id': self.normalize_text_value(seizure_raw.get('MO_SEIZURE_ID')),  # PRIMARY KEY
             'crime_id': crime_id_valid,  # VARCHAR foreign key to crimes.crime_id
-            'seq_no': seizure_raw.get('SEQ_NO'),
-            'mo_id': seizure_raw.get('MO_ID'),
-            'type': seizure_raw.get('TYPE'),
-            'sub_type': seizure_raw.get('SUB_TYPE'),
-            'description': seizure_raw.get('DESCRIPTION'),
-            'seized_from': seizure_raw.get('SEIZED_FROM'),
+            'seq_no': self.normalize_text_value(seizure_raw.get('SEQ_NO')),
+            'mo_id': self.normalize_text_value(seizure_raw.get('MO_ID')),
+            'type': self.normalize_text_value(seizure_raw.get('TYPE')),
+            'sub_type': self.normalize_text_value(seizure_raw.get('SUB_TYPE')),
+            'description': self.normalize_text_value(seizure_raw.get('DESCRIPTION')),
+            'seized_from': self.normalize_text_value(seizure_raw.get('SEIZED_FROM')),
             'seized_at': seized_at,  # TIMESTAMPTZ (parsed from SEIZED_DATE)
-            'seized_by': seizure_raw.get('SEIZED_BY'),
-            'strength_of_evidence': seizure_raw.get('STRENGTH_OF_EVIDENCE'),
-            'pos_address1': seizure_raw.get('POS_ADDRESS1'),
-            'pos_address2': seizure_raw.get('POS_ADDRESS2'),
-            'pos_city': seizure_raw.get('POS_CITY'),
-            'pos_district': seizure_raw.get('POS_DISTRICT'),
-            'pos_pincode': seizure_raw.get('POS_PINCODE'),
-            'pos_landmark': seizure_raw.get('POS_LANDMARK'),
-            'pos_description': seizure_raw.get('POS_DESCRIPTION'),
-            'pos_latitude': seizure_raw.get('POS_LATITUDE'),
-            'pos_longitude': seizure_raw.get('POS_LONGITUDE'),
-            'mo_media_url': seizure_raw.get('MO_MEDIA_URL'),
-            'mo_media_name': seizure_raw.get('MO_MEDIA_NAME'),
-            'mo_media_file_id': seizure_raw.get('MO_MEDIA_FILE_ID'),
+            'seized_by': self.normalize_text_value(seizure_raw.get('SEIZED_BY')),
+            'strength_of_evidence': self.normalize_text_value(seizure_raw.get('STRENGTH_OF_EVIDENCE')),
+            'pos_address1': self.normalize_text_value(seizure_raw.get('POS_ADDRESS1')),
+            'pos_address2': self.normalize_text_value(seizure_raw.get('POS_ADDRESS2')),
+            'pos_city': self.normalize_text_value(seizure_raw.get('POS_CITY')),
+            'pos_district': self.normalize_text_value(seizure_raw.get('POS_DISTRICT')),
+            'pos_pincode': self.normalize_text_value(seizure_raw.get('POS_PINCODE')),
+            'pos_landmark': self.normalize_text_value(seizure_raw.get('POS_LANDMARK')),
+            'pos_description': self.normalize_text_value(seizure_raw.get('POS_DESCRIPTION')),
+            'pos_latitude': self.normalize_coordinate_value(seizure_raw.get('POS_LATITUDE')),
+            'pos_longitude': self.normalize_coordinate_value(seizure_raw.get('POS_LONGITUDE')),
+            'mo_media_url': primary_media.get('media_url'),
+            'mo_media_name': primary_media.get('media_name'),
+            'mo_media_file_id': primary_media.get('media_file_id'),
             # Dates are always from API (never use CURRENT_TIMESTAMP)
             # Normalize to convert empty strings to None
             'date_created': self.normalize_date_value(seizure_raw.get('DATE_CREATED')),  # TIMESTAMPTZ
             'date_modified': self.normalize_date_value(seizure_raw.get('DATE_MODIFIED')),  # TIMESTAMPTZ
+            'media_entries': media_entries,
             # Store original CRIME_ID string for validation
             '_original_crime_id': crime_id_str
         }
@@ -804,6 +878,75 @@ class MoSeizureETL:
                 'date_modified': row[24]
             }
         return None
+
+    def get_existing_seizure_media(self, mo_seizure_id: str, cursor) -> List[Dict]:
+        """Get existing media rows for a seizure."""
+        query = f"""
+            SELECT media_index, media_file_id, media_url, media_name
+            FROM {MO_SEIZURE_MEDIA_TABLE}
+            WHERE mo_seizure_id = %s
+            ORDER BY media_index ASC, id ASC
+        """
+        try:
+            cursor.execute(query, (mo_seizure_id,))
+            rows = cursor.fetchall()
+        except Exception as exc:
+            logger.warning(f"⚠️  Could not read {MO_SEIZURE_MEDIA_TABLE} for {mo_seizure_id}: {exc}")
+            return []
+
+        return [
+            {
+                'media_index': row[0],
+                'media_file_id': row[1],
+                'media_url': row[2],
+                'media_name': row[3],
+            }
+            for row in rows
+        ]
+
+    def media_entries_equal(self, existing_entries: List[Dict], new_entries: List[Dict]) -> bool:
+        """Compare normalized media entries."""
+        def normalize(entries):
+            return [
+                (
+                    entry.get('media_index'),
+                    self.normalize_text_value(entry.get('media_file_id')),
+                    self.normalize_text_value(entry.get('media_url')),
+                    self.normalize_text_value(entry.get('media_name')),
+                )
+                for entry in entries
+            ]
+
+        return normalize(existing_entries) == normalize(new_entries)
+
+    def sync_seizure_media(self, mo_seizure_id: str, media_entries: List[Dict], conn, cursor):
+        """Replace media rows for a seizure with the normalized source-of-truth set."""
+        delete_query = f"DELETE FROM {MO_SEIZURE_MEDIA_TABLE} WHERE mo_seizure_id = %s"
+        cursor.execute(delete_query, (mo_seizure_id,))
+
+        if not media_entries:
+            return
+
+        insert_query = f"""
+            INSERT INTO {MO_SEIZURE_MEDIA_TABLE} (
+                mo_seizure_id,
+                media_index,
+                media_file_id,
+                media_url,
+                media_name
+            ) VALUES (%s, %s, %s, %s, %s)
+        """
+        media_values = [
+            (
+                mo_seizure_id,
+                entry.get('media_index', 0),
+                entry.get('media_file_id'),
+                entry.get('media_url'),
+                entry.get('media_name'),
+            )
+            for entry in media_entries
+        ]
+        execute_batch(cursor, insert_query, media_values, page_size=100)
     
     def log_failed_record(self, seizure: Dict, reason: str, error_details: str = ""):
         """Log a failed record to the failed records log file"""
@@ -908,6 +1051,8 @@ class MoSeizureETL:
         mo_seizure_id = seizure.get('mo_seizure_id')
         crime_id = seizure.get('crime_id')
         original_crime_id = seizure.get('_original_crime_id')
+        media_entries = seizure.get('media_entries', []) or []
+        primary_media = self.get_primary_media_entry(media_entries)
         
         # Validate crime_id exists in crimes table
         if not crime_id:
@@ -943,99 +1088,64 @@ class MoSeizureETL:
                     existing = None
                 
                 if existing:
-                    # Smart update: only update fields that need updating
-                    # Rules:
-                    # 1. If existing is NULL and new is not NULL → update
-                    # 2. If existing is not NULL and new is NULL → keep existing (don't update to NULL)
-                    # 3. If both are not NULL and different → update
-                    # 4. If both are not NULL and same → skip update (no change needed)
-                    # Special: date_created and date_modified always from API (even if NULL)
-                    
+                    existing_media = self.get_existing_seizure_media(mo_seizure_id, cursor)
+
+                    desired_values = {
+                        'crime_id': seizure.get('crime_id'),
+                        'seq_no': seizure.get('seq_no'),
+                        'mo_id': seizure.get('mo_id'),
+                        'type': seizure.get('type'),
+                        'sub_type': seizure.get('sub_type'),
+                        'description': seizure.get('description'),
+                        'seized_from': seizure.get('seized_from'),
+                        'seized_at': seizure.get('seized_at'),
+                        'seized_by': seizure.get('seized_by'),
+                        'strength_of_evidence': seizure.get('strength_of_evidence'),
+                        'pos_address1': seizure.get('pos_address1'),
+                        'pos_address2': seizure.get('pos_address2'),
+                        'pos_city': seizure.get('pos_city'),
+                        'pos_district': seizure.get('pos_district'),
+                        'pos_pincode': seizure.get('pos_pincode'),
+                        'pos_landmark': seizure.get('pos_landmark'),
+                        'pos_description': seizure.get('pos_description'),
+                        'pos_latitude': seizure.get('pos_latitude'),
+                        'pos_longitude': seizure.get('pos_longitude'),
+                        'mo_media_url': primary_media.get('media_url'),
+                        'mo_media_name': primary_media.get('media_name'),
+                        'mo_media_file_id': primary_media.get('media_file_id'),
+                        'date_created': seizure.get('date_created'),
+                        'date_modified': seizure.get('date_modified'),
+                    }
+
                     update_fields = []
                     update_values = []
                     changes = []
-                    
-                    # Define all fields to check (excluding primary key: mo_seizure_id)
-                    fields_to_check = [
-                        ('crime_id', 'CRIME_ID'),
-                        ('seq_no', 'SEQ_NO'),
-                        ('mo_id', 'MO_ID'),
-                        ('type', 'TYPE'),
-                        ('sub_type', 'SUB_TYPE'),
-                        ('description', 'DESCRIPTION'),
-                        ('seized_from', 'SEIZED_FROM'),
-                        ('seized_at', 'SEIZED_DATE'),
-                        ('seized_by', 'SEIZED_BY'),
-                        ('strength_of_evidence', 'STRENGTH_OF_EVIDENCE'),
-                        ('pos_address1', 'POS_ADDRESS1'),
-                        ('pos_address2', 'POS_ADDRESS2'),
-                        ('pos_city', 'POS_CITY'),
-                        ('pos_district', 'POS_DISTRICT'),
-                        ('pos_pincode', 'POS_PINCODE'),
-                        ('pos_landmark', 'POS_LANDMARK'),
-                        ('pos_description', 'POS_DESCRIPTION'),
-                        ('pos_latitude', 'POS_LATITUDE'),
-                        ('pos_longitude', 'POS_LONGITUDE'),
-                        ('mo_media_url', 'MO_MEDIA_URL'),
-                        ('mo_media_name', 'MO_MEDIA_NAME'),
-                        ('mo_media_file_id', 'MO_MEDIA_FILE_ID'),
-                        ('date_created', 'DATE_CREATED'),  # Always from API
-                        ('date_modified', 'DATE_MODIFIED')  # Always from API
-                    ]
-                    
-                    for db_field, api_field in fields_to_check:
+
+                    for db_field, new_val in desired_values.items():
                         existing_val = existing.get(db_field)
-                        new_val = seizure.get(db_field)
-                        
-                        # Special handling for date fields - always use API value
-                        if db_field in ('date_created', 'date_modified'):
-                            # Always update date fields from API (even if NULL)
-                            if existing_val != new_val:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                logger.trace(f"  Will update {db_field}: {existing_val} → {new_val} (API date)")
-                        else:
-                            # Rule 1: Existing is NULL, new is not NULL → update
-                            if existing_val is None and new_val is not None:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: NULL → {new_val}")
-                                logger.trace(f"  Will update {db_field}: NULL → {new_val}")
-                            
-                            # Rule 2: Existing is not NULL, new is NULL → keep existing (skip)
-                            elif existing_val is not None and new_val is None:
-                                logger.trace(f"  Will keep existing {db_field}: {existing_val} (new value is NULL)")
-                                # Don't add to update - preserve existing value
-                            
-                            # Rule 3 & 4: Both are not NULL
-                            elif existing_val is not None and new_val is not None:
-                                # Rule 3: Different → update
-                                if existing_val != new_val:
-                                    update_fields.append(f"{db_field} = %s")
-                                    update_values.append(new_val)
-                                    changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                    logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
-                                # Rule 4: Same → skip (no change)
-                                else:
-                                    logger.trace(f"  No change for {db_field}: {existing_val}")
-                            
-                            # Both are NULL → no update needed
-                            else:
-                                logger.trace(f"  Both NULL for {db_field}, no update")
-                    
-                    # Only update if there are changes
-                    if update_fields:
+                        if existing_val != new_val:
+                            update_fields.append(f"{db_field} = %s")
+                            update_values.append(new_val)
+                            changes.append(f"{db_field}: {existing_val} → {new_val}")
+                            logger.trace(f"  Will overwrite {db_field}: {existing_val} → {new_val}")
+
+                    media_changed = not self.media_entries_equal(existing_media, media_entries)
+
+                    # Only update if there are changes in the parent row or media set
+                    if update_fields or media_changed:
                         update_query = f"""
                             UPDATE {MO_SEIZURES_TABLE} SET
                                 {', '.join(update_fields)}
                             WHERE mo_seizure_id = %s
                         """
-                        update_values.append(mo_seizure_id)
-                        cursor.execute(update_query, tuple(update_values))
+                        if update_fields:
+                            update_values.append(mo_seizure_id)
+                            cursor.execute(update_query, tuple(update_values))
+                        if media_changed:
+                            self.sync_seizure_media(mo_seizure_id, media_entries, conn, cursor)
                         with self.stats_lock:
                             self.stats['total_seizures_updated'] += 1
-                        logger.debug(f"Updated seizure: mo_seizure_id={mo_seizure_id} ({len(changes)} fields changed)")
+                        logger.debug(f"Updated seizure: mo_seizure_id={mo_seizure_id} ({len(changes)} fields changed, media_changed={media_changed})")
                         logger.trace(f"Changes: {', '.join(changes)}")
                         conn.commit()
                         logger.trace(f"Transaction committed for updated seizure")
@@ -1092,6 +1202,8 @@ class MoSeizureETL:
                     seizure.get('date_created'),  # From API (or NULL)
                     seizure.get('date_modified')  # From API (or NULL)
                 ))
+                if media_entries:
+                    self.sync_seizure_media(mo_seizure_id, media_entries, conn, cursor)
                 with self.stats_lock:
                     self.stats['total_seizures_inserted'] += 1
                 logger.debug(f"Inserted seizure: mo_seizure_id={mo_seizure_id}")

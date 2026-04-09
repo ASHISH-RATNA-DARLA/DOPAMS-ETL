@@ -109,6 +109,36 @@ def parse_input_file(file_path):
         
     return processes
 
+def validate_mo_seizures_wiring(processes, config_path):
+    """
+    Hardening check to ensure top-level orchestrator explicitly includes
+    the corrected MO Seizures ingestion module.
+
+    This does not block execution, but emits a clear warning so accidental
+    reliance on files-only extraction is avoided.
+    """
+    has_mo_seizure_loader = False
+
+    for process in processes:
+        commands = process.get('commands', [])
+        command_blob = " ".join(commands).lower()
+
+        # Corrected row-level MO Seizures loader path
+        if 'etl_mo_seizure.py' in command_blob and 'etl_mo_seizures' in command_blob:
+            has_mo_seizure_loader = True
+            break
+
+    if has_mo_seizure_loader:
+        logger.info(
+            "✓ Orchestration hardening: corrected MO Seizures loader is explicitly wired "
+            f"in {config_path}"
+        )
+    else:
+        logger.warning(
+            "⚠ Orchestration hardening: corrected MO Seizures loader was NOT found in "
+            f"{config_path}. Ensure config contains 'cd .../etl_mo_seizures' + 'python3 etl_mo_seizure.py'."
+        )
+
 def execute_process(process):
     """
     Executes a single process block.
@@ -171,6 +201,7 @@ def main():
     logger.info(f"Reading configuration from: {args.config}")
 
     processes = parse_input_file(args.config)
+    validate_mo_seizures_wiring(processes, args.config)
     
     if not processes:
         logger.warning("No process blocks found in configuration file.")
