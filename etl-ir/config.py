@@ -99,6 +99,15 @@ TABLE_CONFIG = {
     'ir_media': _table_name('IR_MEDIA_TABLE', 'ir_media'),
     'ir_interrogation_report_refs': _table_name('IR_INTERROGATION_REPORT_REFS_TABLE', 'ir_interrogation_report_refs'),
     'ir_dopams_links': _table_name('IR_DOPAMS_LINKS_TABLE', 'ir_dopams_links'),
+    'ir_indulgance_before_offence': _table_name('IR_INDULGANCE_BEFORE_OFFENCE_TABLE', 'ir_indulgance_before_offence'),
+    'ir_property_disposal': _table_name('IR_PROPERTY_DISPOSAL_TABLE', 'ir_property_disposal'),
+    'ir_regularization_transit_warrants': _table_name('IR_REGULARIZATION_TRANSIT_WARRANTS_TABLE', 'ir_regularization_transit_warrants'),
+    'ir_execution_of_nbw': _table_name('IR_EXECUTION_OF_NBW_TABLE', 'ir_execution_of_nbw'),
+    'ir_pending_nbw': _table_name('IR_PENDING_NBW_TABLE', 'ir_pending_nbw'),
+    'ir_sureties': _table_name('IR_SURETIES_TABLE', 'ir_sureties'),
+    'ir_jail_sentence': _table_name('IR_JAIL_SENTENCE_TABLE', 'ir_jail_sentence'),
+    'ir_new_gang_formation': _table_name('IR_NEW_GANG_FORMATION_TABLE', 'ir_new_gang_formation'),
+    'ir_conviction_acquittal': _table_name('IR_CONVICTION_ACQUITTAL_TABLE', 'ir_conviction_acquittal'),
 }
 
 

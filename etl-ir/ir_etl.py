@@ -66,6 +66,15 @@ IR_SHELTER_TABLE = TABLE_CONFIG.get('ir_shelter', 'ir_shelter')
 IR_MEDIA_TABLE = TABLE_CONFIG.get('ir_media', 'ir_media')
 IR_INTERROGATION_REPORT_REFS_TABLE = TABLE_CONFIG.get('ir_interrogation_report_refs', 'ir_interrogation_report_refs')
 IR_DOPAMS_LINKS_TABLE = TABLE_CONFIG.get('ir_dopams_links', 'ir_dopams_links')
+IR_INDULGANCE_BEFORE_OFFENCE_TABLE = TABLE_CONFIG.get('ir_indulgance_before_offence', 'ir_indulgance_before_offence')
+IR_PROPERTY_DISPOSAL_TABLE = TABLE_CONFIG.get('ir_property_disposal', 'ir_property_disposal')
+IR_REGULARIZATION_TRANSIT_WARRANTS_TABLE = TABLE_CONFIG.get('ir_regularization_transit_warrants', 'ir_regularization_transit_warrants')
+IR_EXECUTION_OF_NBW_TABLE = TABLE_CONFIG.get('ir_execution_of_nbw', 'ir_execution_of_nbw')
+IR_PENDING_NBW_TABLE = TABLE_CONFIG.get('ir_pending_nbw', 'ir_pending_nbw')
+IR_SURETIES_TABLE = TABLE_CONFIG.get('ir_sureties', 'ir_sureties')
+IR_JAIL_SENTENCE_TABLE = TABLE_CONFIG.get('ir_jail_sentence', 'ir_jail_sentence')
+IR_NEW_GANG_FORMATION_TABLE = TABLE_CONFIG.get('ir_new_gang_formation', 'ir_new_gang_formation')
+IR_CONVICTION_ACQUITTAL_TABLE = TABLE_CONFIG.get('ir_conviction_acquittal', 'ir_conviction_acquittal')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 PENDING_FK_TABLE = 'ir_pending_fk'
 
@@ -85,16 +94,15 @@ def get_yesterday_end_ist() -> str:
 
 
 def parse_timestamp(ts_string: Optional[str]) -> Optional[datetime]:
-    """Parse ISO timestamp string to datetime object (timezone-naive)."""
+    """Parse ISO timestamp string and normalize timezone-aware values to UTC."""
     if not ts_string:
         return None
     try:
         ts_string = ts_string.replace('Z', '+00:00')
         dt = datetime.fromisoformat(ts_string)
-        # Convert to timezone-naive (remove timezone info)
         if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
-        return dt
+            dt = dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=None)
     except Exception as e:
         logger.debug(f"Failed to parse timestamp '{ts_string}': {e}")
         return None
@@ -196,6 +204,70 @@ class InterrogationReportsETL:
         except Exception as e:
             logger.error(f"❌ Failed to create pending FK table: {e}")
             raise
+
+    def ensure_schema_exists(self):
+        """Apply schema migrations from INTERROGATION_REPORTS_FIX.sql (9 new tables + fixes)."""
+        try:
+            # Get the directory where this script lives
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            sql_file_path = os.path.join(script_dir, '..', 'INTERROGATION_REPORTS_FIX.sql')
+            
+            # If not found, try alternate paths
+            if not os.path.exists(sql_file_path):
+                sql_file_path = os.path.join(os.getcwd(), 'INTERROGATION_REPORTS_FIX.sql')
+            
+            if not os.path.exists(sql_file_path):
+                logger.warning(f"⚠️  Schema migration file not found at {sql_file_path}. Skipping schema setup.")
+                logger.warning("    Ensure INTERROGATION_REPORTS_FIX.sql exists or run: psql < INTERROGATION_REPORTS_FIX.sql manually")
+                return True  # Non-fatal; schema may already exist
+            
+            logger.info(f"📋 Applying schema migrations from {sql_file_path}...")
+            
+            # Read the SQL file
+            with open(sql_file_path, 'r') as f:
+                sql_content = f.read()
+            
+            # Split by semicolon, filter comments and empty statements
+            statements = []
+            current_stmt = []
+            for line in sql_content.split('\n'):
+                # Skip comment lines
+                if line.strip().startswith('--'):
+                    continue
+                current_stmt.append(line)
+                if ';' in line:
+                    stmt = '\n'.join(current_stmt).strip()
+                    if stmt and not stmt.startswith('--'):
+                        statements.append(stmt)
+                    current_stmt = []
+            
+            if current_stmt:
+                stmt = '\n'.join(current_stmt).strip()
+                if stmt and not stmt.startswith('--'):
+                    statements.append(stmt)
+            
+            # Execute each statement
+            executed_count = 0
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    for stmt in statements:
+                        if stmt.strip():
+                            try:
+                                cur.execute(stmt)
+                                executed_count += 1
+                            except Exception as e:
+                                # Log but continue (CREATE IF NOT EXISTS shouldn't fail)
+                                if 'already exists' not in str(e).lower():
+                                    logger.debug(f"  Statement execution note: {e}")
+                    conn.commit()
+            
+            logger.info(f"✅ Schema migrations applied: {executed_count} statements executed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to ensure schema exists: {e}")
+            # Non-fatal - tables may already exist
+            return True
 
     def load_crime_ids(self) -> bool:
         """Load all crime IDs into an in-memory set for O(1) lookups."""
@@ -561,9 +633,29 @@ class InterrogationReportsETL:
         return None
 
     def get_existing_ir_record(self, ir_id: str, cursor) -> Optional[Dict[str, Any]]:
-        """Get existing IR record from database."""
+        """Get existing IR record from database with a snapshot used for fallback comparison."""
         cursor.execute(
-            f"SELECT interrogation_report_id, date_created, date_modified FROM {IR_TABLE} WHERE interrogation_report_id = %s",
+            f"""
+            SELECT
+                interrogation_report_id,
+                date_created,
+                date_modified,
+                crime_id,
+                person_id,
+                other_regular_habits,
+                other_indulgence_before_offence,
+                time_since_modus_operandi,
+                is_in_jail,
+                is_on_bail,
+                is_absconding,
+                is_normal_life,
+                is_rehabilitated,
+                is_dead,
+                is_facing_trial,
+                date_of_bail
+            FROM {IR_TABLE}
+            WHERE interrogation_report_id = %s
+            """,
             (ir_id,)
         )
         result = cursor.fetchone()
@@ -571,31 +663,82 @@ class InterrogationReportsETL:
             return {
                 'interrogation_report_id': result[0],
                 'date_created': result[1],
-                'date_modified': result[2]
+                'date_modified': result[2],
+                'snapshot': {
+                    'crime_id': result[3],
+                    'person_id': result[4],
+                    'other_regular_habits': result[5],
+                    'other_indulgence_before_offence': result[6],
+                    'time_since_modus_operandi': result[7],
+                    'is_in_jail': result[8],
+                    'is_on_bail': result[9],
+                    'is_absconding': result[10],
+                    'is_normal_life': result[11],
+                    'is_rehabilitated': result[12],
+                    'is_dead': result[13],
+                    'is_facing_trial': result[14],
+                    'date_of_bail': result[15]
+                }
             }
         return None
 
-    def should_update_record(self, existing: Dict[str, Any], new_date_modified: Optional[datetime]) -> bool:
-        """Determine if record should be updated based on DATE_MODIFIED."""
+    def _build_main_snapshot_from_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a comparable snapshot from API payload for fallback updates when DATE_MODIFIED is missing."""
+        pw = record.get('PRESENT_WHEREABOUTS', {})
+        in_jail = pw.get('IN_JAIL', {})
+        on_bail = pw.get('ON_BAIL', {})
+        absconding = pw.get('ABSCONDING', {})
+        normal_life = pw.get('NORMAL_LIFE', {})
+        rehabilitated = pw.get('REHABILITATED', {})
+        dead = pw.get('DEAD', {})
+        facing_trial = pw.get('FACING_TRIAL', {})
+
+        return {
+            'crime_id': record.get('CRIME_ID'),
+            'person_id': normalize_person_id(record.get('PERSON_ID')),
+            'other_regular_habits': record.get('OTHER_REGULAR_HABITS'),
+            'other_indulgence_before_offence': (
+                record.get('OTHER_INDULGENCE_BEFORE_OFFENCE')
+                if record.get('OTHER_INDULGENCE_BEFORE_OFFENCE') is not None
+                else record.get('OTHER_INDULGANCE_BEFORE_OFFENCE')
+            ),
+            'time_since_modus_operandi': record.get('TIME_SINCE_MODUS_OPERANDI'),
+            'is_in_jail': in_jail.get('IS_IN_JAIL'),
+            'is_on_bail': on_bail.get('IS_ON_BAIL'),
+            'is_absconding': absconding.get('IS_ABSCONDING'),
+            'is_normal_life': normal_life.get('IS_NORMAL_LIFE'),
+            'is_rehabilitated': rehabilitated.get('IS_REHABILITATED'),
+            'is_dead': dead.get('IS_DEAD'),
+            'is_facing_trial': facing_trial.get('IS_FACING_TRIAL'),
+            'date_of_bail': parse_date(on_bail.get('DATE_OF_BAIL')) if on_bail.get('DATE_OF_BAIL') else None
+        }
+
+    def should_update_record(self, existing: Dict[str, Any], record: Dict[str, Any]) -> bool:
+        """Determine if record should be updated using DATE_MODIFIED or fallback field-diff when missing."""
         if not existing:
-            return False  # New record, will be inserted
-        
-        if not new_date_modified:
-            return False  # No new modified date, don't update
-        
-        existing_modified = existing.get('date_modified')
-        if not existing_modified:
-            return True  # No existing modified date, update
-        
-        # Normalize both timestamps to timezone-naive for comparison
-        if isinstance(existing_modified, datetime):
-            if existing_modified.tzinfo is not None:
+            return False
+
+        new_date_modified = parse_timestamp(record.get('DATE_MODIFIED'))
+        if new_date_modified:
+            existing_modified = existing.get('date_modified')
+            if not existing_modified:
+                return True
+            if isinstance(existing_modified, datetime) and existing_modified.tzinfo is not None:
                 existing_modified = existing_modified.replace(tzinfo=None)
-        if new_date_modified.tzinfo is not None:
-            new_date_modified = new_date_modified.replace(tzinfo=None)
-        
-        # Update if new modified date is newer
-        return new_date_modified > existing_modified
+            if new_date_modified.tzinfo is not None:
+                new_date_modified = new_date_modified.replace(tzinfo=None)
+            return new_date_modified > existing_modified
+
+        # Fallback comparison when DATE_MODIFIED is missing.
+        existing_snapshot = existing.get('snapshot', {})
+        new_snapshot = self._build_main_snapshot_from_record(record)
+        has_diff = existing_snapshot != new_snapshot
+        if has_diff:
+            logger.debug(
+                "DATE_MODIFIED missing for IR %s; fallback field-diff detected change.",
+                record.get('INTERROGATION_REPORT_ID')
+            )
+        return has_diff
 
     def delete_related_records(self, ir_id: str, cursor):
         """Delete all related records for an IR before re-inserting."""
@@ -614,7 +757,16 @@ class InterrogationReportsETL:
             IR_SHELTER_TABLE,
             IR_MEDIA_TABLE,
             IR_INTERROGATION_REPORT_REFS_TABLE,
-            IR_DOPAMS_LINKS_TABLE
+            IR_DOPAMS_LINKS_TABLE,
+            IR_INDULGANCE_BEFORE_OFFENCE_TABLE,
+            IR_PROPERTY_DISPOSAL_TABLE,
+            IR_REGULARIZATION_TRANSIT_WARRANTS_TABLE,
+            IR_EXECUTION_OF_NBW_TABLE,
+            IR_PENDING_NBW_TABLE,
+            IR_SURETIES_TABLE,
+            IR_JAIL_SENTENCE_TABLE,
+            IR_NEW_GANG_FORMATION_TABLE,
+            IR_CONVICTION_ACQUITTAL_TABLE
         ]
         
         for table in tables:
@@ -675,28 +827,28 @@ class InterrogationReportsETL:
         soas.get('SHARE_OF_AMOUNT_SPENT'),
         soas.get('OTHER_SHARE_OF_AMOUNT_SPENT'),
         soas.get('REMARKS'),
-        in_jail.get('IS_IN_JAIL', False),
+        in_jail.get('IS_IN_JAIL'),
         in_jail.get('FROM_WHERE_SENT_IN_JAIL'),
         in_jail.get('CRIME_NUM'),
         in_jail.get('DIST_UNIT'),
-        on_bail.get('IS_ON_BAIL', False),
+        on_bail.get('IS_ON_BAIL'),
         on_bail.get('FROM_WHERE_SENT_ON_BAIL'),
         on_bail.get('CRIME_NUM'),
         parse_date(on_bail.get('DATE_OF_BAIL')) if on_bail.get('DATE_OF_BAIL') else None,
-        absconding.get('IS_ABSCONDING', False),
+        absconding.get('IS_ABSCONDING'),
         absconding.get('WANTED_IN_POLICE_STATION'),
         absconding.get('CRIME_NUM'),
-        normal_life.get('IS_NORMAL_LIFE', False),
+        normal_life.get('IS_NORMAL_LIFE'),
         normal_life.get('EKING_LIVELIHOOD_BY_LABOR_WORK'),
-        rehabilitated.get('IS_REHABILITATED', False),
+        rehabilitated.get('IS_REHABILITATED'),
         rehabilitated.get('REHABILITATION_DETAILS'),
-        dead.get('IS_DEAD', False),
+        dead.get('IS_DEAD'),
         dead.get('DEATH_DETAILS'),
-        facing_trial.get('IS_FACING_TRIAL', False),
+        facing_trial.get('IS_FACING_TRIAL'),
         facing_trial.get('PS_NAME'),
         facing_trial.get('CRIME_NUM'),
             record.get('OTHER_REGULAR_HABITS'),
-            record.get('OTHER_INDULGENCE_BEFORE_OFFENCE'),
+            record.get('OTHER_INDULGENCE_BEFORE_OFFENCE') if record.get('OTHER_INDULGENCE_BEFORE_OFFENCE') is not None else record.get('OTHER_INDULGANCE_BEFORE_OFFENCE'),
             record.get('TIME_SINCE_MODUS_OPERANDI'),
         parse_timestamp(record.get('DATE_CREATED')),
         parse_timestamp(record.get('DATE_MODIFIED'))
@@ -837,9 +989,12 @@ class InterrogationReportsETL:
                 for td in types_of_drugs:
                     supplier_id = normalize_person_id(td.get('SUPPLIER_PERSON_ID'))
                     receiver_id = normalize_person_id(td.get('RECEIVERS_PERSON_ID'))
+                    purchase_amount = td.get('PURCHASE_AMOUNT_IN_INR')
+                    if purchase_amount is None:
+                        purchase_amount = td.get('PURCHASE_AMOUN_IN_INR')
                     drug_values.append((
                         ir_id, td.get('TYPE_OF_DRUG'), td.get('QUANTITY'),
-                        td.get('PURCHASE_AMOUN_IN_INR'), td.get('MODE_OF_PAYMENT'),
+                        purchase_amount, td.get('MODE_OF_PAYMENT'),
                         td.get('MODE_OF_TRANSPORT'), supplier_id, receiver_id
                     ))
                 
@@ -947,19 +1102,26 @@ class InterrogationReportsETL:
         if previous_offences:
             try:
                 po_values = [
-                    (ir_id, parse_timestamp(po.get('ARREST_DATE')) if po.get('ARREST_DATE') else None,
-                     truncate_string(po.get('ARRESTED_BY'), 100),
-                     truncate_string(po.get('ARREST_PLACE'), 100),
-                     truncate_string(po.get('CRIME_NUM'), 100),
-                     truncate_string(po.get('DIST_UNIT_DIVISION'), 100),
-                     truncate_string(po.get('GANG_MEMBER'), 100),
-                     truncate_string(po.get('INTERROGATED_BY'), 100),
-                     truncate_string(po.get('LAW_SECTION'), 100),
-                     truncate_string(po.get('OTHERS_IDENTIFY'), 100),
-                     truncate_string(po.get('PROPERTY_RECOVERED'), 100),
-                     truncate_string(po.get('PROPERTY_STOLEN'), 100),
-                     truncate_string(po.get('PS_CODE'), 100),
-                     truncate_string(po.get('REMARKS'), 100))
+                    (
+                        ir_id,
+                        parse_date(po.get('ARREST_DATE')) if po.get('ARREST_DATE') else None,
+                        po.get('ARRESTED_BY'),
+                        po.get('ARREST_PLACE'),
+                        po.get('CRIME_NUM'),
+                        po.get('DIST_UNIT_DIVISION'),
+                        po.get('GANG_MEMBER'),
+                        po.get('INTERROGATED_BY'),
+                        po.get('LAW_SECTION'),
+                        po.get('OTHERS_IDENTIFY'),
+                        po.get('PROPERTY_RECOVERED'),
+                        po.get('PROPERTY_STOLEN'),
+                        po.get('PS_CODE'),
+                        po.get('REMARKS'),
+                        po.get('CONVICTION_STATUS'),
+                        po.get('BAIL_STATUS'),
+                        po.get('COURT_NAME'),
+                        po.get('JUDGE_NAME')
+                    )
                     for po in previous_offences
                 ]
                 execute_values(
@@ -967,7 +1129,8 @@ class InterrogationReportsETL:
                     f"""INSERT INTO {IR_PREVIOUS_OFFENCES_TABLE} 
                        (interrogation_report_id, arrest_date, arrested_by, arrest_place, crime_num,
                         dist_unit_division, gang_member, interrogated_by, law_section,
-                        others_identify, property_recovered, property_stolen, ps_code, remarks)
+                        others_identify, property_recovered, property_stolen, ps_code, remarks,
+                        conviction_status, bail_status, court_name, judge_name)
                        VALUES %s""",
                     po_values
                 )
@@ -1082,6 +1245,249 @@ class InterrogationReportsETL:
                 dopams_values
             )
 
+        # 16. INDULGANCE_BEFORE_OFFENCE
+        indulgance_before_offence = record.get('INDULGANCE_BEFORE_OFFENCE', [])
+        if indulgance_before_offence:
+            ind_values = [(ir_id, value) for value in indulgance_before_offence if value]
+            if ind_values:
+                execute_values(
+                    cursor,
+                    f"""INSERT INTO {IR_INDULGANCE_BEFORE_OFFENCE_TABLE} (interrogation_report_id, indulgance)
+                       VALUES %s""",
+                    ind_values
+                )
+
+        # 17. PROPERTY_DISPOSAL
+        property_disposal = record.get('PROPERTY_DISPOSAL', [])
+        if property_disposal:
+            pd_values = [
+                (
+                    ir_id,
+                    pd.get('MODE_OF_DISPOSAL'),
+                    pd.get('BUYER_NAME'),
+                    pd.get('SOLD_AMOUNT_IN_INR'),
+                    pd.get('LOCATION_OF_DISPOSAL'),
+                    parse_date(pd.get('DATE_OF_DISPOSAL')) if pd.get('DATE_OF_DISPOSAL') else None,
+                    pd.get('REMARKS')
+                )
+                for pd in property_disposal
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_PROPERTY_DISPOSAL_TABLE}
+                   (interrogation_report_id, mode_of_disposal, buyer_name, sold_amount_in_inr,
+                    location_of_disposal, date_of_disposal, remarks)
+                   VALUES %s""",
+                pd_values
+            )
+
+        # 18. REGULARIZATION_OF_TRANSIT_WARRANTS
+        regularization_transit = record.get('REGULARIZATION_OF_TRANSIT_WARRANTS', [])
+        if regularization_transit:
+            rtw_values = [
+                (
+                    ir_id,
+                    row.get('WARRANT_NUMBER'),
+                    row.get('WARRANT_TYPE'),
+                    parse_date(row.get('ISSUED_DATE')) if row.get('ISSUED_DATE') else None,
+                    row.get('JURISDICTION_PS'),
+                    row.get('CRIME_NUM'),
+                    row.get('STATUS'),
+                    row.get('REMARKS')
+                )
+                for row in regularization_transit
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_REGULARIZATION_TRANSIT_WARRANTS_TABLE}
+                   (interrogation_report_id, warrant_number, warrant_type, issued_date,
+                    jurisdiction_ps, crime_num, status, remarks)
+                   VALUES %s""",
+                rtw_values
+            )
+
+        # 19. EXECUTION_OF_NBW
+        execution_of_nbw = record.get('EXECUTION_OF_NBW', [])
+        if execution_of_nbw:
+            enbw_values = [
+                (
+                    ir_id,
+                    row.get('NBW_NUMBER'),
+                    parse_date(row.get('ISSUED_DATE')) if row.get('ISSUED_DATE') else None,
+                    parse_date(row.get('EXECUTED_DATE')) if row.get('EXECUTED_DATE') else None,
+                    row.get('JURISDICTION_PS'),
+                    row.get('CRIME_NUM'),
+                    row.get('EXECUTED_BY'),
+                    row.get('PLACE_OF_EXECUTION'),
+                    row.get('REMARKS')
+                )
+                for row in execution_of_nbw
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_EXECUTION_OF_NBW_TABLE}
+                   (interrogation_report_id, nbw_number, issued_date, executed_date,
+                    jurisdiction_ps, crime_num, executed_by, place_of_execution, remarks)
+                   VALUES %s""",
+                enbw_values
+            )
+
+        # 20. PENDING_NBW
+        pending_nbw = record.get('PENDING_NBW', [])
+        if pending_nbw:
+            pnbw_values = [
+                (
+                    ir_id,
+                    row.get('NBW_NUMBER'),
+                    parse_date(row.get('ISSUED_DATE')) if row.get('ISSUED_DATE') else None,
+                    row.get('JURISDICTION_PS'),
+                    row.get('CRIME_NUM'),
+                    row.get('REASON_FOR_PENDING'),
+                    parse_date(row.get('EXPECTED_EXECUTION_DATE')) if row.get('EXPECTED_EXECUTION_DATE') else None,
+                    row.get('REMARKS')
+                )
+                for row in pending_nbw
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_PENDING_NBW_TABLE}
+                   (interrogation_report_id, nbw_number, issued_date, jurisdiction_ps,
+                    crime_num, reason_for_pending, expected_execution_date, remarks)
+                   VALUES %s""",
+                pnbw_values
+            )
+
+        # 21. SURETIES
+        sureties = record.get('SURETIES', [])
+        if sureties:
+            sur_values = [
+                (
+                    ir_id,
+                    normalize_person_id(row.get('SURETY_PERSON_ID')),
+                    row.get('SURETY_NAME'),
+                    row.get('RELATION_TO_ACCUSED'),
+                    row.get('OCCUPATION'),
+                    row.get('AADHAR_NUMBER'),
+                    row.get('PAN_NUMBER'),
+                    row.get('HOUSE_NO'),
+                    row.get('STREET_ROAD_NO'),
+                    row.get('LOCALITY_VILLAGE'),
+                    row.get('AREA_MANDAL'),
+                    row.get('DISTRICT'),
+                    row.get('STATE_UT'),
+                    row.get('PIN_CODE'),
+                    row.get('PHONE_NUMBER'),
+                    row.get('SURETY_AMOUNT_IN_INR'),
+                    parse_date(row.get('DATE_OF_SURETY')) if row.get('DATE_OF_SURETY') else None,
+                    row.get('REMARKS')
+                )
+                for row in sureties
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_SURETIES_TABLE}
+                   (interrogation_report_id, surety_person_id, surety_name, relation_to_accused,
+                    occupation, aadhar_number, pan_number, house_no, street_road_no,
+                    locality_village, area_mandal, district, state_ut, pin_code,
+                    phone_number, surety_amount_in_inr, date_of_surety, remarks)
+                   VALUES %s""",
+                sur_values
+            )
+
+        # 22. JAIL_SENTENCE
+        jail_sentence = record.get('JAIL_SENTENCE', [])
+        if jail_sentence:
+            js_values = [
+                (
+                    ir_id,
+                    row.get('CRIME_NUM'),
+                    row.get('JURISDICTION_PS'),
+                    row.get('LAW_SECTION'),
+                    row.get('SENTENCE_TYPE'),
+                    row.get('SENTENCE_DURATION_IN_MONTHS'),
+                    parse_date(row.get('SENTENCE_START_DATE')) if row.get('SENTENCE_START_DATE') else None,
+                    parse_date(row.get('SENTENCE_END_DATE')) if row.get('SENTENCE_END_DATE') else None,
+                    row.get('SENTENCE_AMOUNT_IN_INR'),
+                    row.get('JAIL_NAME'),
+                    parse_date(row.get('DATE_OF_JAIL_ENTRY')) if row.get('DATE_OF_JAIL_ENTRY') else None,
+                    parse_date(row.get('DATE_OF_JAIL_RELEASE')) if row.get('DATE_OF_JAIL_RELEASE') else None,
+                    row.get('REMARKS')
+                )
+                for row in jail_sentence
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_JAIL_SENTENCE_TABLE}
+                   (interrogation_report_id, crime_num, jurisdiction_ps, law_section,
+                    sentence_type, sentence_duration_in_months, sentence_start_date,
+                    sentence_end_date, sentence_amount_in_inr, jail_name,
+                    date_of_jail_entry, date_of_jail_release, remarks)
+                   VALUES %s""",
+                js_values
+            )
+
+        # 23. NEW_GANG_FORMATION
+        new_gang_formation = record.get('NEW_GANG_FORMATION', [])
+        if new_gang_formation:
+            ngf_values = [
+                (
+                    ir_id,
+                    row.get('GANG_NAME'),
+                    parse_date(row.get('GANG_FORMATION_DATE')) if row.get('GANG_FORMATION_DATE') else None,
+                    row.get('NUMBER_OF_MEMBERS'),
+                    row.get('LEADER_NAME'),
+                    normalize_person_id(row.get('LEADER_PERSON_ID')),
+                    row.get('GANG_OBJECTIVE'),
+                    row.get('CRIMINAL_HISTORY'),
+                    row.get('JURISDICTION_PS'),
+                    row.get('ACTIVE'),
+                    row.get('REMARKS')
+                )
+                for row in new_gang_formation
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_NEW_GANG_FORMATION_TABLE}
+                   (interrogation_report_id, gang_name, gang_formation_date, number_of_members,
+                    leader_name, leader_person_id, gang_objective, criminal_history,
+                    jurisdiction_ps, active, remarks)
+                   VALUES %s""",
+                ngf_values
+            )
+
+        # 24. CONVICTION_ACQUITTAL
+        conviction_acquittal = record.get('CONVICTION_ACQUITTAL', [])
+        if conviction_acquittal:
+            ca_values = [
+                (
+                    ir_id,
+                    row.get('CRIME_NUM'),
+                    row.get('JURISDICTION_PS'),
+                    row.get('COURT_NAME'),
+                    row.get('JUDGE_NAME'),
+                    row.get('LAW_SECTION'),
+                    row.get('VERDICT'),
+                    parse_date(row.get('VERDICT_DATE')) if row.get('VERDICT_DATE') else None,
+                    row.get('REASON_IF_ACQUITTED'),
+                    row.get('CONVICTION_REMARKS'),
+                    row.get('FINE_AMOUNT_IN_INR'),
+                    row.get('SENTENCE_IF_CONVICTED'),
+                    row.get('APPEAL_STATUS'),
+                    row.get('APPEAL_COURT')
+                )
+                for row in conviction_acquittal
+            ]
+            execute_values(
+                cursor,
+                f"""INSERT INTO {IR_CONVICTION_ACQUITTAL_TABLE}
+                   (interrogation_report_id, crime_num, jurisdiction_ps, court_name,
+                    judge_name, law_section, verdict, verdict_date,
+                    reason_if_acquitted, conviction_remarks, fine_amount_in_inr,
+                    sentence_if_convicted, appeal_status, appeal_court)
+                   VALUES %s""",
+                ca_values
+            )
+
     def process_ir_record(self, record: Dict[str, Any], conn, cursor) -> bool:
         """
         Process a single IR record (insert or update).
@@ -1093,7 +1499,6 @@ class InterrogationReportsETL:
             True if successful, False otherwise
         """
         ir_id = record.get('INTERROGATION_REPORT_ID')
-        date_modified = parse_timestamp(record.get('DATE_MODIFIED'))
         crime_id = record.get('CRIME_ID')
         
         if not ir_id:
@@ -1113,7 +1518,7 @@ class InterrogationReportsETL:
             
             if existing:
                 # Check if update is needed
-                if self.should_update_record(existing, date_modified):
+                if self.should_update_record(existing, record):
                     logger.debug(f"Updating record: {ir_id}")
                     # Delete related records before re-inserting
                     self.delete_related_records(ir_id, cursor)
@@ -1134,29 +1539,16 @@ class InterrogationReportsETL:
                                 pass
                             return False
                         raise
-                    # Re-insert related records
+                    # Re-insert related records (atomic requirement: fail whole record on dependent insert error)
                     try:
                         self.insert_related_records(record, cursor)
                     except Exception as e:
-                        logger.warning(f"Failed to insert some related records for {ir_id}: {e}")
-                        # Rollback to clear failed transaction state
-                        try:
-                            conn.rollback()
-                            # Re-apply main record update
-                            self.insert_main_record(record, cursor, is_update=True)
-                            # Try to insert related records again, but don't fail if it still fails
-                            try:
-                                self.insert_related_records(record, cursor)
-                            except Exception as retry_error:
-                                logger.warning(f"Failed to insert related records on retry for {ir_id}: {retry_error}")
-                                # Continue anyway - main record is saved
-                        except Exception as rollback_error:
-                            logger.error(f"Failed to rollback/re-apply for {ir_id}: {rollback_error}")
-                            # Rollback to ensure clean state
-                            try:
-                                conn.rollback()
-                            except:
-                                pass
+                        logger.error(f"Dependent insert failed for {ir_id}; rolling back record: {e}")
+                        conn.rollback()
+                        with self.stats_lock:
+                            self.stats['total_ir_failed'] += 1
+                            self.stats['errors'].append(f"IR {ir_id}: dependent insert failed ({e})")
+                        return False
                     with self.stats_lock:
                         self.stats['total_ir_updated'] += 1
                     return True
@@ -1184,29 +1576,16 @@ class InterrogationReportsETL:
                             pass
                         return False
                     raise
-                # Insert related records
+                # Insert related records (atomic requirement: fail whole record on dependent insert error)
                 try:
                     self.insert_related_records(record, cursor)
                 except Exception as e:
-                    logger.warning(f"Failed to insert some related records for {ir_id}: {e}")
-                    # Rollback to clear failed transaction state
-                    try:
-                        conn.rollback()
-                        # Re-apply main record insert
-                        self.insert_main_record(record, cursor, is_update=False)
-                        # Try to insert related records again, but don't fail if it still fails
-                        try:
-                            self.insert_related_records(record, cursor)
-                        except Exception as retry_error:
-                            logger.warning(f"Failed to insert related records on retry for {ir_id}: {retry_error}")
-                            # Continue anyway - main record is saved
-                    except Exception as rollback_error:
-                        logger.error(f"Failed to rollback/re-apply for {ir_id}: {rollback_error}")
-                        # Rollback to ensure clean state
-                        try:
-                            conn.rollback()
-                        except:
-                            pass
+                    logger.error(f"Dependent insert failed for {ir_id}; rolling back record: {e}")
+                    conn.rollback()
+                    with self.stats_lock:
+                        self.stats['total_ir_failed'] += 1
+                        self.stats['errors'].append(f"IR {ir_id}: dependent insert failed ({e})")
+                    return False
                 with self.stats_lock:
                     self.stats['total_ir_inserted'] += 1
                 return True
@@ -1342,6 +1721,9 @@ class InterrogationReportsETL:
         try:
             # Ensure pending table exists
             self.ensure_pending_table()
+            
+            # Ensure schema migrations are applied (9 new tables + fixes)
+            self.ensure_schema_exists()
             
             # Load crime IDs into memory
             self.load_crime_ids()
