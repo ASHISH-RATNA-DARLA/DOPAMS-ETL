@@ -12,6 +12,7 @@ import psycopg2
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg2.extras import Json
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 from tqdm import tqdm
 import logging
@@ -53,6 +54,8 @@ logger.setLevel(LOG_CONFIG['level'])
 PROPERTIES_TABLE = TABLE_CONFIG.get('properties', 'properties')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 PENDING_FK_TABLE = 'properties_pending_fk'
+PROPERTY_ADDITIONAL_DETAILS_TABLE = TABLE_CONFIG.get('property_additional_details', 'property_additional_details')
+PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('property_media', 'property_media')
 
 
 def parse_iso_date(date_str: str) -> datetime:
@@ -78,6 +81,8 @@ class PropertiesETL:
         self.crime_ids = set()
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
+        self.has_property_additional_details_table = False
+        self.has_property_media_table = False
         self.stats = {
             'total_api_calls': 0,
             'total_properties_fetched': 0,
@@ -91,6 +96,24 @@ class PropertiesETL:
             'failed_api_calls': 0,
             'errors': []
         }
+
+    def table_exists(self, table_name: str) -> bool:
+        """Check whether a table exists in current schema search path."""
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_name = %s
+                        )
+                    """, (table_name,))
+                    row = cur.fetchone()
+                    return bool(row and row[0])
+        except Exception as e:
+            logger.warning(f"Could not verify table existence for {table_name}: {e}")
+            return False
     
     def connect_db(self):
         """Connect to PostgreSQL database using db_pool"""
@@ -547,11 +570,236 @@ class PropertiesETL:
             # If ISO parsing fails, try other common formats
             try:
                 # Try YYYY-MM-DD format
-                return datetime.strptime(date_value, '%Y-%m-%d')
+                return datetime.strptime(date_value, '%Y-%m-%d').replace(tzinfo=IST_OFFSET)
             except (ValueError, AttributeError):
                 # If all parsing fails, return None
                 logger.debug(f"Could not parse date: {date_value}")
                 return None
+
+    def normalize_blank(self, value):
+        """Normalize blank strings to None, leave other values unchanged."""
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned if cleaned else None
+        return value
+
+    def coerce_numeric(self, value, field_name: str) -> Optional[Decimal]:
+        """Safely coerce numeric API values to Decimal or None."""
+        value = self.normalize_blank(value)
+        if value is None:
+            return None
+        if isinstance(value, Decimal):
+            return value
+        if isinstance(value, bool):
+            logger.warning(f"Unexpected boolean for numeric field {field_name}: {value}")
+            return None
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            logger.warning(f"Could not coerce numeric field {field_name}: {value}")
+            return None
+
+    def coerce_bool(self, value) -> Optional[bool]:
+        """Coerce API boolean-like values to bool or None."""
+        value = self.normalize_blank(value)
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in ('true', 't', '1', 'yes', 'y'):
+                return True
+            if lowered in ('false', 'f', '0', 'no', 'n'):
+                return False
+        logger.warning(f"Could not coerce boolean value: {value}")
+        return None
+
+    def normalize_json_value(self, value):
+        """Recursively normalize JSON values (blank strings to null)."""
+        if isinstance(value, dict):
+            return {k: self.normalize_json_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self.normalize_json_value(v) for v in value]
+        return self.normalize_blank(value)
+
+    def normalize_additional_details(self, details_raw) -> Optional[Dict]:
+        """
+        Normalize ADDITIONAL_DETAILS payload.
+        - Preserve all keys
+        - Convert blank strings to null
+        - Coerce known numeric/boolean keys
+        - Preserve explicit null from API
+        """
+        if details_raw is None:
+            return None
+
+        if not isinstance(details_raw, dict):
+            logger.warning("ADDITIONAL_DETAILS is not an object; storing as wrapped raw value")
+            return {'_raw': self.normalize_json_value(details_raw)}
+
+        normalized = self.normalize_json_value(details_raw)
+
+        if 'WEIGHT' in normalized:
+            weight_value = self.coerce_numeric(normalized.get('WEIGHT'), 'ADDITIONAL_DETAILS.WEIGHT')
+            normalized['WEIGHT'] = float(weight_value) if weight_value is not None else None
+
+        bool_keys = [
+            'WHETHER_NOTICE',
+            'WHETHER_LAB',
+            'WHETHER_ACCUSED',
+            'WHETHER_DRUG_SYNDICATE',
+            'WHETHER_TRAFFICKER',
+            'WHETHER_CARRIER',
+            'WHETHER_ADDICT',
+            'WHETHER_PEDDLER',
+            'WHETHER_DETAINED',
+            'WHETHER_EMERGENCY',
+            'WHETHER_INTERROGATION',
+        ]
+        for key in bool_keys:
+            if key in normalized:
+                normalized[key] = self.coerce_bool(normalized.get(key))
+
+        return normalized
+
+    def normalize_media(self, media_raw) -> Optional[List]:
+        """
+        Normalize MEDIA array while preserving payload shape.
+        Returns None when API explicitly sends null.
+        """
+        if media_raw is None:
+            return None
+        if not isinstance(media_raw, list):
+            logger.warning("MEDIA is not an array; coercing to empty array")
+            return []
+        return [self.normalize_json_value(item) for item in media_raw]
+
+    def to_jsonb_param(self, value):
+        """Return psycopg2 JSON wrapper only for non-null values."""
+        return Json(value) if value is not None else None
+
+    def parse_media_item(self, media_item) -> Tuple[Optional[str], Optional[str], Optional[Dict]]:
+        """Extract media_file_id and media_url from a media entry while keeping full payload."""
+        if media_item is None:
+            return None, None, None
+
+        if isinstance(media_item, str):
+            media_file_id = self.normalize_blank(media_item)
+            return media_file_id, None, {'media_file_id': media_file_id}
+
+        if isinstance(media_item, dict):
+            media_file_id = (
+                self.normalize_blank(media_item.get('fileId'))
+                or self.normalize_blank(media_item.get('file_id'))
+                or self.normalize_blank(media_item.get('mediaFileId'))
+                or self.normalize_blank(media_item.get('MEDIA_FILE_ID'))
+                or self.normalize_blank(media_item.get('id'))
+            )
+            media_url = (
+                self.normalize_blank(media_item.get('url'))
+                or self.normalize_blank(media_item.get('mediaUrl'))
+                or self.normalize_blank(media_item.get('MEDIA_URL'))
+                or self.normalize_blank(media_item.get('fileUrl'))
+                or self.normalize_blank(media_item.get('file_url'))
+            )
+            return media_file_id, media_url, media_item
+
+        return None, None, {'_raw': media_item}
+
+    def upsert_property_additional_details(
+        self,
+        property_id: str,
+        additional_details: Optional[Dict],
+        date_created: Optional[datetime],
+        date_modified: Optional[datetime],
+        cursor,
+    ):
+        """
+        Keep property_additional_details in overwrite mode.
+        If source is null, remove child row to avoid stale data.
+        """
+        if not self.has_property_additional_details_table:
+            return
+
+        if additional_details is None:
+            cursor.execute(
+                f"DELETE FROM {PROPERTY_ADDITIONAL_DETAILS_TABLE} WHERE property_id = %s",
+                (property_id,),
+            )
+            return
+
+        cursor.execute(
+            f"""
+                INSERT INTO {PROPERTY_ADDITIONAL_DETAILS_TABLE}
+                    (property_id, additional_details, date_created, date_modified)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (property_id)
+                DO UPDATE SET
+                    additional_details = EXCLUDED.additional_details,
+                    date_created = EXCLUDED.date_created,
+                    date_modified = EXCLUDED.date_modified
+            """,
+            (
+                property_id,
+                self.to_jsonb_param(additional_details),
+                date_created,
+                date_modified,
+            ),
+        )
+
+    def replace_property_media(
+        self,
+        property_id: str,
+        media: Optional[List],
+        date_created: Optional[datetime],
+        date_modified: Optional[datetime],
+        cursor,
+    ):
+        """
+        Keep property_media in overwrite mode.
+        Always delete previous rows first to avoid stale child records.
+        """
+        if not self.has_property_media_table:
+            return
+
+        cursor.execute(
+            f"DELETE FROM {PROPERTY_MEDIA_TABLE} WHERE property_id = %s",
+            (property_id,),
+        )
+
+        if not media:
+            return
+
+        insert_sql = f"""
+            INSERT INTO {PROPERTY_MEDIA_TABLE}
+                (property_id, media_index, media_file_id, media_url, media_payload, date_created, date_modified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (property_id, media_index)
+            DO UPDATE SET
+                media_file_id = EXCLUDED.media_file_id,
+                media_url = EXCLUDED.media_url,
+                media_payload = EXCLUDED.media_payload,
+                date_created = EXCLUDED.date_created,
+                date_modified = EXCLUDED.date_modified
+        """
+
+        for idx, media_item in enumerate(media):
+            media_file_id, media_url, media_payload = self.parse_media_item(media_item)
+            cursor.execute(
+                insert_sql,
+                (
+                    property_id,
+                    idx,
+                    media_file_id,
+                    media_url,
+                    self.to_jsonb_param(media_payload),
+                    date_created,
+                    date_modified,
+                ),
+            )
     
     def transform_property(self, property_raw: Dict) -> Dict:
         """
@@ -571,28 +819,21 @@ class PropertiesETL:
         date_created = self.parse_date_field(property_raw.get('DATE_CREATED'))
         date_modified = self.parse_date_field(property_raw.get('DATE_MODIFIED'))
         
-        # Handle ADDITIONAL_DETAILS - ensure it's a dict
-        additional_details = property_raw.get('ADDITIONAL_DETAILS', {})
-        if not isinstance(additional_details, dict):
-            additional_details = {}
-        
-        # Handle MEDIA - ensure it's a list
-        media = property_raw.get('MEDIA', [])
-        if not isinstance(media, list):
-            media = []
+        additional_details = self.normalize_additional_details(property_raw.get('ADDITIONAL_DETAILS'))
+        media = self.normalize_media(property_raw.get('MEDIA'))
         
         return {
             'property_id': property_raw.get('PROPERTY_ID'),
             'crime_id': property_raw.get('CRIME_ID'),
             'case_property_id': property_raw.get('CASE_PROPERTY_ID'),
             'property_status': property_raw.get('PROPERTY_STATUS'),
-            'recovered_from': property_raw.get('RECOVERED_FROM'),
-            'place_of_recovery': property_raw.get('PLACE_OF_RECOVERY'),
+            'recovered_from': self.normalize_blank(property_raw.get('RECOVERED_FROM')),
+            'place_of_recovery': self.normalize_blank(property_raw.get('PLACE_OF_RECOVERY')),
             'date_of_seizure': date_of_seizure,
             'nature': property_raw.get('NATURE'),
             'belongs': property_raw.get('BELONGS'),
-            'estimate_value': property_raw.get('ESTIMATE_VALUE', 0),
-            'recovered_value': property_raw.get('RECOVERED_VALUE', 0),
+            'estimate_value': self.coerce_numeric(property_raw.get('ESTIMATE_VALUE'), 'ESTIMATE_VALUE'),
+            'recovered_value': self.coerce_numeric(property_raw.get('RECOVERED_VALUE'), 'RECOVERED_VALUE'),
             'particular_of_property': property_raw.get('PARTICULAR_OF_PROPERTY'),
             'category': property_raw.get('CATEGORY'),
             'additional_details': additional_details,
@@ -622,8 +863,7 @@ class PropertiesETL:
             # Check if property already exists
             if self.property_exists(prop['property_id'], cursor):
                 # Update existing property
-                # Note: date_created is NOT updated (preserved from original insert)
-                # date_modified comes from API (as per API response)
+                # Overwrite with API values (source of truth), including explicit nulls.
                 update_query = f"""
                     UPDATE {PROPERTIES_TABLE} SET
                         crime_id = %s,
@@ -640,6 +880,7 @@ class PropertiesETL:
                         category = %s,
                         additional_details = %s,
                         media = %s,
+                        date_created = %s,
                         date_modified = %s
                     WHERE property_id = %s
                 """
@@ -656,11 +897,27 @@ class PropertiesETL:
                     prop['recovered_value'],
                     prop['particular_of_property'],
                     prop['category'],
-                    Json(prop['additional_details']),
-                    Json(prop['media']),
-                    prop['date_modified'],  # Only update date_modified from API
+                    self.to_jsonb_param(prop['additional_details']),
+                    self.to_jsonb_param(prop['media']),
+                    prop['date_created'],
+                    prop['date_modified'],
                     prop['property_id']
                 ))
+
+                self.upsert_property_additional_details(
+                    prop['property_id'],
+                    prop['additional_details'],
+                    prop['date_created'],
+                    prop['date_modified'],
+                    cursor,
+                )
+                self.replace_property_media(
+                    prop['property_id'],
+                    prop['media'],
+                    prop['date_created'],
+                    prop['date_modified'],
+                    cursor,
+                )
                 with self.stats_lock:
                     self.stats['total_properties_updated'] += 1
                 logger.debug(f"Updated property: {prop['property_id']}")
@@ -691,11 +948,26 @@ class PropertiesETL:
                     prop['recovered_value'],
                     prop['particular_of_property'],
                     prop['category'],
-                    Json(prop['additional_details']),
-                    Json(prop['media']),
+                    self.to_jsonb_param(prop['additional_details']),
+                    self.to_jsonb_param(prop['media']),
                     prop['date_created'],
                     prop['date_modified']
                 ))
+
+                self.upsert_property_additional_details(
+                    prop['property_id'],
+                    prop['additional_details'],
+                    prop['date_created'],
+                    prop['date_modified'],
+                    cursor,
+                )
+                self.replace_property_media(
+                    prop['property_id'],
+                    prop['media'],
+                    prop['date_created'],
+                    prop['date_modified'],
+                    cursor,
+                )
                 with self.stats_lock:
                     self.stats['total_properties_inserted'] += 1
                 logger.debug(f"Inserted property: {prop['property_id']}")
@@ -836,6 +1108,23 @@ class PropertiesETL:
         try:
             # Ensure the pending FK retry queue table exists
             self.ensure_pending_table()
+
+            self.has_property_additional_details_table = self.table_exists(PROPERTY_ADDITIONAL_DETAILS_TABLE)
+            self.has_property_media_table = self.table_exists(PROPERTY_MEDIA_TABLE)
+            if self.has_property_additional_details_table:
+                logger.info(f"✅ Child table detected: {PROPERTY_ADDITIONAL_DETAILS_TABLE}")
+            else:
+                logger.warning(
+                    f"⚠️  Child table missing: {PROPERTY_ADDITIONAL_DETAILS_TABLE} "
+                    f"(run migration to enable normalized ADDITIONAL_DETAILS sync)"
+                )
+            if self.has_property_media_table:
+                logger.info(f"✅ Child table detected: {PROPERTY_MEDIA_TABLE}")
+            else:
+                logger.warning(
+                    f"⚠️  Child table missing: {PROPERTY_MEDIA_TABLE} "
+                    f"(run migration to enable normalized MEDIA sync)"
+                )
             
             # Load crime IDs into memory
             self.load_crime_ids()

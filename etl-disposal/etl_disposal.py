@@ -104,6 +104,45 @@ def parse_iso_date(iso_date_str: str) -> datetime:
         dt = datetime.strptime(iso_date_str.split('T')[0], '%Y-%m-%d')
         return dt.replace(tzinfo=IST_OFFSET)
 
+
+def normalize_api_value(value):
+    """Normalize API values by converting blank strings to None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value
+
+
+def parse_api_timestamp(value) -> Optional[datetime]:
+    """Parse API timestamps as timezone-aware datetimes without double conversion."""
+    value = normalize_api_value(value)
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=IST_OFFSET)
+        return value
+
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=IST_OFFSET)
+            return parsed
+        except ValueError:
+            try:
+                parsed = datetime.strptime(value.split('T')[0], '%Y-%m-%d')
+                return parsed.replace(tzinfo=IST_OFFSET)
+            except ValueError:
+                logger.warning(f"⚠️  Could not parse API timestamp: {value}")
+                return None
+
+    logger.warning(f"⚠️  Unsupported API timestamp type: {type(value).__name__}")
+    return None
+
 def iso_to_date_only(iso_date_str: str) -> str:
     """
     Extract date part from ISO 8601 format string
@@ -340,14 +379,14 @@ class DisposalETL:
                     min_start_dt = parse_iso_date(API_DATA_START_DATE)
                     
                     api_start_dt = parse_iso_date(API_DATA_START_DATE)
-                    api_start_date_str = api_start_dt.strftime('%Y-%m-%d')
                     cur.execute(f"""
                         SELECT GREATEST(
-                            COALESCE(MAX(CASE WHEN date_created >= '{api_start_date_str}'::timestamp THEN date_created END), '{api_start_date_str}'::timestamp),
-                            COALESCE(MAX(CASE WHEN date_modified >= '{api_start_date_str}'::timestamp THEN date_modified END), '{api_start_date_str}'::timestamp)
+                            COALESCE(MAX(date_created), %s::timestamptz),
+                            COALESCE(MAX(date_modified), %s::timestamptz)
                         ) as max_date
                         FROM {DISPOSAL_TABLE}
-                    """)
+                        WHERE date_created >= %s::timestamptz OR date_modified >= %s::timestamptz
+                    """, (api_start_dt, api_start_dt, api_start_dt, api_start_dt))
                     result = cur.fetchone()
                     if result and result[0]:
                         max_date = result[0]
@@ -386,6 +425,7 @@ class DisposalETL:
         field_mapping = {
             'CRIME_ID': 'crime_id',
             'DISPOSAL_TYPE': 'disposal_type',
+            'DISPOSED_DATE': 'disposed_at',
             'DISPOSED_AT': 'disposed_at',
             'DISPOSAL': 'disposal',
             'CASE_STATUS': 'case_status',
@@ -669,7 +709,7 @@ class DisposalETL:
         logger.trace(f"Transforming disposal: CRIME_ID={disposal_raw.get('CRIME_ID')}, DISPOSAL_TYPE={disposal_raw.get('DISPOSAL_TYPE')}")
         
         # Get crime_id - validate it exists in crimes table
-        crime_id_str = disposal_raw.get('CRIME_ID')
+        crime_id_str = normalize_api_value(disposal_raw.get('CRIME_ID'))
         crime_id_valid = None
         
         if crime_id_str:
@@ -686,26 +726,21 @@ class DisposalETL:
                 logger.error(f"Error validating crime_id {crime_id_str}: {e}")
                 # Note: The calling worker ensures transaction handling
         
-        # FIX: API sends DISPOSED_DATE (not DISPOSED_AT)
-        disposed_date_str = disposal_raw.get('DISPOSED_DATE')  # API field name
-        disposed_at_timestamp = None
-        if disposed_date_str:
-            try:
-                # Parse ISO format date from API
-                disposed_at_timestamp = parse_iso_date(disposed_date_str)
-            except Exception as e:
-                logger.warning(f"Warning parsing DISPOSED_DATE {disposed_date_str}: {e}")
+        # FIX: API sends DISPOSED_DATE; accept DISPOSED_AT for compatibility.
+        disposed_at_timestamp = parse_api_timestamp(
+            disposal_raw.get('DISPOSED_DATE') or disposal_raw.get('DISPOSED_AT')
+        )
         
         transformed = {
             'crime_id': crime_id_valid,  # VARCHAR foreign key to crimes.crime_id
-            'disposal_type': disposal_raw.get('DISPOSAL_TYPE'),
+            'disposal_type': normalize_api_value(disposal_raw.get('DISPOSAL_TYPE')),
             'disposed_at': disposed_at_timestamp,  # FIX: Maps DISPOSED_DATE from API
-            'disposal': disposal_raw.get('DISPOSAL'),
-            'case_status': disposal_raw.get('CASE_STATUS'),
+            'disposal': normalize_api_value(disposal_raw.get('DISPOSAL')),
+            'case_status': normalize_api_value(disposal_raw.get('CASE_STATUS')),
             # Dates are always from API (never use CURRENT_TIMESTAMP)
             # If API doesn't provide dates, they will be NULL
-            'date_created': disposal_raw.get('DATE_CREATED') or None,
-            'date_modified': disposal_raw.get('DATE_MODIFIED') or None,
+            'date_created': parse_api_timestamp(disposal_raw.get('DATE_CREATED')),
+            'date_modified': parse_api_timestamp(disposal_raw.get('DATE_MODIFIED')),
             # Store original CRIME_ID string for validation
             '_original_crime_id': crime_id_str
         }
@@ -717,7 +752,9 @@ class DisposalETL:
         logger.trace(f"Checking if disposal exists: crime_id={crime_id}, disposal_type={disposal_type}, disposed_at={disposed_at}")
         query = f"""
             SELECT 1 FROM {DISPOSAL_TABLE} 
-            WHERE crime_id = %s AND disposal_type = %s AND disposed_at = %s
+            WHERE crime_id = %s
+              AND disposal_type IS NOT DISTINCT FROM %s
+              AND disposed_at IS NOT DISTINCT FROM %s
         """
         cursor.execute(query, (crime_id, disposal_type, disposed_at))
         exists = cursor.fetchone() is not None
@@ -730,7 +767,9 @@ class DisposalETL:
             SELECT crime_id, disposal_type, disposed_at, disposal, case_status,
                    date_created, date_modified
             FROM {DISPOSAL_TABLE}
-            WHERE crime_id = %s AND disposal_type = %s AND disposed_at = %s
+            WHERE crime_id = %s
+              AND disposal_type IS NOT DISTINCT FROM %s
+              AND disposed_at IS NOT DISTINCT FROM %s
         """
         cursor.execute(query, (crime_id, disposal_type, disposed_at))
         row = cursor.fetchone()
@@ -865,15 +904,6 @@ class DisposalETL:
             self.log_invalid_crime_id(disposal, original_crime_id, chunk_date_range)
             return False, reason
         
-        if not disposal_type:
-            reason = 'missing_disposal_type'
-            error_details = "Disposal record missing DISPOSAL_TYPE"
-            logger.warning(f"⚠️  {error_details}")
-            with self.stats_lock:
-                self.stats['total_disposals_failed'] += 1
-            self.log_failed_record(disposal, reason, error_details)
-            return False, reason
-        
         try:
             logger.trace(f"Processing disposal: crime_id={crime_id}, disposal_type={disposal_type}, disposed_at={disposed_at}")
             
@@ -889,11 +919,9 @@ class DisposalETL:
                 if existing:
                     # Smart update: only update fields that need updating
                     # Rules:
-                    # 1. If existing is NULL and new is not NULL → update
-                    # 2. If existing is not NULL and new is NULL → keep existing (don't update to NULL)
-                    # 3. If both are not NULL and different → update
-                    # 4. If both are not NULL and same → skip update (no change needed)
-                    # Special: date_created and date_modified always from API (even if NULL)
+                    # 1. API is source of truth for all mutable fields.
+                    # 2. NULL from API must overwrite existing values.
+                    # 3. Only key columns are preserved by the conflict lookup.
                     
                     update_fields = []
                     update_values = []
@@ -903,57 +931,28 @@ class DisposalETL:
                     fields_to_check = [
                         ('disposal', 'DISPOSAL'),
                         ('case_status', 'CASE_STATUS'),
-                        ('date_created', 'DATE_CREATED'),  # Always from API
-                        ('date_modified', 'DATE_MODIFIED')  # Always from API
+                        ('date_created', 'DATE_CREATED'),
+                        ('date_modified', 'DATE_MODIFIED')
                     ]
                     
                     for db_field, api_field in fields_to_check:
                         existing_val = existing.get(db_field)
                         new_val = disposal.get(db_field)
                         
-                        # Special handling for date fields - always use API value
-                        if db_field in ('date_created', 'date_modified'):
-                            # Always update date fields from API (even if NULL)
-                            if existing_val != new_val:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                logger.trace(f"  Will update {db_field}: {existing_val} → {new_val} (API date)")
-                        else:
-                            # Rule 1: Existing is NULL, new is not NULL → update
-                            if existing_val is None and new_val is not None:
-                                update_fields.append(f"{db_field} = %s")
-                                update_values.append(new_val)
-                                changes.append(f"{db_field}: NULL → {new_val}")
-                                logger.trace(f"  Will update {db_field}: NULL → {new_val}")
-                            
-                            # Rule 2: Existing is not NULL, new is NULL → keep existing (skip)
-                            elif existing_val is not None and new_val is None:
-                                logger.trace(f"  Will keep existing {db_field}: {existing_val} (new value is NULL)")
-                                # Don't add to update - preserve existing value
-                            
-                            # Rule 3 & 4: Both are not NULL
-                            elif existing_val is not None and new_val is not None:
-                                # Rule 3: Different → update
-                                if existing_val != new_val:
-                                    update_fields.append(f"{db_field} = %s")
-                                    update_values.append(new_val)
-                                    changes.append(f"{db_field}: {existing_val} → {new_val}")
-                                    logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
-                                # Rule 4: Same → skip (no change)
-                                else:
-                                    logger.trace(f"  No change for {db_field}: {existing_val}")
-                            
-                            # Both are NULL → no update needed
-                            else:
-                                logger.trace(f"  Both NULL for {db_field}, no update")
+                        if existing_val != new_val:
+                            update_fields.append(f"{db_field} = %s")
+                            update_values.append(new_val)
+                            changes.append(f"{db_field}: {existing_val} → {new_val}")
+                            logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
                     
                     # Only update if there are changes
                     if update_fields:
                         update_query = f"""
                             UPDATE {DISPOSAL_TABLE} SET
                                 {', '.join(update_fields)}
-                            WHERE crime_id = %s AND disposal_type = %s AND disposed_at = %s
+                            WHERE crime_id = %s
+                              AND disposal_type IS NOT DISTINCT FROM %s
+                              AND disposed_at IS NOT DISTINCT FROM %s
                         """
                         update_values.extend([crime_id, disposal_type, disposed_at])
                         cursor.execute(update_query, tuple(update_values))
@@ -991,8 +990,8 @@ class DisposalETL:
                     disposed_at,
                     disposal.get('disposal'),
                     disposal.get('case_status'),
-                    disposal.get('date_created'),  # From API (or NULL)
-                    disposal.get('date_modified')  # From API (or NULL)
+                    disposal.get('date_created'),
+                    disposal.get('date_modified')
                 ))
                 with self.stats_lock:
                     self.stats['total_disposals_inserted'] += 1

@@ -82,6 +82,8 @@ TABLE_CONFIG = {
     'persons': _table_name('PERSONS_TABLE', 'persons'),
     'hierarchy': _table_name('HIERARCHY_TABLE', 'hierarchy'),
     'properties': _table_name('PROPERTIES_TABLE', 'properties'),
+    'property_additional_details': _table_name('PROPERTY_ADDITIONAL_DETAILS_TABLE', 'property_additional_details'),
+    'property_media': _table_name('PROPERTY_MEDIA_TABLE', 'property_media'),
     # Interrogation Reports (IR) tables
     'interrogation_reports': _table_name('IR_TABLE', 'interrogation_reports'),
     'ir_family_history': _table_name('IR_FAMILY_HISTORY_TABLE', 'ir_family_history'),
