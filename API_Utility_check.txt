@@ -1,0 +1,171 @@
+📊 API USAGE AUDIT REPORT (REFINED)
+========================================
+
+🔍 Summary:
+----------------------------------------
+- Total Endpoint Groups: 13
+- ✅ Actively Used (Valid): 10
+- ❌ Completely Unused: 3
+
+----------------------------------------
+📌 ENDPOINT GROUP ANALYSIS
+----------------------------------------
+
+1. CRIMES
+----------------------------------------
+GET /crimes → USED
+GET /crimes/{crimeId} → USED
+Status: ✅ ACTIVE
+Notes: Core dependency across multiple ETLs
+
+----------------------------------------
+
+2. DISPOSAL
+----------------------------------------
+GET /crimes/disposal → USED
+GET /crimes/disposal/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+Notes: Detail endpoint unused but valid since list API is used
+
+----------------------------------------
+
+3. ACCUSED
+----------------------------------------
+GET /accused → USED
+GET /accused/{crimeId} → USED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+4. ARRESTS
+----------------------------------------
+GET /arrests → USED
+GET /arrests/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+Notes: Detail endpoint currently not used
+
+----------------------------------------
+
+5. MO SEIZURES
+----------------------------------------
+GET /mo-seizures → USED
+GET /mo-seizures/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+6. STOLEN AUTOMOBILES
+----------------------------------------
+GET /stolen-automobiles → UNUSED
+GET /stolen-automobiles/{crimeId} → UNUSED
+Status: ❌ UNUSED
+Notes: No integration found
+
+----------------------------------------
+
+7. PROPERTY DETAILS
+----------------------------------------
+GET /property-details → USED
+GET /property-details/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+8. CASE PROPERTY
+----------------------------------------
+GET /case-property → USED
+GET /case-property/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+9. INTERROGATION REPORTS
+----------------------------------------
+GET /interrogation-reports/v1/ → USED
+GET /interrogation-reports/v1/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+10. CHARGESHEETS
+----------------------------------------
+GET /chargesheets → USED
+GET /chargesheets/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+11. UPDATED CHARGESHEETS
+----------------------------------------
+GET /update-chargesheets → USED
+GET /update-chargesheets/{crimeId} → UNUSED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+12. PERSON DETAILS
+----------------------------------------
+GET /person-details/{personId} → USED
+Status: ✅ ACTIVE
+Notes: Only detail endpoint exists
+
+----------------------------------------
+
+13. FILES
+----------------------------------------
+GET /files/{fileId} → USED
+Status: ✅ ACTIVE
+
+----------------------------------------
+
+14. REPORTS
+----------------------------------------
+GET /reports/missing-udb-persons/v1/ → UNUSED
+GET /reports/arrest/arrest-particulars/v1/ → UNUSED
+Status: ❌ UNUSED
+
+----------------------------------------
+
+🚨 FINAL INSIGHTS
+----------------------------------------
+
+✅ Strong Coverage:
+- Core investigation pipelines (crimes, accused, arrests, seizures, etc.) are well integrated
+
+⚠️ Detail Endpoints Gap:
+- Many `/id` endpoints are not used
+- Likely future-use APIs or UI drill-down features missing
+
+❌ Completely Unused APIs:
+- Stolen Automobiles
+- Reports (missing-udb, arrest-particulars)
+
+----------------------------------------
+
+🎯 ACTIONABLE RECOMMENDATIONS
+----------------------------------------
+
+1. REMOVE / ARCHIVE (after validation):
+   - stolen-automobiles (both endpoints)
+   - reports endpoints
+
+2. INVESTIGATE (Feature Gap):
+   - Why `/id` endpoints are not used?
+   - Missing drill-down UI or analytics?
+
+3. STANDARDIZE:
+   - Replace all hardcoded URLs with centralized config
+   - Remove duplicate legacy ETL files
+
+----------------------------------------
+END OF REPORT
+----------------------------------------
+
+
+
+
+
+
+
+
+
