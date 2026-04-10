@@ -8,6 +8,8 @@ Only processes person_ids from accused records that were added/updated since las
 import sys
 import os
 import time
+import re
+import json
 import requests
 import psycopg2
 from psycopg2.extras import execute_batch
@@ -16,12 +18,12 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import colorlog
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List, Set, Tuple, Any
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
-from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG
+from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDER_CONFIG
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -51,6 +53,10 @@ logger.setLevel(LOG_CONFIG['level'])
 class PersonsETL:
     def __init__(self):
         self.db_pool = None
+        self.person_gender_infer_on_unknown = bool(PERSON_GENDER_CONFIG.get('infer_on_unknown', False))
+        self.person_gender_inference_threshold = float(PERSON_GENDER_CONFIG.get('inference_threshold', 0.8))
+        self.person_gender_dry_run = bool(PERSON_GENDER_CONFIG.get('dry_run', False))
+        self.person_gender_preserve_valid_api = bool(PERSON_GENDER_CONFIG.get('preserve_valid_api', True))
         self.stats = {
             'person_ids': 0,
             'api_calls': 0,
@@ -60,10 +66,167 @@ class PersonsETL:
             'no_change': 0,  # Records that exist but no changes needed
             'no_data': 0,   # API returned 404 / no data (dead person_id)
             'failed': 0,  # Records that failed to process
-            'errors': 0
+            'errors': 0,
+            'dry_run_changes': 0,
+            'dry_run_no_change': 0,
+            'dry_run_inserts': 0
         }
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
+        self.dry_run_lock = threading.Lock()
+
+        self.dry_run_log_file = None
+        if self.person_gender_dry_run:
+            os.makedirs('logs', exist_ok=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.dry_run_log_file = f"logs/person_gender_dry_run_{ts}.jsonl"
+            logger.warning(f"⚠️  PERSON_GENDER_DRY_RUN enabled. No DB writes will be made. Dry-run log: {self.dry_run_log_file}")
+
+        self.invalid_name_exact = {
+            'absconding', 'unknown', 'unknown person', 'unknown persons',
+            'not known', 'name not known', 'unidentified', 'dead body',
+            'na', 'n a', 'n/a', 'nil', 'none', 'not available',
+            'no name', 'accused', 'suspect', 'person'
+        }
+        self.placeholder_tokens = {
+            'absconding', 'unknown', 'unidentified', 'na', 'n/a',
+            'nil', 'none', 'dead', 'body', 'accused', 'suspect', 'person'
+        }
+        self.gender_map = {
+            'male': 'Male',
+            'm': 'Male',
+            'man': 'Male',
+            'boy': 'Male',
+            'female': 'Female',
+            'f': 'Female',
+            'woman': 'Female',
+            'girl': 'Female',
+            'transgender': 'Transgender',
+            'trans gender': 'Transgender',
+            'third gender': 'Transgender',
+            'trans': 'Transgender',
+            'tg': 'Transgender',
+            'unknown': 'Unknown',
+            'unk': 'Unknown',
+            'n/a': 'Unknown',
+            'na': 'Unknown',
+            'not known': 'Unknown',
+            'not available': 'Unknown',
+            '': 'Unknown'
+        }
+        self.name_gender_rule_map = {
+            'ramesh': 'Male', 'rajesh': 'Male', 'suresh': 'Male', 'mahesh': 'Male',
+            'rahul': 'Male', 'vijay': 'Male', 'kiran': 'Male', 'arun': 'Male',
+            'sita': 'Female', 'laxmi': 'Female', 'lakshmi': 'Female', 'kavitha': 'Female',
+            'kavita': 'Female', 'sunita': 'Female', 'anjali': 'Female', 'pooja': 'Female'
+        }
+
+    def _normalize_space(self, value: str) -> str:
+        return ' '.join(value.strip().split())
+
+    def _canonical_name_for_match(self, value: str) -> str:
+        lowered = value.lower().strip()
+        lowered = re.sub(r'[^a-z0-9\s]+', ' ', lowered)
+        return self._normalize_space(lowered)
+
+    def _normalize_person_name(self, raw_name: Optional[str], personal: Dict) -> Optional[str]:
+        if raw_name is None:
+            name_part = self._normalize_space(str(personal.get('NAME') or ''))
+            surname_part = self._normalize_space(str(personal.get('SURNAME') or ''))
+            joined = self._normalize_space(f"{name_part} {surname_part}".strip())
+            return joined if joined else None
+        text = self._normalize_space(str(raw_name))
+        if not text:
+            return None
+        return text
+
+    def _is_valid_person_name(self, clean_name: Optional[str]) -> bool:
+        if clean_name is None:
+            return False
+        lowered = clean_name.lower().strip()
+        if not lowered:
+            return False
+
+        canonical = self._canonical_name_for_match(lowered)
+        if canonical in self.invalid_name_exact:
+            return False
+
+        alpha_chars = [ch for ch in lowered if ch.isalpha()]
+        if len(alpha_chars) < 2:
+            return False
+        alpha_ratio = len(alpha_chars) / max(len(lowered), 1)
+        if alpha_ratio < 0.35:
+            return False
+
+        tokens = [t for t in re.split(r'[^a-z]+', canonical) if t]
+        if tokens and all(token in self.placeholder_tokens for token in tokens):
+            return False
+        if re.search(r'\b(name\s+not\s+known|unknown\s+person(s)?|absconding\s+accused|dead\s+body|unidentified)\b', canonical):
+            return False
+        return True
+
+    def _normalize_api_gender(self, raw_gender: Optional[str]) -> Optional[str]:
+        if raw_gender is None:
+            return 'Unknown'
+        value = self._normalize_space(str(raw_gender)).strip().lower()
+        mapped = self.gender_map.get(value)
+        if mapped:
+            return mapped
+        compact = self._normalize_space(value.replace('-', ' '))
+        mapped = self.gender_map.get(compact)
+        if mapped:
+            return mapped
+        return None
+
+    def _infer_gender_from_name(self, clean_name: Optional[str]) -> Tuple[Optional[str], float, str]:
+        if not clean_name:
+            return None, 0.0, 'heuristic'
+
+        tokens = [token for token in re.findall(r"[A-Za-z]+", clean_name.lower()) if len(token) > 1]
+        if not tokens:
+            return None, 0.0, 'heuristic'
+
+        first = tokens[0]
+        rule_match = self.name_gender_rule_map.get(first)
+        if rule_match:
+            return rule_match, 0.9, 'rule'
+
+        female_suffixes = ('a', 'i', 'ya', 'ika', 'ita')
+        male_suffixes = ('esh', 'endra', 'kumar', 'raj', 'veer')
+        if first.endswith(female_suffixes):
+            return 'Female', 0.8, 'heuristic'
+        if first.endswith(male_suffixes):
+            return 'Male', 0.8, 'heuristic'
+
+        return None, 0.0, 'heuristic'
+
+    def _resolve_gender(self, clean_name: Optional[str], api_gender_raw: Optional[str]) -> Tuple[str, float, str]:
+        normalized_api = self._normalize_api_gender(api_gender_raw)
+
+        # Source-priority protection: never override a valid API gender when enabled.
+        if self.person_gender_preserve_valid_api and normalized_api in ('Male', 'Female', 'Transgender'):
+            return normalized_api, 1.0, 'api'
+
+        is_name_valid = self._is_valid_person_name(clean_name)
+        if not is_name_valid:
+            return 'Unknown', 0.0, 'invalid_name'
+
+        if normalized_api in ('Male', 'Female', 'Transgender'):
+            return normalized_api, 1.0, 'api'
+
+        if normalized_api == 'Unknown':
+            if not self.person_gender_infer_on_unknown:
+                return 'Unknown', 1.0, 'api'
+            inferred_gender, confidence, source = self._infer_gender_from_name(clean_name)
+            if inferred_gender and confidence >= self.person_gender_inference_threshold:
+                return inferred_gender, confidence, source
+            return 'Unknown', confidence, source
+
+        # Invalid raw gender value from API.
+        inferred_gender, confidence, source = self._infer_gender_from_name(clean_name)
+        if inferred_gender and confidence >= self.person_gender_inference_threshold:
+            return inferred_gender, confidence, source
+        return 'Unknown', confidence, source
 
     def connect_db(self):
         try:
@@ -214,31 +377,37 @@ class PersonsETL:
         """Add a new column to the persons table."""
         with self.schema_lock:
             try:
-                # Determine column type based on field name
-                if 'date' in column_name.lower():
-                    column_type = 'DATE'
-                elif column_name == 'age':
-                    column_type = 'INTEGER'
-                elif column_name in ('is_died',):
-                    column_type = 'BOOLEAN'
-                elif column_name in ('name', 'surname', 'alias', 'full_name', 'occupation', 
-                                    'education_qualification', 'designation', 'place_of_work'):
-                    column_type = 'VARCHAR(500)'
-                elif column_name in ('relation_type', 'gender', 'caste', 'sub_caste', 'religion', 
-                                    'nationality', 'residency_type', 'country_code'):
-                    column_type = 'VARCHAR(100)'
-                elif 'pin_code' in column_name.lower() or 'jurisdiction_ps' in column_name.lower():
-                    column_type = 'VARCHAR(20)'
-                elif 'phone_number' in column_name.lower() or 'email_id' in column_name.lower():
-                    column_type = 'VARCHAR(255)'
-                elif 'house_no' in column_name.lower() or 'street' in column_name.lower() or \
-                     'ward' in column_name.lower() or 'landmark' in column_name.lower() or \
-                     'locality' in column_name.lower() or 'area' in column_name.lower() or \
-                     'district' in column_name.lower() or 'state' in column_name.lower() or \
-                     'country' in column_name.lower():
-                    column_type = 'VARCHAR(255)'
+                explicit_type = (column_type or '').strip().upper()
+                if explicit_type and explicit_type != 'TEXT':
+                    column_type = explicit_type
                 else:
-                    column_type = 'VARCHAR(255)'
+                    # Determine column type based on field name
+                    if 'date' in column_name.lower():
+                        column_type = 'DATE'
+                    elif column_name == 'age':
+                        column_type = 'INTEGER'
+                    elif column_name in ('is_died',):
+                        column_type = 'BOOLEAN'
+                    elif column_name in ('name', 'surname', 'alias', 'full_name', 'raw_full_name', 'occupation', 
+                                        'education_qualification', 'designation', 'place_of_work'):
+                        column_type = 'VARCHAR(500)'
+                    elif column_name in ('relation_type', 'gender', 'caste', 'sub_caste', 'religion', 
+                                        'nationality', 'residency_type', 'country_code', 'gender_source'):
+                        column_type = 'VARCHAR(100)'
+                    elif column_name == 'gender_confidence':
+                        column_type = 'NUMERIC(4,3)'
+                    elif 'pin_code' in column_name.lower() or 'jurisdiction_ps' in column_name.lower():
+                        column_type = 'VARCHAR(20)'
+                    elif 'phone_number' in column_name.lower() or 'email_id' in column_name.lower():
+                        column_type = 'VARCHAR(255)'
+                    elif 'house_no' in column_name.lower() or 'street' in column_name.lower() or \
+                         'ward' in column_name.lower() or 'landmark' in column_name.lower() or \
+                         'locality' in column_name.lower() or 'area' in column_name.lower() or \
+                         'district' in column_name.lower() or 'state' in column_name.lower() or \
+                         'country' in column_name.lower():
+                        column_type = 'VARCHAR(255)'
+                    else:
+                        column_type = 'VARCHAR(255)'
                 
                 with self.db_pool.get_connection_context() as conn:
                     cursor = conn.cursor()
@@ -250,6 +419,144 @@ class PersonsETL:
             except Exception as e:
                 logger.error(f"❌ Error adding column {column_name}: {e}")
                 return False
+
+    def ensure_person_enrichment_columns(self, table_columns: Set[str]) -> Set[str]:
+        """Ensure required enrichment columns exist in persons table."""
+        required_columns = {
+            'raw_full_name': 'VARCHAR(500)',
+            'gender_confidence': 'NUMERIC(4,3)',
+            'gender_source': 'VARCHAR(20)'
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name not in table_columns:
+                if self.add_column_to_table(column_name, column_type):
+                    table_columns.add(column_name)
+        return table_columns
+
+    def apply_person_enrichment(self, person_id: str, raw_full_name: Optional[str],
+                                gender_confidence: Optional[float], gender_source: Optional[str],
+                                table_columns: Set[str], cursor):
+        """Apply enrichment fields that are not part of the base API mapping."""
+        updates = []
+        values = []
+
+        if 'raw_full_name' in table_columns:
+            updates.append('raw_full_name = COALESCE(%s, raw_full_name)')
+            values.append(raw_full_name)
+
+        if 'gender_confidence' in table_columns:
+            updates.append('gender_confidence = COALESCE(%s, gender_confidence)')
+            values.append(gender_confidence)
+
+        if 'gender_source' in table_columns:
+            updates.append('gender_source = COALESCE(%s, gender_source)')
+            values.append(gender_source)
+
+        if not updates:
+            return
+
+        values.append(person_id)
+        cursor.execute(
+            f"""
+                UPDATE {PERSONS_TABLE}
+                SET {', '.join(updates)}
+                WHERE person_id = %s
+            """,
+            tuple(values)
+        )
+
+    def _normalize_confidence(self, value: Optional[Any]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return round(float(value), 3)
+        except Exception:
+            return None
+
+    def log_dry_run_change(self, person_id: str, operation: str, changes: Dict[str, Dict[str, Any]],
+                           preview: Dict[str, Any]):
+        if not self.dry_run_log_file:
+            return
+        payload = {
+            'timestamp': datetime.now(tz=IST_OFFSET).isoformat(),
+            'person_id': person_id,
+            'operation': operation,
+            'changes': changes,
+            'preview': preview,
+        }
+        with self.dry_run_lock:
+            with open(self.dry_run_log_file, 'a', encoding='utf-8') as handle:
+                handle.write(json.dumps(payload, ensure_ascii=True) + '\n')
+
+    def handle_dry_run(self, person_id: str, clean_full_name: Optional[str], raw_full_name_value: Optional[str],
+                       resolved_gender: Optional[str], gender_confidence: Optional[float],
+                       gender_source: Optional[str], table_columns: Set[str], cursor):
+        select_columns = ['full_name', 'gender']
+        if 'raw_full_name' in table_columns:
+            select_columns.append('raw_full_name')
+        if 'gender_confidence' in table_columns:
+            select_columns.append('gender_confidence')
+        if 'gender_source' in table_columns:
+            select_columns.append('gender_source')
+
+        cursor.execute(
+            f"""
+                SELECT {', '.join(select_columns)}
+                FROM {PERSONS_TABLE}
+                WHERE person_id = %s
+            """,
+            (person_id,)
+        )
+        row = cursor.fetchone()
+
+        new_conf = self._normalize_confidence(gender_confidence)
+        if row is None:
+            preview = {
+                'full_name': clean_full_name,
+                'raw_full_name': raw_full_name_value,
+                'gender': resolved_gender,
+                'gender_confidence': new_conf,
+                'gender_source': gender_source,
+            }
+            self.log_dry_run_change(person_id, 'insert', {}, preview)
+            with self.stats_lock:
+                self.stats['dry_run_inserts'] += 1
+            return
+
+        idx = {name: i for i, name in enumerate(select_columns)}
+        old_full_name = row[idx['full_name']] if 'full_name' in idx else None
+        old_gender = row[idx['gender']] if 'gender' in idx else None
+        old_raw_full_name = row[idx['raw_full_name']] if 'raw_full_name' in idx else None
+        old_conf = row[idx['gender_confidence']] if 'gender_confidence' in idx else None
+        old_source = row[idx['gender_source']] if 'gender_source' in idx else None
+        old_conf = self._normalize_confidence(old_conf)
+        changes: Dict[str, Dict[str, Any]] = {}
+
+        if clean_full_name is not None and clean_full_name != old_full_name:
+            changes['full_name'] = {'old': old_full_name, 'new': clean_full_name}
+        if raw_full_name_value is not None and raw_full_name_value != old_raw_full_name:
+            changes['raw_full_name'] = {'old': old_raw_full_name, 'new': raw_full_name_value}
+        if resolved_gender is not None and resolved_gender != old_gender:
+            changes['gender'] = {'old': old_gender, 'new': resolved_gender}
+        if new_conf is not None and new_conf != old_conf:
+            changes['gender_confidence'] = {'old': old_conf, 'new': new_conf}
+        if gender_source is not None and gender_source != old_source:
+            changes['gender_source'] = {'old': old_source, 'new': gender_source}
+
+        if changes:
+            preview = {
+                'full_name': clean_full_name,
+                'raw_full_name': raw_full_name_value,
+                'gender': resolved_gender,
+                'gender_confidence': new_conf,
+                'gender_source': gender_source,
+            }
+            self.log_dry_run_change(person_id, 'update', changes, preview)
+            with self.stats_lock:
+                self.stats['dry_run_changes'] += 1
+        else:
+            with self.stats_lock:
+                self.stats['dry_run_no_change'] += 1
     
     def update_existing_records_with_new_fields(self, new_fields: Dict[str, str]):
         """
@@ -280,6 +587,7 @@ class PersonsETL:
             'person_id', 'name', 'surname', 'alias', 'full_name', 'relation_type', 'relative_name',
             'gender', 'is_died', 'date_of_birth', 'age', 'occupation', 'education_qualification',
             'caste', 'sub_caste', 'religion', 'nationality', 'designation', 'place_of_work',
+            'raw_full_name', 'gender_confidence', 'gender_source',
             'present_house_no', 'present_street_road_no', 'present_ward_colony',
             'present_landmark_milestone', 'present_locality_village', 'present_area_mandal',
             'present_district', 'present_state_ut', 'present_country', 'present_residency_type',
@@ -624,7 +932,28 @@ class PersonsETL:
         except Exception:
             age_value = None
 
+        api_full_name = personal.get('FULL_NAME')
+        raw_full_name_value = self.truncate_string(api_full_name, 500, 'raw_full_name')
+        clean_full_name = self._normalize_person_name(api_full_name, personal)
+        clean_full_name = self.truncate_string(clean_full_name, 500, 'full_name')
+        resolved_gender, gender_confidence, gender_source = self._resolve_gender(clean_full_name, personal.get('GENDER'))
+        resolved_gender = self.truncate_string(resolved_gender, 20, 'gender')
+        gender_source = self.truncate_string(gender_source, 20, 'gender_source')
+
         try:
+            if self.person_gender_dry_run:
+                self.handle_dry_run(
+                    person_id=person_id,
+                    clean_full_name=clean_full_name,
+                    raw_full_name_value=raw_full_name_value,
+                    resolved_gender=resolved_gender,
+                    gender_confidence=gender_confidence,
+                    gender_source=gender_source,
+                    table_columns=table_columns,
+                    cursor=cursor
+                )
+                return
+
             cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (p.get('PERSON_ID'),))
             exists = cursor.fetchone() is not None
 
@@ -686,10 +1015,10 @@ class PersonsETL:
                         self.truncate_string(personal.get('NAME'), 255, 'name'),
                         self.truncate_string(personal.get('SURNAME'), 255, 'surname'),
                         self.truncate_string(personal.get('ALIAS'), 255, 'alias'),
-                        self.truncate_string(personal.get('FULL_NAME'), 500, 'full_name'),
+                        clean_full_name,
                         self.truncate_string(personal.get('RELATION_TYPE'), 50, 'relation_type'),
                         self.truncate_string(personal.get('RELATIVE_NAME'), 255, 'relative_name'),
-                        self.truncate_string(personal.get('GENDER'), 20, 'gender'),
+                        resolved_gender,
                         personal.get('IS_DIED'),
                         personal.get('DATE_OF_BIRTH'), age_value,
                         self.truncate_string(personal.get('OCCUPATION'), 255, 'occupation'),
@@ -730,6 +1059,15 @@ class PersonsETL:
                         date_created, date_modified,
                         person_id
                     )
+                )
+
+                self.apply_person_enrichment(
+                    person_id=person_id,
+                    raw_full_name=raw_full_name_value,
+                    gender_confidence=gender_confidence,
+                    gender_source=gender_source,
+                    table_columns=table_columns,
+                    cursor=cursor
                 )
                 with self.stats_lock:
                     self.stats['updated'] += 1
@@ -779,10 +1117,10 @@ class PersonsETL:
                         self.truncate_string(personal.get('NAME'), 255, 'name'),
                         self.truncate_string(personal.get('SURNAME'), 255, 'surname'),
                         self.truncate_string(personal.get('ALIAS'), 255, 'alias'),
-                        self.truncate_string(personal.get('FULL_NAME'), 500, 'full_name'),
+                        clean_full_name,
                         self.truncate_string(personal.get('RELATION_TYPE'), 50, 'relation_type'),
                         self.truncate_string(personal.get('RELATIVE_NAME'), 255, 'relative_name'),
-                        self.truncate_string(personal.get('GENDER'), 20, 'gender'),
+                        resolved_gender,
                         personal.get('IS_DIED'),
                         personal.get('DATE_OF_BIRTH'), age_value,
                         self.truncate_string(personal.get('OCCUPATION'), 255, 'occupation'),
@@ -823,6 +1161,15 @@ class PersonsETL:
                         date_created, date_modified
                     )
                 )
+
+                self.apply_person_enrichment(
+                    person_id=person_id,
+                    raw_full_name=raw_full_name_value,
+                    gender_confidence=gender_confidence,
+                    gender_source=gender_source,
+                    table_columns=table_columns,
+                    cursor=cursor
+                )
                 with self.stats_lock:
                     self.stats['inserted'] += 1
                 
@@ -845,6 +1192,10 @@ class PersonsETL:
         logger.info("=" * 80)
         logger.info("ℹ️  This process incrementally fetches person details for PERSON_IDs")
         logger.info("ℹ️  Only processes person_ids from recently updated accused records")
+        if self.person_gender_dry_run:
+            logger.warning("⚠️  DRY RUN MODE ENABLED: writes are disabled and would-change rows are logged only")
+            if self.dry_run_log_file:
+                logger.warning(f"⚠️  Dry-run change log: {self.dry_run_log_file}")
         logger.info("=" * 80)
         
         if not self.connect_db():
@@ -852,6 +1203,15 @@ class PersonsETL:
         try:
             # Get table columns for schema evolution
             table_columns = self.get_table_columns(PERSONS_TABLE)
+            if self.person_gender_dry_run:
+                missing = [c for c in ('raw_full_name', 'gender_confidence', 'gender_source') if c not in table_columns]
+                if missing:
+                    logger.warning(
+                        f"⚠️  Dry-run detected missing enrichment columns {missing}. "
+                        "Preview output will omit comparisons for missing columns."
+                    )
+            else:
+                table_columns = self.ensure_person_enrichment_columns(table_columns)
             logger.debug(f"Existing table columns: {sorted(table_columns)}")
             
             person_ids = self.get_person_ids()
@@ -870,7 +1230,7 @@ class PersonsETL:
                 data = self.fetch_person_api(pid)
                 if data:
                     # Check for schema evolution on first record
-                    if not first_record_processed and table_columns is not None:
+                    if not first_record_processed and table_columns is not None and not self.person_gender_dry_run:
                         with self.schema_lock:
                             # Double check in case another thread already did it
                             if not first_record_processed:
@@ -948,6 +1308,12 @@ class PersonsETL:
                 logger.info(f"  Processed → DB Coverage: {coverage:.2f}%")
             logger.info(f"")
             logger.info(f"❌ Errors:                  {self.stats['errors']}")
+            if self.person_gender_dry_run:
+                logger.info("")
+                logger.info("🧪 DRY-RUN RESULTS:")
+                logger.info(f"  Would Insert:             {self.stats['dry_run_inserts']}")
+                logger.info(f"  Would Update:             {self.stats['dry_run_changes']}")
+                logger.info(f"  No Change:                {self.stats['dry_run_no_change']}")
             logger.info("=" * 80)
             logger.info("✅ ETL Pipeline completed successfully!")
             return True

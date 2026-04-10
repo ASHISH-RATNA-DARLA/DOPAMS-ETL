@@ -70,6 +70,14 @@ LOG_CONFIG = {
     'date_format': '%Y-%m-%d %H:%M:%S'
 }
 
+# Person gender standardization/inference rollout controls.
+PERSON_GENDER_CONFIG = {
+    'infer_on_unknown': os.getenv('PERSON_GENDER_INFER_ON_UNKNOWN', 'false').lower() == 'true',
+    'inference_threshold': float(os.getenv('PERSON_GENDER_INFERENCE_THRESHOLD', '0.8')),
+    'dry_run': os.getenv('PERSON_GENDER_DRY_RUN', 'false').lower() == 'true',
+    'preserve_valid_api': os.getenv('PERSON_GENDER_PRESERVE_VALID_API', 'true').lower() == 'true',
+}
+
 # Table configuration (allows redirecting ETL runs to test tables)
 def _table_name(env_key: str, default: str) -> str:
     """Return override table name; fall back to default if env unset or empty."""
