@@ -1,0 +1,15 @@
+{
+  "testedAt": "2026-04-10T07:35:10.293Z",
+  "endpoint": "http://103.164.200.184:3000/api/DOPAMS/files/38cdbc0c-fabd-4186-95d2-b8d25e8d6bc9",
+  "burstCount": 15,
+  "burstElapsedSeconds": 4.2,
+  "burstStatuses": {
+    "200": 9,
+    "429": 6,
+    "retry-after-header-seen": 6
+  },
+  "pacedCount": 3,
+  "pacedStatuses": {
+    "429": 3
+  }
+}

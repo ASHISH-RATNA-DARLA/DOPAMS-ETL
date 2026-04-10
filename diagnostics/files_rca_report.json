@@ -1,0 +1,710 @@
+{
+  "generatedAt": "2026-04-10T07:26:52.433Z",
+  "envSource": "D:\\DOPAMS\\Toystack\\dopams-etl-pipelines\\.env.server",
+  "db": {
+    "host": "192.168.103.106",
+    "port": 5432,
+    "database": "dev-2",
+    "user": "dev_dopamas"
+  },
+  "findings": {
+    "totalRows": [
+      {
+        "total": "120132"
+      }
+    ],
+    "recent": [
+      {
+        "id": "a6d82cce-07f7-45f8-876b-cfe1cad9d141",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c67bf8443c1035440c1fa2",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "2fa60b89-1664-480d-ae34-5afff6bad9d0",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c6733a650ba24c5657b9f7",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "981cce6e-ed4d-4369-87a7-b128887a1e7f",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c662f9a95d6d1a0fb97a7d",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "a4ff05f4-6152-40fc-9735-06e46053ec7b",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c6555ec83ee5e3619c09f0",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "52aacb9a-fabf-41d3-8d56-10450d610427",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c6376c650ba2b25d4fa01d",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "76b77a39-bc73-4e21-87c3-1de8d32a5026",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c63255a1508b3b9aec926d",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "85f1a67d-fe9b-4f92-8177-bc8cca40f375",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c62cf0650ba27ece4e2514",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "18349ba3-9d15-4916-b358-778a888712f5",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c617933f8a9161b7d5055a",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "fd345bed-d87f-42d3-815e-7bc2d866a73e",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c614366ae97620f9c31ced",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "50190327-cade-402a-be35-3cc0e4293f40",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c60b19443c10ae4df9cf90",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "bdda679d-e751-4d80-b03f-ec51b5ef1f4d",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c60a8ae6d67ad19572e826",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "31152dee-ad21-4b16-8f22-2e60c71f37bb",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c609bda1508b32a0e58609",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "b5284c42-be3c-46b9-8fd0-9422f1552ccf",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c60874253af5022545d705",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.427Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "f1c99e8c-e4bb-4da0-9e98-aa1e5e59ea02",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c606dd6ae976243ec1aba3",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "9c86580b-1f60-465d-94f1-21b48e71a8df",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c606c1253af561c545c51d",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "77cbb2be-32e3-4202-bb36-6e450fa3ce6b",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c601e93f8a912f28d331be",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "aa94ce9b-5f1b-4c1a-b49a-a8d3f16375ba",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c59694443c104802f43ca1",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "aa5c6c60-163b-40fb-a8a0-7be670c38013",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c58cf4253af56f53416bbd",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "bfafb5bf-764a-432f-a9d6-a16538ba2667",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c572eef87ba2ec59a3a1d0",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "be9dcf21-77c9-47e8-afd0-167f7ba826a2",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c57173f87ba28b1da39356",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "89b07c39-3d50-4864-8373-cd8a2aa17f88",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c56d88a95d6d1edea043d3",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "192d7b36-60f9-431f-b2e2-59f95e40a1d1",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c53a2e3f8a9150aecb4425",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "0533838a-d4b0-4e4d-ab7f-f1a97507b0d9",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c5385ba95d6d25a39a8fd3",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "76a23dd9-2562-45d2-99bf-e8f3c2572609",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c536763f8a9194ddca8226",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      },
+      {
+        "id": "3f094655-b823-41cc-87fc-6e07f755bdb9",
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "parent_id": "69c534aeb387bfdc3d8dab5e",
+        "file_id": null,
+        "has_field": true,
+        "is_empty": false,
+        "is_downloaded": false,
+        "download_attempts": 0,
+        "download_error": "",
+        "created_at": "2026-04-07T02:37:25.426Z",
+        "downloaded_at": null
+      }
+    ],
+    "pendingByTypeField": [
+      {
+        "source_type": "chargesheets",
+        "source_field": "uploadChargeSheet",
+        "pending_count": "146"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "INTERROGATION_REPORT",
+        "pending_count": "46"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "MEDIA",
+        "pending_count": "3"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "pending_count": "1"
+      },
+      {
+        "source_type": "person",
+        "source_field": "MEDIA",
+        "pending_count": "1"
+      }
+    ],
+    "nullFileIdByTypeField": [
+      {
+        "source_type": "person",
+        "source_field": "IDENTITY_DETAILS",
+        "total": "26649",
+        "null_file_id": "23762",
+        "non_null_file_id": "2887",
+        "suspicious_null_file_id": "23762"
+      },
+      {
+        "source_type": "person",
+        "source_field": "MEDIA",
+        "total": "25700",
+        "null_file_id": "23842",
+        "non_null_file_id": "1858",
+        "suspicious_null_file_id": "23842"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "INTERROGATION_REPORT",
+        "total": "15336",
+        "null_file_id": "5656",
+        "non_null_file_id": "9680",
+        "suspicious_null_file_id": "5656"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "MEDIA",
+        "total": "15267",
+        "null_file_id": "11503",
+        "non_null_file_id": "3764",
+        "suspicious_null_file_id": "11503"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "total": "14466",
+        "null_file_id": "13897",
+        "non_null_file_id": "569",
+        "suspicious_null_file_id": "13897"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "FIR_COPY",
+        "total": "7456",
+        "null_file_id": "1446",
+        "non_null_file_id": "6010",
+        "suspicious_null_file_id": "1446"
+      },
+      {
+        "source_type": "chargesheets",
+        "source_field": "uploadChargeSheet",
+        "total": "5429",
+        "null_file_id": "535",
+        "non_null_file_id": "4894",
+        "suspicious_null_file_id": "535"
+      },
+      {
+        "source_type": "property",
+        "source_field": "MEDIA",
+        "total": "5407",
+        "null_file_id": "5248",
+        "non_null_file_id": "159",
+        "suspicious_null_file_id": "5248"
+      },
+      {
+        "source_type": "mo_seizures",
+        "source_field": "MO_MEDIA",
+        "total": "2477",
+        "null_file_id": "2066",
+        "non_null_file_id": "411",
+        "suspicious_null_file_id": "2066"
+      },
+      {
+        "source_type": "case_property",
+        "source_field": "MEDIA",
+        "total": "1941",
+        "null_file_id": "1940",
+        "non_null_file_id": "1",
+        "suspicious_null_file_id": "1940"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "total": "4",
+        "null_file_id": "3",
+        "non_null_file_id": "1",
+        "suspicious_null_file_id": "3"
+      }
+    ],
+    "errorSummary": [
+      {
+        "source_type": "chargesheets",
+        "source_field": "uploadChargeSheet",
+        "error_rows": "146",
+        "attempted_rows": "146",
+        "max_attempts": 41
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "INTERROGATION_REPORT",
+        "error_rows": "46",
+        "attempted_rows": "44",
+        "max_attempts": 38
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "MEDIA",
+        "error_rows": "3",
+        "attempted_rows": "3",
+        "max_attempts": 32
+      },
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "error_rows": "1",
+        "attempted_rows": "1",
+        "max_attempts": 31
+      },
+      {
+        "source_type": "person",
+        "source_field": "MEDIA",
+        "error_rows": "1",
+        "attempted_rows": "1",
+        "max_attempts": 37
+      }
+    ],
+    "topErrors": [
+      {
+        "error_text": "HTTP 400 Bad Request - File does not exist or invalid file_id",
+        "cnt": "172"
+      },
+      {
+        "error_text": "Failed to check existence after retries",
+        "cnt": "25"
+      }
+    ],
+    "distribution": [
+      {
+        "source_type": "crime",
+        "source_field": "FIR_COPY",
+        "cnt": "7456"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "cnt": "4"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "MEDIA",
+        "cnt": "15267"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "INTERROGATION_REPORT",
+        "cnt": "15336"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "cnt": "14466"
+      },
+      {
+        "source_type": "property",
+        "source_field": "MEDIA",
+        "cnt": "5407"
+      },
+      {
+        "source_type": "person",
+        "source_field": "MEDIA",
+        "cnt": "25700"
+      },
+      {
+        "source_type": "person",
+        "source_field": "IDENTITY_DETAILS",
+        "cnt": "26649"
+      },
+      {
+        "source_type": "mo_seizures",
+        "source_field": "MO_MEDIA",
+        "cnt": "2477"
+      },
+      {
+        "source_type": "chargesheets",
+        "source_field": "uploadChargeSheet",
+        "cnt": "5429"
+      },
+      {
+        "source_type": "case_property",
+        "source_field": "MEDIA",
+        "cnt": "1941"
+      }
+    ],
+    "stuckRetries": [
+      {
+        "source_type": "chargesheets",
+        "source_field": "uploadChargeSheet",
+        "stuck_count": "146"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "INTERROGATION_REPORT",
+        "stuck_count": "8"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "stuck_count": "1"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "MEDIA",
+        "stuck_count": "1"
+      },
+      {
+        "source_type": "person",
+        "source_field": "MEDIA",
+        "stuck_count": "1"
+      }
+    ],
+    "statusMix": [
+      {
+        "total": "120132",
+        "with_file_id": "30234",
+        "candidate_downloadable": "30234",
+        "downloaded_true": "30037",
+        "pending_or_unknown": "90095",
+        "with_error": "197"
+      }
+    ],
+    "duplicateFileId": [
+      {
+        "file_id": "bb35e549-4c60-4a5f-9aa6-ef5b09790970",
+        "cnt": "10"
+      },
+      {
+        "file_id": "a0d75706-cde3-44f8-a442-2504e7ad53ae",
+        "cnt": "10"
+      },
+      {
+        "file_id": "0901530e-bf9d-46fb-b856-a9a8e6f75746",
+        "cnt": "6"
+      },
+      {
+        "file_id": "d556d54a-bb8a-4f45-aca9-ad39f4e613d3",
+        "cnt": "5"
+      },
+      {
+        "file_id": "bc3c058e-beeb-4559-aef8-21fcba3fa827",
+        "cnt": "4"
+      },
+      {
+        "file_id": "17225d9d-79e4-4582-b911-0088c1929344",
+        "cnt": "4"
+      },
+      {
+        "file_id": "4fa02dec-995b-4dc7-aea1-fbabdbb5c7d8",
+        "cnt": "4"
+      },
+      {
+        "file_id": "f0a55c69-7288-4785-b033-0b4ce99ffdad",
+        "cnt": "4"
+      },
+      {
+        "file_id": "7c7d7ad2-c61c-4e3e-b74b-4fffaeeff65e",
+        "cnt": "3"
+      },
+      {
+        "file_id": "135dc97b-2a06-4c52-9cee-4a042980f026",
+        "cnt": "3"
+      },
+      {
+        "file_id": "d85ff0b2-7692-4d5e-86cb-756d96d9e24d",
+        "cnt": "3"
+      },
+      {
+        "file_id": "bb2c6503-1733-438d-b9fb-6293de45a1fd",
+        "cnt": "3"
+      },
+      {
+        "file_id": "4fea58de-302e-4c2b-9e38-7bc7e7754a9c",
+        "cnt": "3"
+      },
+      {
+        "file_id": "7562c51b-6955-40b6-b3f9-5164a93cb2a7",
+        "cnt": "3"
+      },
+      {
+        "file_id": "4d0eec21-8c4d-46aa-ba2b-ea0360c72542",
+        "cnt": "2"
+      },
+      {
+        "file_id": "499c6e8d-309a-4af3-af3b-b224b7f28524",
+        "cnt": "2"
+      },
+      {
+        "file_id": "3b3b803a-5e46-4d63-b287-14a9b024b547",
+        "cnt": "2"
+      },
+      {
+        "file_id": "163619f9-4775-4afd-a10c-dbb36218fb4f",
+        "cnt": "2"
+      },
+      {
+        "file_id": "1136d256-edeb-4292-8dd5-bd4f32100e35",
+        "cnt": "2"
+      },
+      {
+        "file_id": "34edcf88-e195-4c0b-b341-815eaa3a0b98",
+        "cnt": "2"
+      }
+    ],
+    "unmappablePotential": []
+  }
+}

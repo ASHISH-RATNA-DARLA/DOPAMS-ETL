@@ -1,0 +1,191 @@
+{
+  "generatedAt": "2026-04-10T07:53:25.480Z",
+  "envSource": "D:\\DOPAMS\\Toystack\\dopams-etl-pipelines\\.env.server",
+  "checks": {
+    "columns_present": [
+      {
+        "column_name": "created_at"
+      },
+      {
+        "column_name": "download_attempts"
+      },
+      {
+        "column_name": "download_error"
+      },
+      {
+        "column_name": "downloaded_at"
+      },
+      {
+        "column_name": "file_id"
+      },
+      {
+        "column_name": "file_path"
+      },
+      {
+        "column_name": "file_url"
+      },
+      {
+        "column_name": "has_field"
+      },
+      {
+        "column_name": "is_downloaded"
+      },
+      {
+        "column_name": "is_empty"
+      },
+      {
+        "column_name": "parent_id"
+      },
+      {
+        "column_name": "source_field"
+      },
+      {
+        "column_name": "source_type"
+      }
+    ],
+    "enum_source_type": [
+      {
+        "value": "crime"
+      },
+      {
+        "value": "interrogation"
+      },
+      {
+        "value": "property"
+      },
+      {
+        "value": "person"
+      },
+      {
+        "value": "mo_seizures"
+      },
+      {
+        "value": "chargesheets"
+      },
+      {
+        "value": "case_property"
+      }
+    ],
+    "enum_source_field": [
+      {
+        "value": "FIR_COPY"
+      },
+      {
+        "value": "MEDIA"
+      },
+      {
+        "value": "INTERROGATION_REPORT"
+      },
+      {
+        "value": "DOPAMS_DATA"
+      },
+      {
+        "value": "IDENTITY_DETAILS"
+      },
+      {
+        "value": "MO_MEDIA"
+      },
+      {
+        "value": "uploadChargeSheet"
+      }
+    ],
+    "downloadable_unmapped_combos": [],
+    "null_fileid_but_downloadable_flag": [
+      {
+        "source_type": "person",
+        "source_field": "MEDIA",
+        "cnt": "23842"
+      },
+      {
+        "source_type": "person",
+        "source_field": "IDENTITY_DETAILS",
+        "cnt": "23762"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "DOPAMS_DATA",
+        "cnt": "13897"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "MEDIA",
+        "cnt": "11503"
+      },
+      {
+        "source_type": "interrogation",
+        "source_field": "INTERROGATION_REPORT",
+        "cnt": "5656"
+      },
+      {
+        "source_type": "property",
+        "source_field": "MEDIA",
+        "cnt": "5248"
+      },
+      {
+        "source_type": "mo_seizures",
+        "source_field": "MO_MEDIA",
+        "cnt": "2066"
+      },
+      {
+        "source_type": "case_property",
+        "source_field": "MEDIA",
+        "cnt": "1940"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "FIR_COPY",
+        "cnt": "1446"
+      },
+      {
+        "source_type": "chargesheets",
+        "source_field": "uploadChargeSheet",
+        "cnt": "535"
+      },
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "cnt": "3"
+      }
+    ],
+    "pending_queue_size": [
+      {
+        "pending": "197"
+      }
+    ],
+    "permanent_error_rows": [
+      {
+        "permanent_error_rows": "0"
+      }
+    ],
+    "high_attempt_rows": [
+      {
+        "gt5_attempt_rows": "157"
+      }
+    ],
+    "path_url_missing_for_downloadable": [
+      {
+        "source_type": "crime",
+        "source_field": "MEDIA",
+        "missing_path": "1",
+        "missing_url": "1",
+        "total": "1"
+      }
+    ],
+    "duplicate_composite_key_rows": [],
+    "trigger_exists": [
+      {
+        "tgname": "trigger_auto_generate_file_paths"
+      }
+    ],
+    "retry_error_top": [
+      {
+        "error_text": "HTTP 400 Bad Request - File does not exist or invalid file_id",
+        "cnt": "172"
+      },
+      {
+        "error_text": "Failed to check existence after retries",
+        "cnt": "25"
+      }
+    ]
+  }
+}

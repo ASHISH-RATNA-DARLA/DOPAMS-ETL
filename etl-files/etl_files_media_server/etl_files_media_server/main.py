@@ -42,6 +42,7 @@ import sys
 import time
 import logging
 import argparse
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
@@ -76,6 +77,12 @@ BASE_MEDIA_PATH = os.getenv(
 # Files API rate limit: reduced to 5 requests per minute to avoid connection blocking
 FILES_API_MAX_RPM = 5
 SECONDS_PER_REQUEST = 60.0 / FILES_API_MAX_RPM  # 12.0 seconds
+
+# Hard cap to avoid retrying permanently bad file_ids forever across runs.
+MAX_TOTAL_ATTEMPTS = int(os.getenv("FILES_MAX_TOTAL_ATTEMPTS", "5"))
+
+# By default, do not requeue terminal failures (PERMANENT:*).
+RETRY_PERMANENT_ERRORS = os.getenv("FILES_RETRY_PERMANENT_ERRORS", "false").lower() == "true"
 
 # -----------------------------------------------------------------------------
 # Logging setup
@@ -156,6 +163,10 @@ def map_destination_subdir(source_type: str, source_field: str) -> Optional[str]
     source_field = (source_field or "").upper()
 
     if source_type == "crime" and source_field == "FIR_COPY":
+        return "crimes"
+
+    # Backward-compatibility: some historical rows use crime/MEDIA.
+    if source_type == "crime" and source_field == "MEDIA":
         return "crimes"
 
     if source_type == "person" and source_field == "IDENTITY_DETAILS":
@@ -288,6 +299,10 @@ class FilesMediaServerETL:
         self.db_conn: Optional[psycopg2.extensions.connection] = None
         self.db_cursor: Optional[psycopg2.extensions.cursor] = None
         self.repair = repair
+        # Strict global API pacing gate: every HEAD/GET must pass through this.
+        # This prevents bursts even in fast sequential code paths.
+        self._api_rate_lock = threading.Lock()
+        self._last_api_request_ts = 0.0
         self.stats = {
             "total_rows": 0,
             "total_with_file_id": 0,
@@ -418,9 +433,14 @@ class FilesMediaServerETL:
             "has_field IS TRUE",
             "is_empty IS FALSE"
         ]
+        query_params = []
         
         if not self.repair:
             conditions.append("(is_downloaded IS FALSE OR downloaded_at IS NULL)")
+            conditions.append("(download_attempts IS NULL OR download_attempts < %s)")
+            query_params.append(MAX_TOTAL_ATTEMPTS)
+            if not RETRY_PERMANENT_ERRORS:
+                conditions.append("(download_error IS NULL OR download_error NOT LIKE 'PERMANENT:%')")
 
         logger.info(f"📥 Fetching file metadata from table: {FILES_TABLE}")
         if self.repair:
@@ -443,7 +463,7 @@ class FilesMediaServerETL:
                 created_at DESC NULLS LAST, 
                 file_id
         """
-        self.db_cursor.execute(sql)
+        self.db_cursor.execute(sql, tuple(query_params))
 
         if resume_from_date_per_source:
             logger.info("   📅 Last download dates per source_type (for reference):")
@@ -466,7 +486,7 @@ class FilesMediaServerETL:
                 FROM {FILES_TABLE}
                 WHERE {' AND '.join(conditions)}
             """
-            self.db_cursor.execute(stats_sql)
+            self.db_cursor.execute(stats_sql, tuple(query_params))
             stats = self.db_cursor.fetchone()
 
             if stats and stats[0]:
@@ -480,6 +500,7 @@ class FilesMediaServerETL:
                 logger.info(f"      - Total files to download: {total_count}")
                 logger.info(f"      - Never attempted: {never_attempted}")
                 logger.info(f"      - Previously failed (will retry): {previously_failed}")
+                logger.info(f"      - Max total attempts allowed per file_id: {MAX_TOTAL_ATTEMPTS}")
                 logger.info(f"      - Date range: {newest} (newest) → {oldest} (oldest)")
 
         by_source_type = {}
@@ -504,6 +525,20 @@ class FilesMediaServerETL:
     # HTTP / download helpers
     # -------------------------------------------------------------------------
 
+    def _wait_for_request_slot(self) -> None:
+        """
+        Strict pacing: allow only one API request every SECONDS_PER_REQUEST.
+
+        This is enforced before EVERY outbound HEAD/GET call so we do not rely
+        on loop speed or sequential execution behavior.
+        """
+        with self._api_rate_lock:
+            now = time.time()
+            wait_for = (self._last_api_request_ts + SECONDS_PER_REQUEST) - now
+            if wait_for > 0:
+                time.sleep(wait_for)
+            self._last_api_request_ts = time.time()
+
     def build_file_url(self, file_id: str) -> str:
         """Build the files API URL for a given file_id."""
         return f"{FILES_BASE_URL}/{file_id}"
@@ -519,6 +554,8 @@ class FilesMediaServerETL:
         # Retry logic for existence check to handle transient connection errors
         for attempt in range(1, 4):
             try:
+                # Enforce strict request pacing for every HEAD call.
+                self._wait_for_request_slot()
                 response = requests.head(
                     url,
                     headers=headers,
@@ -529,9 +566,9 @@ class FilesMediaServerETL:
                 if response.status_code == 200:
                     return (True, None)
                 elif response.status_code == 404:
-                    return (False, "HTTP 404 Not Found - File does not exist")
+                    return (False, "PERMANENT: HTTP 404 Not Found - File does not exist")
                 elif response.status_code == 400:
-                    return (False, "HTTP 400 Bad Request - File does not exist or invalid file_id")
+                    return (False, "PERMANENT: HTTP 400 Bad Request - File does not exist or invalid file_id")
                 elif response.status_code == 429:
                     # Rate limited, wait and retry
                     time.sleep(SECONDS_PER_REQUEST * attempt)
@@ -607,6 +644,8 @@ class FilesMediaServerETL:
                     f"(source_type={source_type}, source_field={source_field}) "
                     f"from {url} (attempt {attempt}/{max_retries})"
                 )
+                # Enforce strict request pacing for every GET call.
+                self._wait_for_request_slot()
                 with requests.get(
                     url,
                     headers=headers,
@@ -628,6 +667,14 @@ class FilesMediaServerETL:
                                 f"skipping file_id={file_id}"
                             )
                             self.stats["skipped_no_mapping"] += 1
+                            self._mark_as_downloaded(
+                                file_id,
+                                success=False,
+                                error_msg=(
+                                    f"PERMANENT: No destination mapping for "
+                                    f"source_type={source_type}, source_field={source_field}"
+                                ),
+                            )
                             self._respect_rate_limit(start_time)
                             return False
 
@@ -706,10 +753,10 @@ class FilesMediaServerETL:
                             error_body = "Could not read response body"
                             
                         if resp.status_code == 400:
-                            error_msg = f"HTTP 400 Bad Request - {error_body}"
+                            error_msg = f"PERMANENT: HTTP 400 Bad Request - {error_body}"
                             logger.error(f"❌ File does not exist (HTTP 400) for file_id={file_id}: {error_body}")
                         elif resp.status_code == 404:
-                            error_msg = f"HTTP 404 Not Found - {error_body}"
+                            error_msg = f"PERMANENT: HTTP 404 Not Found - {error_body}"
                             logger.error(f"❌ File not found (HTTP 404) for file_id={file_id}")
                         elif resp.status_code == 401:
                             error_msg = f"HTTP 401 Unauthorized - {error_body}"
@@ -898,10 +945,33 @@ class FilesMediaServerETL:
 def main() -> None:
     parser = argparse.ArgumentParser(description="DOPAMAS ETL - Files Media Server Downloader")
     parser.add_argument("--repair", action="store_true", help="Repair mode: Check all files, including those marked as downloaded")
+    parser.add_argument("--skip-sync", action="store_true", help="Skip sync validation after download")
     args = parser.parse_args()
     
     etl = FilesMediaServerETL(repair=args.repair)
     success = etl.run()
+    
+    # Run sync validation after download completes
+    if success and not args.skip_sync:
+        logger = logging.getLogger("etl-files-media-server")
+        logger.info("\n" + "=" * 80)
+        logger.info("🔄 STARTING FILES SYNC VALIDATION")
+        logger.info("=" * 80)
+        
+        # Import and run sync to verify downloaded files exist on disk
+        try:
+            # Add parent directory to path to import sync script
+            sys.path.insert(0, str(PARENT_DIR))
+            from sync_files_state import run_sync
+            sync_success = run_sync(logger=logger)
+            if sync_success:
+                logger.info("✅ Sync validation completed successfully")
+            else:
+                logger.warning("⚠️  Sync validation failed")
+        except Exception as e:
+            logger.error(f"⚠️  Sync validation encountered error: {e}")
+            logger.warning("Downloader completed, but sync check failed. Check manually if needed.")
+    
     sys.exit(0 if success else 1)
 
 

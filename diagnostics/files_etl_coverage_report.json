@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2026-04-10T07:47:48.612Z",
+  "totals": {
+    "combos": 11,
+    "combos_with_downloadable": 11,
+    "mapping_gaps_for_downloadable": 0
+  },
+  "combos": [
+    {
+      "source_type": "crime",
+      "source_field": "FIR_COPY",
+      "total": 7456,
+      "downloadable": 6010,
+      "pending": 0,
+      "mapped_subdir": "crimes",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "crime",
+      "source_field": "MEDIA",
+      "total": 4,
+      "downloadable": 1,
+      "pending": 1,
+      "mapped_subdir": "crimes",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "interrogation",
+      "source_field": "MEDIA",
+      "total": 15267,
+      "downloadable": 3764,
+      "pending": 3,
+      "mapped_subdir": "interrogations\\media",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "interrogation",
+      "source_field": "INTERROGATION_REPORT",
+      "total": 15336,
+      "downloadable": 9680,
+      "pending": 46,
+      "mapped_subdir": "interrogations\\interrogationreport",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "interrogation",
+      "source_field": "DOPAMS_DATA",
+      "total": 14466,
+      "downloadable": 569,
+      "pending": 0,
+      "mapped_subdir": "interrogations\\dopamsdata",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "property",
+      "source_field": "MEDIA",
+      "total": 5407,
+      "downloadable": 159,
+      "pending": 0,
+      "mapped_subdir": "property",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "person",
+      "source_field": "MEDIA",
+      "total": 25700,
+      "downloadable": 1858,
+      "pending": 1,
+      "mapped_subdir": "person\\media",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "person",
+      "source_field": "IDENTITY_DETAILS",
+      "total": 26649,
+      "downloadable": 2887,
+      "pending": 0,
+      "mapped_subdir": "person\\identitydetails",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "mo_seizures",
+      "source_field": "MO_MEDIA",
+      "total": 2477,
+      "downloadable": 411,
+      "pending": 0,
+      "mapped_subdir": "mo_seizures",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "chargesheets",
+      "source_field": "uploadChargeSheet",
+      "total": 5429,
+      "downloadable": 4894,
+      "pending": 146,
+      "mapped_subdir": "chargesheets",
+      "mapping_ok": true
+    },
+    {
+      "source_type": "case_property",
+      "source_field": "MEDIA",
+      "total": 1941,
+      "downloadable": 1,
+      "pending": 0,
+      "mapped_subdir": "fsl_case_property",
+      "mapping_ok": true
+    }
+  ],
+  "mapping_gaps": []
+}

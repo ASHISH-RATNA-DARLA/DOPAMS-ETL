@@ -6,6 +6,7 @@ Resets is_downloaded = FALSE for missing files to allow re-download.
 """
 
 import os
+import logging
 import psycopg2
 from pathlib import Path
 from dotenv import load_dotenv
@@ -82,8 +83,27 @@ DB_CONFIG = {
 BASE_MEDIA_PATH = os.getenv("FILES_MEDIA_BASE_PATH", "/mnt/shared-etl-files")
 FILES_TABLE = os.getenv("FILES_TABLE", "files")
 
+# Setup logger for sync script
+_sync_logger = None
 
-def validate_db_config():
+def get_sync_logger():
+    """Get or create logger for sync operations."""
+    global _sync_logger
+    if _sync_logger is None:
+        _sync_logger = logging.getLogger("etl-files-sync")
+        if not _sync_logger.handlers:
+            _sync_logger.setLevel(logging.INFO)
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            _sync_logger.addHandler(handler)
+    return _sync_logger
+
+
+def validate_db_config(logger=None):
+    if logger is None:
+        logger = get_sync_logger()
+    
     required = {
         "POSTGRES_HOST": DB_CONFIG["host"],
         "POSTGRES_DB": DB_CONFIG["database"],
@@ -96,16 +116,16 @@ def validate_db_config():
     if not missing:
         return True
 
-    print("Missing required database configuration.")
-    print(f"Missing variables: {', '.join(missing)}")
+    logger.error("Missing required database configuration.")
+    logger.error(f"Missing variables: {', '.join(missing)}")
     if LOADED_ENV_FILE:
-        print(f"Loaded env file: {LOADED_ENV_FILE}")
+        logger.error(f"Loaded env file: {LOADED_ENV_FILE}")
     else:
-        print("No env file was loaded.")
-    print("Checked env paths:")
+        logger.error("No env file was loaded.")
+    logger.error("Checked env paths:")
     for env_path in CHECKED_ENV_PATHS:
-        print(f"  - {env_path}")
-    print("You can also set DOPAMS_ENV_FILE=/absolute/path/to/.env.server before running.")
+        logger.error(f"  - {env_path}")
+    logger.error("You can also set DOPAMS_ENV_FILE=/absolute/path/to/.env.server before running.")
     return False
 
 def map_destination_subdir(source_type, source_field):
@@ -114,6 +134,7 @@ def map_destination_subdir(source_type, source_field):
 
     mapping = {
         ("crime", "FIR_COPY"): "crimes",
+        ("crime", "MEDIA"): "crimes",
         ("person", "IDENTITY_DETAILS"): os.path.join("person", "identitydetails"),
         ("person", "MEDIA"): os.path.join("person", "media"),
         ("property", "MEDIA"): "property",
@@ -126,22 +147,30 @@ def map_destination_subdir(source_type, source_field):
     }
     return mapping.get((source_type, source_field))
 
-def run_sync():
-    if not validate_db_config():
-        return
+def run_sync(logger=None):
+    """
+    Sync database file status with filesystem.
+    Checks for files marked as downloaded but missing on disk.
+    Resets is_downloaded = FALSE for missing files to allow re-download.
+    """
+    if logger is None:
+        logger = get_sync_logger()
+    
+    if not validate_db_config(logger):
+        return False
 
-    print(f"Connecting to database {DB_CONFIG['database']} at {DB_CONFIG['host']}...")
+    logger.info(f"Connecting to database {DB_CONFIG['database']} at {DB_CONFIG['host']}...")
     if LOADED_ENV_FILE:
-        print(f"Loaded environment from {LOADED_ENV_FILE}")
+        logger.info(f"Loaded environment from {LOADED_ENV_FILE}")
 
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
     except Exception as e:
-        print(f"Error connecting to database: {e}")
-        return
+        logger.error(f"Error connecting to database: {e}")
+        return False
 
-    print(f"Base media path: {BASE_MEDIA_PATH}")
+    logger.info(f"Base media path: {BASE_MEDIA_PATH}")
     
     # Fetch all files marked as downloaded
     sql = f"""
@@ -152,7 +181,7 @@ def run_sync():
     cursor.execute(sql)
     rows = cursor.fetchall()
     
-    print(f"Found {len(rows)} records marked as is_downloaded = TRUE")
+    logger.info(f"Found {len(rows)} records marked as is_downloaded = TRUE")
     
     missing_count = 0
     fixed_count = 0
@@ -173,7 +202,7 @@ def run_sync():
         
         if not os.path.exists(file_path):
             missing_count += 1
-            # print(f"Missing: {file_path}")
+            # logger.debug(f"Missing: {file_path}")
             
             # Reset status in DB
             update_sql = f"""
@@ -187,16 +216,22 @@ def run_sync():
             
             if fixed_count % 100 == 0:
                 conn.commit()
-                print(f"Fixed {fixed_count} records...")
+                logger.info(f"Fixed {fixed_count} records...")
 
     conn.commit()
-    print(f"\nSync complete:")
-    print(f"Total checked: {len(rows)}")
-    print(f"Total missing: {missing_count}")
-    print(f"Total DB records reset: {fixed_count}")
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info("📊 FILES SYNC VALIDATION SUMMARY")
+    logger.info("=" * 80)
+    logger.info(f"Total records checked: {len(rows)}")
+    logger.info(f"Missing from disk: {missing_count}")
+    logger.info(f"DB records reset for re-download: {fixed_count}")
+    logger.info("=" * 80)
     
     cursor.close()
     conn.close()
+    
+    return True
 
 if __name__ == "__main__":
     run_sync()

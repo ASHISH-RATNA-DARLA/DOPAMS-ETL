@@ -227,6 +227,10 @@ def map_destination_subdir(source_type: str, source_field: str) -> Optional[str]
     if source_type == "crime" and source_field == "FIR_COPY":
         return "crimes"
 
+    # Backward-compatibility: some historical rows use crime/MEDIA.
+    if source_type == "crime" and source_field == "MEDIA":
+        return "crimes"
+
     if source_type == "person" and source_field == "IDENTITY_DETAILS":
         return os.path.join("person", "identitydetails")
 

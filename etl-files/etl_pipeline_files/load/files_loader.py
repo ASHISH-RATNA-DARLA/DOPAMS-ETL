@@ -112,7 +112,8 @@ class FilesLoader:
                     insert_query = """
                         INSERT INTO files (
                             source_type, source_field, parent_id, file_id,
-                            file_index, identity_type, identity_number, created_at
+                            file_index, identity_type, identity_number,
+                            has_field, is_empty, created_at
                         )
                         VALUES %s
                         ON CONFLICT DO NOTHING
@@ -190,6 +191,8 @@ class FilesLoader:
                             r.get('file_index'),
                             r.get('identity_type'),
                             r.get('identity_number'),
+                            r.get('has_field', True),
+                            r.get('is_empty', r.get('file_id') is None),
                             created_at
                         ))
                 else:
@@ -197,7 +200,8 @@ class FilesLoader:
                     insert_query = """
                         INSERT INTO files (
                             source_type, source_field, parent_id, file_id,
-                            file_index, identity_type, identity_number
+                            file_index, identity_type, identity_number,
+                            has_field, is_empty
                         )
                         VALUES %s
                         ON CONFLICT DO NOTHING
@@ -211,7 +215,9 @@ class FilesLoader:
                             r.get('file_id'),
                             r.get('file_index'),
                             r.get('identity_type'),
-                            r.get('identity_number')
+                            r.get('identity_number'),
+                            r.get('has_field', True),
+                            r.get('is_empty', r.get('file_id') is None)
                         )
                         for r in records_to_insert
                     ]
