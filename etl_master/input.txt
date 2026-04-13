@@ -157,48 +157,36 @@ source /data-drive/etl-process-dev/venv/bin/activate
 python3 views_refresh_sql.py
 
 [Order 23]
-brief_facts_accused
+brief_facts_ai
 cd /data-drive/etl-process-dev/brief_facts_accused
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 accused_type.py
 
 [Order 24]
-brief_facts_drugs
-cd /data-drive/etl-process-dev/brief_facts_drugs
-source /data-drive/etl-process-dev/venv/bin/activate
-python3 main.py
-
-[Order 25]
-drug_standardization
-cd /data-drive/etl-process-dev/drug_standardization
-source /data-drive/etl-process-dev/venv/bin/activate
-python3 drug_standardization.py
-
-[Order 26]
 refresh_views
 cd /data-drive/etl-process-dev/etl_refresh_views
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 views_refresh_sql.py
 
-[Order 27]
+[Order 25]
 update_file_id
 cd /data-drive/etl-process-dev/etl-files/etl_pipeline_files
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 main_standalone.py
 
-[Order 28]
+[Order 26]
 files_download_media_server
 cd /data-drive/etl-process-dev/etl-files/etl_files_media_server
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 -m etl_files_media_server.main
 
-[Order 29]
+[Order 27]
 update_file_extentions
 cd /data-drive/etl-process-dev/etl-files/update_file_urls_with_extensions
 source /data-drive/etl-process-dev/venv/bin/activate
 python3 update_file_urls_with_extensions.py
 
-[Order 30]
+[Order 28]
 refresh_views
 cd /data-drive/etl-process-dev/etl_refresh_views
 source /data-drive/etl-process-dev/venv/bin/activate

@@ -311,6 +311,44 @@ class AccusedETL:
         if self.db_pool:
             self.db_pool.close_all()
         logger.info("Database connection closed")
+
+    def ensure_run_state_table(self):
+        """Ensure ETL run-state table exists."""
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS etl_run_state (
+                    module_name TEXT PRIMARY KEY,
+                    last_successful_end TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+    def get_run_checkpoint(self, module_name: str) -> Optional[datetime]:
+        """Get last successful run checkpoint for a module."""
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                (module_name,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def update_run_checkpoint(self, module_name: str, end_date_iso: str):
+        """Persist successful run boundary."""
+        end_dt = parse_iso_date(end_date_iso)
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (module_name) DO UPDATE SET
+                    last_successful_end = EXCLUDED.last_successful_end,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (module_name, end_dt))
+            conn.commit()
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
@@ -330,15 +368,9 @@ class AccusedETL:
     def get_effective_start_date(self) -> str:
         """
         Get effective start date for ETL:
-        - If explicitly set via ACCUSED_START_DATE env var: use that
         - If table is empty: use DEFAULT_START_DATE (configurable, defaults to 2022-01-01T00:00:00+05:30)
         - If table has data: return max(date_created, date_modified) from table
         """
-        # Check if explicitly overridden via environment variable
-        if os.environ.get('ACCUSED_START_DATE'):
-            logger.info(f"📌 Using environment-provided start date: {os.environ.get('ACCUSED_START_DATE')}")
-            return os.environ.get('ACCUSED_START_DATE')
-        
         try:
             with self.db_pool.get_connection_context() as conn:
                 cursor = conn.cursor()
@@ -1786,27 +1818,21 @@ class AccusedETL:
             return False
         
         try:
-            # Get start and end dates, allowing environment variable overrides
-            env_start_date = os.environ.get('ACCUSED_START_DATE')
-            env_end_date = os.environ.get('ACCUSED_END_DATE')
-            
-            if RUN_MODE == 1:
-                # Standard Incremental Logic
-                if env_start_date:
-                    # If explicitly set, use it
-                    effective_start_date = env_start_date
-                    logger.info(f"📌 Using environment-provided start date: {effective_start_date}")
-                else:
-                    # Otherwise, determine automatically from DB or config
-                    effective_start_date = self.get_effective_start_date()
-                
-                calculated_end_date = env_end_date if env_end_date else get_yesterday_end_ist()
-                logger.info(f"🔄 Incremental Mode: Fetching data from {effective_start_date} to {calculated_end_date}")
-            else:
-                # Full Reset Logic
-                effective_start_date = env_start_date if env_start_date else ETL_CONFIG['start_date']
-                calculated_end_date = env_end_date if env_end_date else get_yesterday_end_ist()
-                logger.info(f"⚠️ FULL RESET Mode: Fetching historical data from {effective_start_date} to {calculated_end_date}")
+            self.ensure_run_state_table()
+
+            # Strict incremental mode: always use dynamic resume + automatic end date
+            if RUN_MODE != 1:
+                logger.warning("⚠️ ACCUSED_RUN_MODE!=1 ignored. Enforcing strict incremental mode.")
+
+            effective_start_date = self.get_effective_start_date()
+            checkpoint_date = self.get_run_checkpoint('accused')
+            if checkpoint_date:
+                checkpoint_iso = checkpoint_date.isoformat()
+                if parse_iso_date(checkpoint_iso) > parse_iso_date(effective_start_date):
+                    effective_start_date = checkpoint_iso
+
+            calculated_end_date = get_yesterday_end_ist()
+            logger.info(f"🔄 Incremental Mode: Fetching data from {effective_start_date} to {calculated_end_date}")
             
             # Get table columns for schema evolution
             table_columns = self.get_table_columns(ACCUSED_TABLE)
@@ -1922,6 +1948,7 @@ class AccusedETL:
             
             # Write summary to log files
             self.write_log_summaries()
+            self.update_run_checkpoint('accused', calculated_end_date)
             
             logger.info("✅ ETL Pipeline completed successfully!")
             logger.info(f"📝 API chunk log saved to: {self.api_log_file}")

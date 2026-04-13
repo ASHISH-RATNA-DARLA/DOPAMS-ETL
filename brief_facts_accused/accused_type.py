@@ -1,16 +1,36 @@
 import sys
 import re
 import logging
+import uuid
+import os
+import unicodedata
+from difflib import SequenceMatcher
+import config
+
+try:
+    from unidecode import unidecode as _unidecode
+except Exception:  # pragma: no cover - optional dependency fallback
+    _unidecode = None
+
 from db import (
     get_db_connection,
+    return_db_connection,
     fetch_crimes_by_ids,
     insert_accused_facts,
     fetch_unprocessed_crimes,
     fetch_existing_accused_for_crime,
+    start_crime_processing_run,
+    complete_crime_processing_run,
+    fail_crime_processing_run,
     normalize_accused_status,
     resolve_status_for_insert,
     strip_alias_name,
     compute_age_from_dob,
+    fetch_dedup_candidates,
+    fetch_crime_profile,
+    fetch_crime_associate_person_codes,
+    delete_brief_facts_for_crime,
+    update_sentinel_role,
 )
 from extractor import (
     extract_accused_info,
@@ -27,6 +47,235 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+UNIFIED_TABLE_NAME = "brief_facts_ai"
+
+# Allow imports from sibling ETL modules (e.g., brief_facts_drugs)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
+def _synthetic_accused_id(crime_id, full_name, seq_num):
+    base = f"{crime_id}|{(full_name or '').strip().lower()}|{(seq_num or '').strip().lower()}"
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, base))
+
+
+def _canonical_person_id(full_name, gender, ps_code):
+    base = f"{(full_name or '').strip().lower()}|{(gender or '').strip().lower()}|{(ps_code or '').strip().lower()}"
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, base))
+
+
+_RELATIONAL_PREFIX_RE = re.compile(r'\b(?:s/o|d/o|w/o|h/o)\b', re.IGNORECASE)
+_COMMON_NAME_TOKENS = {
+    'kumar', 'singh', 'rao', 'reddy', 'sharma', 'naidu', 'babu', 'raju'
+}
+
+_INDIC_TOKEN_MAP = {
+    'A': 'a', 'AA': 'aa', 'I': 'i', 'II': 'ii', 'U': 'u', 'UU': 'uu',
+    'E': 'e', 'EE': 'ee', 'AI': 'ai', 'O': 'o', 'OO': 'oo', 'AU': 'au',
+    'KA': 'k', 'KHA': 'kh', 'GA': 'g', 'GHA': 'gh', 'NGA': 'ng',
+    'CA': 'ch', 'CHA': 'chh', 'JA': 'j', 'JHA': 'jh', 'NYA': 'ny',
+    'TTA': 't', 'TTHA': 'th', 'DDA': 'd', 'DDHA': 'dh', 'NNA': 'n',
+    'TA': 't', 'THA': 'th', 'DA': 'd', 'DHA': 'dh', 'NA': 'n',
+    'PA': 'p', 'PHA': 'ph', 'BA': 'b', 'BHA': 'bh', 'MA': 'm',
+    'YA': 'y', 'RA': 'r', 'LA': 'l', 'VA': 'v',
+    'SHA': 'sh', 'SSA': 'sh', 'SA': 's', 'HA': 'h',
+    'LLA': 'l', 'RRA': 'r',
+}
+
+
+def _transliterate_indic_approx(value):
+    if not value:
+        return ''
+    if _unidecode is not None:
+        return _unidecode(str(value))
+    out = []
+    for ch in str(value):
+        try:
+            uname = unicodedata.name(ch)
+        except ValueError:
+            out.append(ch)
+            continue
+
+        if 'DEVANAGARI' not in uname and 'TELUGU' not in uname and 'KANNADA' not in uname:
+            out.append(ch)
+            continue
+
+        token = None
+        if 'LETTER ' in uname:
+            token = uname.split('LETTER ', 1)[1]
+        elif 'VOWEL SIGN ' in uname:
+            token = uname.split('VOWEL SIGN ', 1)[1]
+        elif 'SIGN VIRAMA' in uname:
+            token = ''
+
+        if token is None:
+            out.append(' ')
+            continue
+
+        out.append(_INDIC_TOKEN_MAP.get(token, ''))
+
+    translit = ''.join(out)
+    return translit if translit.strip() else str(value)
+
+
+def _normalize_name(value):
+    if not value:
+        return ''
+    cleaned = _RELATIONAL_PREFIX_RE.sub(' ', str(value))
+    cleaned = _transliterate_indic_approx(cleaned)
+    cleaned = cleaned.split('@')[0]
+    cleaned = re.sub(r'[^a-zA-Z0-9\s]', ' ', cleaned.lower())
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
+def _norm_person_code(value):
+    if not value:
+        return None
+    m = re.search(r'A\s*[-.]?\s*(\d+)', str(value), flags=re.IGNORECASE)
+    if not m:
+        return None
+    return f"A-{int(m.group(1))}"
+
+
+def _token_set_similarity(a, b):
+    ta = set(_normalize_name(a).split())
+    tb = set(_normalize_name(b).split())
+    if not ta or not tb:
+        return 0.0
+    inter = len(ta & tb)
+    return (2.0 * inter) / (len(ta) + len(tb))
+
+
+def _phonetic_overlap(a, b):
+    na = _normalize_name(a)
+    nb = _normalize_name(b)
+    if not na or not nb:
+        return 0.0
+    prefix = 4
+    return 1.0 if na[:prefix] == nb[:prefix] else 0.0
+
+
+def _address_similarity(a, b):
+    ta = set(re.findall(r'[a-z0-9]+', (a or '').lower()))
+    tb = set(re.findall(r'[a-z0-9]+', (b or '').lower()))
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _age_score(current_age, candidate_age):
+    if current_age is None or candidate_age is None:
+        return 0.5
+    try:
+        diff = abs(int(current_age) - int(candidate_age))
+    except Exception:
+        return 0.5
+    if diff <= 2:
+        return 0.8
+    if diff >= 10:
+        return 0.0
+    return max(0.0, 0.8 - ((diff - 2) * (0.8 / 8.0)))
+
+
+def _alias_score(current_alias, candidate_alias):
+    if not current_alias or not candidate_alias:
+        return 0.0
+    return 1.0 if _normalize_name(current_alias) == _normalize_name(candidate_alias) else 0.0
+
+
+def _crime_tokens(value):
+    return set(re.findall(r'[a-z0-9]+', (value or '').lower()))
+
+
+def _dedup_score(current, candidate, ps_code, current_crime_profile, current_assoc_codes, candidate_assoc_codes):
+    name_a = current.get('full_name')
+    name_b = candidate.get('full_name')
+
+    prefix_similarity = SequenceMatcher(None, _normalize_name(name_a), _normalize_name(name_b)).ratio()
+    token_similarity = _token_set_similarity(name_a, name_b)
+    phonetic_similarity = _phonetic_overlap(name_a, name_b)
+    addr_similarity = _address_similarity(current.get('address'), candidate.get('address'))
+    age_similarity = _age_score(current.get('age'), candidate.get('age'))
+    alias_similarity = _alias_score(current.get('alias_name'), candidate.get('alias_name'))
+
+    score = (
+        0.35 * prefix_similarity +
+        0.20 * token_similarity +
+        0.15 * phonetic_similarity +
+        0.12 * addr_similarity +
+        0.10 * age_similarity +
+        0.08 * alias_similarity
+    )
+
+    # Layer 4 contextual boosts
+    cand_ps = (candidate.get('source_accused_fields') or {}).get('ps_code') if isinstance(candidate.get('source_accused_fields'), dict) else None
+    if ps_code and cand_ps and str(ps_code) == str(cand_ps):
+        score += 0.05
+
+    current_tokens = set()
+    candidate_tokens = set()
+    for key in ('major_head', 'minor_head', 'crime_type', 'acts_sections'):
+        current_tokens |= _crime_tokens((current_crime_profile or {}).get(key))
+        candidate_tokens |= _crime_tokens(candidate.get(key))
+    if current_tokens and candidate_tokens and (current_tokens & candidate_tokens):
+        score += 0.04
+
+    if current_assoc_codes and candidate_assoc_codes and (current_assoc_codes & candidate_assoc_codes):
+        score += 0.06
+
+    normalized = _normalize_name(name_a)
+    if len(normalized.split()) == 1 and normalized in _COMMON_NAME_TOKENS:
+        score *= 0.85
+
+    return round(min(score, 1.0), 2)
+
+
+def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code):
+    current_accused_id = payload.get('accused_id')
+    current_person_code = payload.get('person_code')
+    full_name = payload.get('full_name')
+    gender = payload.get('gender')
+    fallback_canonical = _canonical_person_id(full_name, gender, ps_code)
+    current_crime_profile = fetch_crime_profile(conn, current_crime_id)
+    assoc_cache = {current_crime_id: fetch_crime_associate_person_codes(conn, current_crime_id)}
+    current_assoc_codes = assoc_cache[current_crime_id]
+
+    # Layer 1: deterministic exact identity reuse by accused_id/person_code
+    candidates = fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code)
+    for cand in candidates:
+        if current_accused_id and cand.get('accused_id') and str(current_accused_id) == str(cand.get('accused_id')):
+            return cand.get('canonical_person_id') or fallback_canonical, None, 1, False
+        if current_person_code and cand.get('person_code') and str(current_person_code) == str(cand.get('person_code')):
+            return cand.get('canonical_person_id') or fallback_canonical, None, 1, False
+
+    # Layer 3-5: weighted match and thresholding
+    best_cand = None
+    best_score = -1.0
+    for cand in candidates:
+        cand_crime_id = cand.get('crime_id')
+        if cand_crime_id not in assoc_cache:
+            assoc_cache[cand_crime_id] = fetch_crime_associate_person_codes(conn, cand_crime_id)
+        candidate_assoc_codes = assoc_cache.get(cand_crime_id, set())
+        score = _dedup_score(
+            payload,
+            cand,
+            ps_code,
+            current_crime_profile,
+            current_assoc_codes,
+            candidate_assoc_codes,
+        )
+        if score > best_score:
+            best_score = score
+            best_cand = cand
+
+    if best_cand and best_score >= 0.82 and best_cand.get('canonical_person_id'):
+        return best_cand.get('canonical_person_id'), best_score, 1, False
+
+    if best_score >= 0.60:
+        return fallback_canonical, best_score, 2, True
+
+    return fallback_canonical, (best_score if best_score >= 0 else 0.0), 3, False
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +447,117 @@ def _resolve_status(db_status_raw, text, name_hint):
     return None
 
 
+_DRUG_EXTRACTION_CACHE = {
+    'loaded': False,
+    'drug_categories': None,
+    'ignore_set': None,
+    'kb_lookup': None,
+    'dynamic_keywords': None,
+}
+
+
+def _fetch_current_bfai_rows(conn, crime_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT bf_accused_id, accused_id, person_code, full_name, role_in_crime
+            FROM public.brief_facts_ai
+            WHERE crime_id = %s
+            ORDER BY
+                CASE
+                    WHEN seq_num ~ '^[0-9]+$' THEN seq_num::int
+                    ELSE 2147483647
+                END,
+                bf_accused_id
+            """,
+            (crime_id,),
+        )
+        return cur.fetchall()
+
+
+def _inject_accused_roster(facts_text, rows):
+    roster_lines = []
+    for row in rows:
+        person_code = row[2] or 'UNKNOWN'
+        full_name = row[3] or 'UNKNOWN'
+        roster_lines.append(f"- {person_code}: {full_name}")
+    if not roster_lines:
+        return facts_text
+    roster_block = "Known accused roster for attribution:\n" + "\n".join(roster_lines) + "\n\n"
+    return roster_block + (facts_text or '')
+
+
+def _load_drug_context(conn):
+    if _DRUG_EXTRACTION_CACHE['loaded']:
+        return
+    from brief_facts_drugs.db import fetch_drug_categories, fetch_drug_ignore_list
+    from brief_facts_drugs.extractor import build_drug_keywords
+
+    drug_categories = fetch_drug_categories(conn)
+    ignore_dict = fetch_drug_ignore_list(conn)
+    _DRUG_EXTRACTION_CACHE['drug_categories'] = drug_categories
+    _DRUG_EXTRACTION_CACHE['ignore_set'] = set(ignore_dict.keys())
+    _DRUG_EXTRACTION_CACHE['kb_lookup'] = {
+        row['raw_name'].lower().strip(): row['standard_name']
+        for row in drug_categories
+    }
+    _DRUG_EXTRACTION_CACHE['dynamic_keywords'] = build_drug_keywords(drug_categories)
+    _DRUG_EXTRACTION_CACHE['loaded'] = True
+
+
+def _run_unified_drug_enrichment(conn, crime_id, facts_text):
+    """
+    Unified per-crime sequential drug extraction called after accused rows are written.
+    """
+    from brief_facts_drugs.db import batch_insert_drug_facts
+    from brief_facts_drugs.extractor import extract_drug_info
+
+    _load_drug_context(conn)
+
+    current_rows = _fetch_current_bfai_rows(conn, crime_id)
+    real_accused_rows = [r for r in current_rows if r[1] is not None]
+    augmented_text = _inject_accused_roster(facts_text, real_accused_rows)
+
+    extractions = extract_drug_info(
+        augmented_text,
+        _DRUG_EXTRACTION_CACHE['drug_categories'],
+        ignore_set=_DRUG_EXTRACTION_CACHE['ignore_set'],
+        kb_lookup=_DRUG_EXTRACTION_CACHE['kb_lookup'],
+        dynamic_drug_keywords=_DRUG_EXTRACTION_CACHE['dynamic_keywords'],
+        conn=conn,
+    )
+
+    inserts = []
+    if not extractions:
+        if real_accused_rows:
+            placeholder = {
+                "raw_drug_name": "NO_DRUGS_DETECTED",
+                "raw_quantity": 0,
+                "raw_unit": "None",
+                "primary_drug_name": "NO_DRUGS_DETECTED",
+                "drug_form": "None",
+                "weight_g": 0,
+                "weight_kg": 0,
+                "volume_ml": 0,
+                "volume_l": 0,
+                "count_total": 0,
+                "confidence_score": 1.00,
+                "is_commercial": False,
+                "seizure_worth": 0.0,
+                "worth_scope": "individual",
+                "extraction_metadata": {"source_sentence": "No drugs physically seized"},
+            }
+            inserts.append((crime_id, placeholder))
+    else:
+        inserts.extend((crime_id, d.model_dump()) for d in extractions)
+        if not real_accused_rows:
+            update_sentinel_role(conn, crime_id, 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY')
+            update_sentinel_role(conn, crime_id, 'LLM_EXTRACTION_FAILED', 'NO_ACCUSED_DRUGS_ONLY')
+
+    if inserts:
+        batch_insert_drug_facts(conn, inserts)
+
+
 # ---------------------------------------------------------------------------
 # Main + batch loop
 # ---------------------------------------------------------------------------
@@ -246,7 +606,7 @@ def main():
     except Exception as e:
         logging.error(f"Unexpected error in main loop: {e}", exc_info=True)
     finally:
-        conn.close()
+        return_db_connection(conn)
         logging.info("Database connection closed.")
 
 
@@ -265,6 +625,7 @@ def process_crimes_parallel(crimes):
 
     def worker(crime):
         crime_id = crime['crime_id']
+        ps_code = crime.get('ps_code')
         facts_text = (crime['brief_facts'] or "").strip()
         
         # Use connection context manager to ensure proper return to pool
@@ -272,20 +633,38 @@ def process_crimes_parallel(crimes):
         pool = PostgreSQLConnectionPool()
         
         with pool.get_connection_context() as conn:
+            run_id = None
+            rows_written = 0
+            unified_mode = (config.ACCUSED_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME
             try:
+                if unified_mode:
+                    run_id = start_crime_processing_run(conn, crime_id)
+                    delete_brief_facts_for_crime(conn, crime_id)
                 db_accused = fetch_existing_accused_for_crime(conn, crime_id)
                 branch = _classify_db_accused(db_accused)
                 
                 if branch == 'A':
-                    _process_branch_a(conn, crime_id, facts_text, db_accused)
+                    rows_written = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id)
                 elif branch == 'B':
-                    _process_branch_b(conn, crime_id, facts_text, db_accused)
+                    rows_written = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id)
                 else:
-                    _process_branch_c(conn, crime_id, facts_text)
+                    rows_written = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id)
+
+                if unified_mode:
+                    _run_unified_drug_enrichment(conn, crime_id, facts_text)
+
+                if unified_mode and run_id:
+                    complete_crime_processing_run(conn, run_id, rows_written)
 
                 conn.commit()
                 return True, crime_id
             except Exception as e:
+                try:
+                    if unified_mode and run_id:
+                        fail_crime_processing_run(conn, run_id, str(e))
+                        conn.commit()
+                except Exception:
+                    conn.rollback()
                 conn.rollback()
                 logging.error(f"Failed processing Crime {crime_id}: {e}")
                 return False, crime_id
@@ -305,7 +684,7 @@ def process_crimes_parallel(crimes):
 # Branch A — DB has accused rows, at least one person_id IS NOT NULL
 # ---------------------------------------------------------------------------
 
-def _process_branch_a(conn, crime_id, facts_text, db_accused):
+def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     """
     DB is authoritative for identity. LLM extracts roles + fills missing fields.
     Skips accused rows where person_id IS NULL (spec SKIP RULE).
@@ -314,15 +693,11 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
       - 'Accused' / 'CCL': person_code = accused_code (direct from DB)
       - 'Known' / 'Respondent' / 'Suspect': LLM assigns person_code (A1, A2 by mention)
     """
-    # Filter to only rows with person_id (spec: skip NULL person_id)
-    valid_accused = [row for row in db_accused if row.get('person_id')]
-    skipped = len(db_accused) - len(valid_accused)
-    if skipped:
-        logging.info(f"Branch A: Skipped {skipped} accused rows with NULL person_id")
-
+    # Process all DB accused rows; no silent dropping.
+    valid_accused = list(db_accused)
     if not valid_accused:
-        logging.info(f"Branch A: No valid accused with person_id for Crime {crime_id}")
-        return
+        logging.info(f"Branch A: No accused rows found for Crime {crime_id}")
+        return 0
 
     # ---- Pre-scan: determine person_code strategy and missing fields per accused ----
     DIRECT_CODE_TYPES = {'Accused', 'CCL'}
@@ -385,6 +760,8 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
 
         # ---- DB person fields ----
         full_name     = row.get('full_name')
+        if not accused_id and full_name:
+            accused_id = _synthetic_accused_id(crime_id, full_name, seq_num)
         raw_alias     = row.get('alias_name')
         alias_name    = strip_alias_name(raw_alias)
         age           = row.get('age')
@@ -453,6 +830,7 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
             ('status', row.get('accused_status')),
             ('accused_type_db', accused_type_db),
         ] if v is not None and v != ''}
+        source_accused['ps_code'] = ps_code
         source_summary = {}
         if role_in_crime:
             source_summary['role_in_crime'] = 'LLM'
@@ -461,10 +839,26 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
         if accused_type:
             source_summary['accused_type'] = 'LLM_CLASSIFICATION'
 
+        canonical_person_id, dedup_confidence, dedup_match_tier, dedup_review_flag = _resolve_canonical_identity(
+            conn,
+            crime_id,
+            {
+                'accused_id': accused_id,
+                'person_code': person_code,
+                'full_name': full_name,
+                'alias_name': alias_name,
+                'age': age,
+                'gender': gender,
+                'address': address,
+            },
+            ps_code,
+        )
+
         insert_accused_facts(conn, {
             'crime_id'             : crime_id,
             'accused_id'           : accused_id,
             'person_id'            : person_id,
+            'canonical_person_id'  : canonical_person_id,
             'person_code'          : person_code,
             'seq_num'              : seq_num,
             'existing_accused'     : True,
@@ -480,20 +874,25 @@ def _process_branch_a(conn, crime_id, facts_text, db_accused):
             'accused_type'         : accused_type,
             'status'               : status,
             'is_ccl'               : is_ccl,
+            'dedup_match_tier'     : dedup_match_tier,
+            'dedup_confidence'     : dedup_confidence,
+            'dedup_review_flag'    : dedup_review_flag,
             'source_person_fields' : source_person,
             'source_accused_fields': source_accused,
             'source_summary_fields': source_summary,
+            'etl_run_id'           : run_id,
         })
         count += 1
 
     logging.info(f"Branch A processed Crime {crime_id}. row_count={count}")
+    return count
 
 
 # ---------------------------------------------------------------------------
 # Branch B — ALL person_id IS NULL. Full LLM + pair accused_id from DB.
 # ---------------------------------------------------------------------------
 
-def _process_branch_b(conn, crime_id, facts_text, db_accused):
+def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     """Full LLM pipeline + accused_id recovery from DB by code matching."""
     logging.info(
         f"Branch B: crime {crime_id} has {len(db_accused)} stub accused rows "
@@ -512,8 +911,9 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             'existing_accused': False,
             'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
             'source_summary_fields': {'error': 'LLM_EXTRACTION_FAILED'},
+            'etl_run_id'      : run_id,
         })
-        return
+        return 1
 
     count = 0
 
@@ -527,6 +927,7 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             'existing_accused': False,
             'role_in_crime'   : 'NO_ACCUSED_IN_TEXT',
             'source_summary_fields': {'note': 'NO_ACCUSED_IN_TEXT'},
+            'etl_run_id'      : run_id,
         })
         count = 1
     else:
@@ -541,6 +942,9 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             data['accused_id']       = accused_id
             data['person_code']      = matched_code
             data['existing_accused'] = False
+
+            if not data.get('accused_id') and accused.full_name:
+                data['accused_id'] = _synthetic_accused_id(crime_id, accused.full_name, data.get('seq_num'))
 
             if accused_id:
                 # Use raw DB status, fallback to LLM-detected
@@ -562,22 +966,38 @@ def _process_branch_b(conn, crime_id, facts_text, db_accused):
             data['source_person_fields'] = {k: 'LLM' for k in
                 ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'address', 'phone_numbers']
                 if data.get(k) is not None}
-            data['source_accused_fields'] = {'accused_id': 'DB_PAIRED' if accused_id else 'UNMATCHED'}
+            data['source_accused_fields'] = {
+                'accused_id': 'DB_PAIRED' if accused_id else 'UNMATCHED',
+                'ps_code': ps_code,
+            }
             data['source_summary_fields'] = {k: 'LLM' for k in
                 ['role_in_crime', 'key_details', 'accused_type', 'status']
                 if data.get(k) is not None}
+
+            canonical_person_id, dedup_confidence, dedup_match_tier, dedup_review_flag = _resolve_canonical_identity(
+                conn,
+                crime_id,
+                data,
+                ps_code,
+            )
+            data['canonical_person_id'] = canonical_person_id
+            data['dedup_confidence'] = dedup_confidence
+            data['dedup_match_tier'] = dedup_match_tier
+            data['dedup_review_flag'] = dedup_review_flag
+            data['etl_run_id'] = run_id
 
             insert_accused_facts(conn, data)
             count += 1
 
     logging.info(f"Branch B processed Crime {crime_id}. row_count={count}")
+    return count
 
 
 # ---------------------------------------------------------------------------
 # Branch C — No accused rows in DB. Full LLM only.
 # ---------------------------------------------------------------------------
 
-def _process_branch_c(conn, crime_id, facts_text):
+def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
     """Original full LLM flow. No DB reference at all."""
     extractions = extract_accused_info(facts_text)
 
@@ -591,8 +1011,9 @@ def _process_branch_c(conn, crime_id, facts_text):
             'existing_accused': False,
             'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
             'source_summary_fields': {'error': 'LLM_EXTRACTION_FAILED'},
+            'etl_run_id'      : run_id,
         })
-        return
+        return 1
 
     count = 0
 
@@ -606,16 +1027,18 @@ def _process_branch_c(conn, crime_id, facts_text):
             'existing_accused': False,
             'role_in_crime'   : 'NO_ACCUSED_IN_TEXT',
             'source_summary_fields': {'note': 'NO_ACCUSED_IN_TEXT'},
+            'etl_run_id'      : run_id,
         })
         count = 1
     else:
         for accused in extractions:
             data = accused.model_dump()
             data['crime_id']         = crime_id
-            data['accused_id']       = None
+            data['accused_id']       = _synthetic_accused_id(crime_id, accused.full_name, data.get('seq_num'))
             data['person_id']        = None
             data['existing_accused'] = False
             data['gender']           = detect_gender(facts_text, accused.full_name, data.get('gender'))
+            data['etl_run_id']       = run_id
 
             if data.get('accused_type') == 'unknown':
                 data['accused_type'] = None
@@ -626,15 +1049,27 @@ def _process_branch_c(conn, crime_id, facts_text):
             data['source_person_fields'] = {k: 'LLM' for k in
                 ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'address', 'phone_numbers']
                 if data.get(k) is not None}
-            data['source_accused_fields'] = {}
+            data['source_accused_fields'] = {'ps_code': ps_code}
             data['source_summary_fields'] = {k: 'LLM' for k in
                 ['role_in_crime', 'key_details', 'accused_type', 'status']
                 if data.get(k) is not None}
+
+            canonical_person_id, dedup_confidence, dedup_match_tier, dedup_review_flag = _resolve_canonical_identity(
+                conn,
+                crime_id,
+                data,
+                ps_code,
+            )
+            data['canonical_person_id'] = canonical_person_id
+            data['dedup_confidence'] = dedup_confidence
+            data['dedup_match_tier'] = dedup_match_tier
+            data['dedup_review_flag'] = dedup_review_flag
 
             insert_accused_facts(conn, data)
             count += 1
 
     logging.info(f"Branch C processed Crime {crime_id}. row_count={count}")
+    return count
 
 
 if __name__ == "__main__":

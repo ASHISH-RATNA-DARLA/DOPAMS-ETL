@@ -10,7 +10,7 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
-DRUG_TABLE_NAME = os.getenv("DRUG_TABLE_NAME")
+DRUG_TABLE_NAME = os.getenv("DRUG_TABLE_NAME", "brief_facts_ai")
 
 # LLM Configuration
 LLM_ENDPOINT = os.getenv("LLM_ENDPOINT")

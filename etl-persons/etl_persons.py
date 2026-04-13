@@ -28,6 +28,21 @@ from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDE
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
 
+
+def parse_iso_date(iso_date_str: str) -> datetime:
+    """Parse ISO 8601 or YYYY-MM-DD date string to datetime."""
+    if 'T' in iso_date_str:
+        return datetime.fromisoformat(iso_date_str.replace('Z', '+00:00'))
+    dt = datetime.strptime(iso_date_str, '%Y-%m-%d')
+    return dt.replace(tzinfo=IST_OFFSET)
+
+
+def get_yesterday_end_ist() -> str:
+    """Get yesterday 23:59:59 in IST as ISO-8601 string."""
+    now_ist = datetime.now(IST_OFFSET)
+    yesterday = now_ist - timedelta(days=1)
+    return yesterday.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
+
 # Get table names from config (with fallback to defaults)
 ACCUSED_TABLE = TABLE_CONFIG.get('accused', 'accused')
 PERSONS_TABLE = TABLE_CONFIG.get('persons', 'persons')
@@ -200,6 +215,45 @@ class PersonsETL:
 
         return None, 0.0, 'heuristic'
 
+    def _normalize_phone_numbers(self, raw_phone: Any) -> List[str]:
+        """Normalize phone payloads into a de-duplicated list preserving source order."""
+        collected: List[str] = []
+
+        def collect(value: Any):
+            if value is None:
+                return
+            if isinstance(value, dict):
+                for item in value.values():
+                    collect(item)
+                return
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    collect(item)
+                return
+
+            text = self._normalize_space(str(value))
+            if not text:
+                return
+            for chunk in re.split(r'[\n,;|/]+', text):
+                normalized = self._normalize_space(chunk)
+                if normalized:
+                    collected.append(normalized)
+
+        collect(raw_phone)
+
+        invalid_tokens = {'na', 'n/a', 'none', 'null', 'not available', 'unknown', '-'}
+        deduped: List[str] = []
+        seen: Set[str] = set()
+        for value in collected:
+            lowered = value.lower()
+            if lowered in invalid_tokens:
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            deduped.append(value)
+        return deduped
+
     def _resolve_gender(self, clean_name: Optional[str], api_gender_raw: Optional[str]) -> Tuple[str, float, str]:
         normalized_api = self._normalize_api_gender(api_gender_raw)
 
@@ -246,6 +300,44 @@ class PersonsETL:
         if self.db_pool:
             self.db_pool.close_all()
         logger.info("Database connection pool closed")
+
+    def ensure_run_state_table(self):
+        """Ensure ETL run-state table exists."""
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS etl_run_state (
+                    module_name TEXT PRIMARY KEY,
+                    last_successful_end TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+    def get_run_checkpoint(self, module_name: str) -> Optional[datetime]:
+        """Read last successful checkpoint for a module."""
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                (module_name,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def update_run_checkpoint(self, module_name: str, end_date_iso: str):
+        """Persist successful run end boundary for resume safety."""
+        end_dt = parse_iso_date(end_date_iso)
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (module_name) DO UPDATE SET
+                    last_successful_end = EXCLUDED.last_successful_end,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (module_name, end_dt))
+            conn.commit()
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
@@ -425,7 +517,8 @@ class PersonsETL:
         required_columns = {
             'raw_full_name': 'VARCHAR(500)',
             'gender_confidence': 'NUMERIC(4,3)',
-            'gender_source': 'VARCHAR(20)'
+            'gender_source': 'VARCHAR(20)',
+            'phone_numbers': 'TEXT'
         }
         for column_name, column_type in required_columns.items():
             if column_name not in table_columns:
@@ -435,6 +528,7 @@ class PersonsETL:
 
     def apply_person_enrichment(self, person_id: str, raw_full_name: Optional[str],
                                 gender_confidence: Optional[float], gender_source: Optional[str],
+                                phone_numbers: Optional[str],
                                 table_columns: Set[str], cursor):
         """Apply enrichment fields that are not part of the base API mapping."""
         updates = []
@@ -451,6 +545,10 @@ class PersonsETL:
         if 'gender_source' in table_columns:
             updates.append('gender_source = COALESCE(%s, gender_source)')
             values.append(gender_source)
+
+        if 'phone_numbers' in table_columns:
+            updates.append('phone_numbers = COALESCE(%s, phone_numbers)')
+            values.append(phone_numbers)
 
         if not updates:
             return
@@ -490,7 +588,8 @@ class PersonsETL:
 
     def handle_dry_run(self, person_id: str, clean_full_name: Optional[str], raw_full_name_value: Optional[str],
                        resolved_gender: Optional[str], gender_confidence: Optional[float],
-                       gender_source: Optional[str], table_columns: Set[str], cursor):
+                       gender_source: Optional[str], phone_numbers_value: Optional[str],
+                       table_columns: Set[str], cursor):
         select_columns = ['full_name', 'gender']
         if 'raw_full_name' in table_columns:
             select_columns.append('raw_full_name')
@@ -498,6 +597,8 @@ class PersonsETL:
             select_columns.append('gender_confidence')
         if 'gender_source' in table_columns:
             select_columns.append('gender_source')
+        if 'phone_numbers' in table_columns:
+            select_columns.append('phone_numbers')
 
         cursor.execute(
             f"""
@@ -517,6 +618,7 @@ class PersonsETL:
                 'gender': resolved_gender,
                 'gender_confidence': new_conf,
                 'gender_source': gender_source,
+                'phone_numbers': phone_numbers_value,
             }
             self.log_dry_run_change(person_id, 'insert', {}, preview)
             with self.stats_lock:
@@ -529,6 +631,7 @@ class PersonsETL:
         old_raw_full_name = row[idx['raw_full_name']] if 'raw_full_name' in idx else None
         old_conf = row[idx['gender_confidence']] if 'gender_confidence' in idx else None
         old_source = row[idx['gender_source']] if 'gender_source' in idx else None
+        old_phone_numbers = row[idx['phone_numbers']] if 'phone_numbers' in idx else None
         old_conf = self._normalize_confidence(old_conf)
         changes: Dict[str, Dict[str, Any]] = {}
 
@@ -542,6 +645,8 @@ class PersonsETL:
             changes['gender_confidence'] = {'old': old_conf, 'new': new_conf}
         if gender_source is not None and gender_source != old_source:
             changes['gender_source'] = {'old': old_source, 'new': gender_source}
+        if phone_numbers_value is not None and phone_numbers_value != old_phone_numbers:
+            changes['phone_numbers'] = {'old': old_phone_numbers, 'new': phone_numbers_value}
 
         if changes:
             preview = {
@@ -550,6 +655,7 @@ class PersonsETL:
                 'gender': resolved_gender,
                 'gender_confidence': new_conf,
                 'gender_source': gender_source,
+                'phone_numbers': phone_numbers_value,
             }
             self.log_dry_run_change(person_id, 'update', changes, preview)
             with self.stats_lock:
@@ -596,7 +702,7 @@ class PersonsETL:
             'permanent_landmark_milestone', 'permanent_locality_village', 'permanent_area_mandal',
             'permanent_district', 'permanent_state_ut', 'permanent_country', 'permanent_residency_type',
             'permanent_pin_code', 'permanent_jurisdiction_ps',
-            'phone_number', 'country_code', 'email_id', 'date_created', 'date_modified'
+            'phone_number', 'phone_numbers', 'country_code', 'email_id', 'date_created', 'date_modified'
         }
         
         # Find new fields (exist in table but not in standard fields)
@@ -824,11 +930,57 @@ class PersonsETL:
         
         return rows
 
-    def fetch_person_api(self, person_id: str) -> Optional[Dict]:
+    def get_person_ids_for_window(self, from_date: str, to_date: str) -> List[str]:
+        """
+        Get distinct person IDs from accused records changed in a date window.
+        Date window is inclusive and uses accused.date_created/date_modified.
+        """
+        from_dt = parse_iso_date(from_date)
+        to_dt = parse_iso_date(to_date)
+
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT DISTINCT a.person_id
+                FROM {ACCUSED_TABLE} a
+                WHERE a.person_id IS NOT NULL
+                  AND (
+                    (a.date_created IS NOT NULL AND a.date_created >= %s AND a.date_created <= %s)
+                    OR
+                    (a.date_modified IS NOT NULL AND a.date_modified >= %s AND a.date_modified <= %s)
+                  )
+            """, (from_dt, to_dt, from_dt, to_dt))
+
+            return [r[0] for r in cursor.fetchall()]
+
+    def generate_date_ranges(self, start_date: str, end_date: str, chunk_days: int = 5, overlap_days: int = 1) -> List[Tuple[str, str]]:
+        """Generate YYYY-MM-DD window ranges in chunks with overlap."""
+        date_ranges = []
+        current_date = parse_iso_date(start_date).date()
+        end = parse_iso_date(end_date).date()
+
+        while current_date <= end:
+            chunk_end = current_date + timedelta(days=chunk_days - 1)
+            if chunk_end > end:
+                chunk_end = end
+
+            date_ranges.append((
+                current_date.strftime('%Y-%m-%d'),
+                chunk_end.strftime('%Y-%m-%d')
+            ))
+
+            next_start = chunk_end - timedelta(days=overlap_days - 1)
+            if chunk_end >= end:
+                break
+            current_date = next_start
+
+        return date_ranges
+
+    def fetch_person_api(self, person_id: str, from_date: str, to_date: str) -> Optional[Dict]:
         url = f"{API_CONFIG['base_url']}/person-details/{person_id}"
         params = {
-            'fromDate': '2022-01-01',  # API requires dates but seems ignored for details
-            'toDate': '2025-12-31'
+            'fromDate': from_date,
+            'toDate': to_date
         }
         headers = {'x-api-key': API_CONFIG['api_key']}
         
@@ -939,6 +1091,9 @@ class PersonsETL:
         resolved_gender, gender_confidence, gender_source = self._resolve_gender(clean_full_name, personal.get('GENDER'))
         resolved_gender = self.truncate_string(resolved_gender, 20, 'gender')
         gender_source = self.truncate_string(gender_source, 20, 'gender_source')
+        normalized_phone_numbers = self._normalize_phone_numbers(contact.get('PHONE_NUMBER'))
+        primary_phone = self.truncate_string(normalized_phone_numbers[0], 20, 'phone_number') if normalized_phone_numbers else None
+        phone_numbers_value = self.truncate_string(' | '.join(normalized_phone_numbers), 500, 'phone_numbers') if normalized_phone_numbers else None
 
         try:
             if self.person_gender_dry_run:
@@ -949,6 +1104,7 @@ class PersonsETL:
                     resolved_gender=resolved_gender,
                     gender_confidence=gender_confidence,
                     gender_source=gender_source,
+                    phone_numbers_value=phone_numbers_value,
                     table_columns=table_columns,
                     cursor=cursor
                 )
@@ -1053,7 +1209,7 @@ class PersonsETL:
                         self.truncate_string(permanent.get('RESIDENCY_TYPE'), 100, 'permanent_residency_type'),
                         self.truncate_string(permanent.get('PIN_CODE'), 20, 'permanent_pin_code'),
                         self.truncate_string(permanent.get('JURISDICTION_PS'), 20, 'permanent_jurisdiction_ps'),
-                        self.truncate_string(contact.get('PHONE_NUMBER'), 255, 'phone_number'),
+                        primary_phone,
                         self.truncate_string(contact.get('COUNTRY_CODE'), 10, 'country_code'),
                         self.truncate_string(contact.get('EMAIL_ID'), 255, 'email_id'),
                         date_created, date_modified,
@@ -1066,6 +1222,7 @@ class PersonsETL:
                     raw_full_name=raw_full_name_value,
                     gender_confidence=gender_confidence,
                     gender_source=gender_source,
+                    phone_numbers=phone_numbers_value,
                     table_columns=table_columns,
                     cursor=cursor
                 )
@@ -1155,7 +1312,7 @@ class PersonsETL:
                         self.truncate_string(permanent.get('RESIDENCY_TYPE'), 100, 'permanent_residency_type'),
                         self.truncate_string(permanent.get('PIN_CODE'), 20, 'permanent_pin_code'),
                         self.truncate_string(permanent.get('JURISDICTION_PS'), 20, 'permanent_jurisdiction_ps'),
-                        self.truncate_string(contact.get('PHONE_NUMBER'), 255, 'phone_number'),
+                        primary_phone,
                         self.truncate_string(contact.get('COUNTRY_CODE'), 10, 'country_code'),
                         self.truncate_string(contact.get('EMAIL_ID'), 255, 'email_id'),
                         date_created, date_modified
@@ -1167,6 +1324,7 @@ class PersonsETL:
                     raw_full_name=raw_full_name_value,
                     gender_confidence=gender_confidence,
                     gender_source=gender_source,
+                    phone_numbers=phone_numbers_value,
                     table_columns=table_columns,
                     cursor=cursor
                 )
@@ -1201,10 +1359,12 @@ class PersonsETL:
         if not self.connect_db():
             return False
         try:
+            self.ensure_run_state_table()
+
             # Get table columns for schema evolution
             table_columns = self.get_table_columns(PERSONS_TABLE)
             if self.person_gender_dry_run:
-                missing = [c for c in ('raw_full_name', 'gender_confidence', 'gender_source') if c not in table_columns]
+                missing = [c for c in ('raw_full_name', 'gender_confidence', 'gender_source', 'phone_numbers') if c not in table_columns]
                 if missing:
                     logger.warning(
                         f"⚠️  Dry-run detected missing enrichment columns {missing}. "
@@ -1214,20 +1374,40 @@ class PersonsETL:
                 table_columns = self.ensure_person_enrichment_columns(table_columns)
             logger.debug(f"Existing table columns: {sorted(table_columns)}")
             
-            person_ids = self.get_person_ids()
-            logger.info(f"📊 Person IDs to process: {len(person_ids)}")
-            
-            if not person_ids:
-                logger.info("ℹ️  No new/updated person IDs found in accused table. Nothing to process.")
-                logger.info("ℹ️  All person records are up to date!")
+            last_date = self.get_last_processed_date()
+            checkpoint_date = self.get_run_checkpoint('persons')
+            resume_boundary = last_date
+            if checkpoint_date and (resume_boundary is None or checkpoint_date > resume_boundary):
+                resume_boundary = checkpoint_date
+
+            effective_start_date = resume_boundary.isoformat() if resume_boundary else '2022-01-01T00:00:00+05:30'
+            calculated_end_date = get_yesterday_end_ist()
+
+            chunk_days = int(os.environ.get('CHUNK_DAYS', '5'))
+            overlap_days = int(os.environ.get('CHUNK_OVERLAP_DAYS', '1'))
+
+            date_ranges = self.generate_date_ranges(
+                effective_start_date,
+                calculated_end_date,
+                chunk_days,
+                overlap_days
+            )
+
+            logger.info(f"Date Range: {effective_start_date} to {calculated_end_date}")
+            logger.info(f"Chunk Size: {chunk_days} days (overlap: {overlap_days} day(s))")
+
+            if not date_ranges:
+                logger.info("ℹ️  No date ranges to process. Nothing to do.")
                 return True
+
+            processed_person_ids = set()
             
             batch_size = 100  # Log batch stats every 100 records
             first_record_processed = False
             
-            def process_person(pid, table_columns):
+            def process_person(pid, table_columns, from_date, to_date):
                 nonlocal first_record_processed
-                data = self.fetch_person_api(pid)
+                data = self.fetch_person_api(pid, from_date, to_date)
                 if data:
                     # Check for schema evolution on first record
                     if not first_record_processed and table_columns is not None and not self.person_gender_dry_run:
@@ -1246,36 +1426,66 @@ class PersonsETL:
                                     self.update_existing_records_with_new_fields(new_fields)
                                 first_record_processed = True
                     
-                    with self.db_pool.get_connection_context() as conn:
-                        cursor = conn.cursor()
-                        self.upsert_person(data, table_columns, conn, cursor)
+                    db_retry_attempts = int(os.environ.get('DB_WRITE_MAX_RETRIES', '3'))
+                    for db_attempt in range(db_retry_attempts):
+                        try:
+                            with self.db_pool.get_connection_context() as conn:
+                                cursor = conn.cursor()
+                                self.upsert_person(data, table_columns, conn, cursor)
+                            break
+                        except (psycopg2.OperationalError, psycopg2.InterfaceError) as db_err:
+                            if db_attempt == db_retry_attempts - 1:
+                                raise
+                            logger.warning(
+                                f"Transient DB error for person {pid}, retrying "
+                                f"({db_attempt + 1}/{db_retry_attempts}): {db_err}"
+                            )
+                            time.sleep(2 ** db_attempt)
                 else:
                     with self.stats_lock:
                         self.stats['no_data'] += 1
 
             requested_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
             max_workers = compute_safe_workers(self.db_pool, requested_workers)
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(process_person, pid, table_columns): pid for pid in person_ids}
-                
-                with tqdm(total=len(person_ids), desc="Processing persons", unit="person") as pbar:
-                    for idx, future in enumerate(as_completed(futures), 1):
-                        pid = futures[future]
-                        try:
-                            future.result()
-                        except Exception as e:
-                            logger.error(f"Error processing person {pid}: {e}")
-                            with self.stats_lock:
-                                self.stats['failed'] += 1
-                                self.stats['errors'] += 1
-                        
-                        pbar.update(1)
-                        if idx % batch_size == 0:
-                            # Log batch statistics every batch_size records
-                            with self.stats_lock:
-                                logger.info(f"   📊 Progress: {idx}/{len(person_ids)} - "
-                                           f"Inserted: {self.stats['inserted']}, Updated: {self.stats['updated']}, "
-                                           f"Failed: {self.stats['failed']}")
+
+            for from_date, to_date in tqdm(date_ranges, desc="Processing date ranges", unit="range"):
+                window_person_ids = self.get_person_ids_for_window(from_date, to_date)
+                window_person_ids = [pid for pid in window_person_ids if pid not in processed_person_ids]
+
+                if not window_person_ids:
+                    continue
+
+                for pid in window_person_ids:
+                    processed_person_ids.add(pid)
+
+                with self.stats_lock:
+                    self.stats['person_ids'] += len(window_person_ids)
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(process_person, pid, table_columns, from_date, to_date): pid
+                        for pid in window_person_ids
+                    }
+
+                    with tqdm(total=len(window_person_ids), desc=f"Persons {from_date} to {to_date}", unit="person", leave=False) as pbar:
+                        for idx, future in enumerate(as_completed(futures), 1):
+                            pid = futures[future]
+                            try:
+                                future.result()
+                            except Exception as e:
+                                logger.error(f"Error processing person {pid}: {e}")
+                                with self.stats_lock:
+                                    self.stats['failed'] += 1
+                                    self.stats['errors'] += 1
+
+                            pbar.update(1)
+                            if idx % batch_size == 0:
+                                with self.stats_lock:
+                                    logger.info(
+                                        f"   📊 Progress ({from_date} to {to_date}): {idx}/{len(window_person_ids)} - "
+                                        f"Inserted: {self.stats['inserted']}, Updated: {self.stats['updated']}, "
+                                        f"Failed: {self.stats['failed']}"
+                                    )
 
             # Get database counts
             with self.db_pool.get_connection_context() as conn:
@@ -1314,6 +1524,8 @@ class PersonsETL:
                 logger.info(f"  Would Insert:             {self.stats['dry_run_inserts']}")
                 logger.info(f"  Would Update:             {self.stats['dry_run_changes']}")
                 logger.info(f"  No Change:                {self.stats['dry_run_no_change']}")
+            else:
+                self.update_run_checkpoint('persons', calculated_end_date)
             logger.info("=" * 80)
             logger.info("✅ ETL Pipeline completed successfully!")
             return True

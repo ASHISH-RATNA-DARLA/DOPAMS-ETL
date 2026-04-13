@@ -205,18 +205,26 @@ class PostgreSQLConnectionPool:
             conn.close()
             return self.pool.getconn()
     
-    def return_connection(self, conn: psycopg2.extensions.connection):
-        """Return a connection to the pool"""
+    def return_connection(self, conn: psycopg2.extensions.connection, close_conn: bool = False):
+        """Return a connection to the pool. Set close_conn=True to discard a bad connection."""
         if conn and self.pool:
             try:
-                self.pool.putconn(conn)
+                if not close_conn:
+                    # Ensure clean transaction state before reusing connection.
+                    try:
+                        if getattr(conn, "closed", 1) == 0 and conn.status != psycopg2.extensions.STATUS_READY:
+                            conn.rollback()
+                    except Exception:
+                        close_conn = True
+
+                self.pool.putconn(conn, close=close_conn)
                 stats = self.stats()
-                logger.debug(f"[POOL] putconn → in_use={stats.get('in_use')}, available={stats.get('available')}")
+                logger.debug(f"[POOL] putconn(close={close_conn}) → in_use={stats.get('in_use')}, available={stats.get('available')}")
             except Exception as e:
                 logger.error(f"Error returning connection to pool: {e}")
                 try:
                     conn.close()
-                except:
+                except Exception:
                     pass
     
     @contextmanager
@@ -258,9 +266,9 @@ def get_db_connection() -> psycopg2.extensions.connection:
     return PostgreSQLConnectionPool().get_connection()
 
 
-def return_db_connection(conn: psycopg2.extensions.connection):
-    """Return connection to pool"""
-    PostgreSQLConnectionPool().return_connection(conn)
+def return_db_connection(conn: psycopg2.extensions.connection, close_conn: bool = False):
+    """Return connection to pool. Use close_conn=True to discard stale/broken handles."""
+    PostgreSQLConnectionPool().return_connection(conn, close_conn=close_conn)
 
 
 # ============================================================================

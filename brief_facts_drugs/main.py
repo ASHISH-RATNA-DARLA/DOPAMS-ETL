@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import (get_db_connection, fetch_crimes_by_ids, insert_drug_facts,
                 fetch_unprocessed_crimes, fetch_drug_categories, ensure_connection,
                 batch_insert_drug_facts, fetch_drug_ignore_list)
+from db_pooling import return_db_connection
 from extractor import extract_drug_info, build_drug_keywords
 
 # Configure logging
@@ -120,7 +121,7 @@ def main():
                 finally:
                     try:
                         if prefetch_conn is not None:
-                            prefetch_conn.close()
+                            return_db_connection(prefetch_conn)
                     except Exception:
                         pass
 
@@ -178,7 +179,7 @@ def main():
     except Exception as e:
         logging.error(f"Unexpected error in main loop: {e}")
     finally:
-        conn.close()
+        return_db_connection(conn)
         logging.info("Database connection closed.")
 
 

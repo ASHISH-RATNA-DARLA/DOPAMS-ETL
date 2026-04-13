@@ -338,6 +338,44 @@ class DisposalETL:
         if self.db_pool:
             self.db_pool.close_all()
         logger.info("Database connection closed")
+
+    def ensure_run_state_table(self):
+        """Ensure ETL run-state table exists."""
+        with self.db_pool.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS etl_run_state (
+                        module_name TEXT PRIMARY KEY,
+                        last_successful_end TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+
+    def get_run_checkpoint(self, module_name: str) -> Optional[datetime]:
+        """Get last successful run checkpoint for a module."""
+        with self.db_pool.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                    (module_name,)
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+
+    def update_run_checkpoint(self, module_name: str, end_date_iso: str):
+        """Persist successful run completion boundary."""
+        end_dt = parse_iso_date(end_date_iso)
+        with self.db_pool.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (module_name) DO UPDATE SET
+                        last_successful_end = EXCLUDED.last_successful_end,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (module_name, end_dt))
+                conn.commit()
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
@@ -906,100 +944,54 @@ class DisposalETL:
         
         try:
             logger.trace(f"Processing disposal: crime_id={crime_id}, disposal_type={disposal_type}, disposed_at={disposed_at}")
-            
-            # Check if disposal already exists (based on unique constraint)
-            if self.disposal_exists(crime_id, disposal_type, disposed_at, cursor):
-                # Get existing record to compare
-                existing = self.get_existing_disposal(crime_id, disposal_type, disposed_at, cursor)
-                if not existing:
-                    logger.warning(f"⚠️  Disposal exists check returned True but fetch returned None")
-                    # Fall back to insert
-                    existing = None
-                
-                if existing:
-                    # Smart update: only update fields that need updating
-                    # Rules:
-                    # 1. API is source of truth for all mutable fields.
-                    # 2. NULL from API must overwrite existing values.
-                    # 3. Only key columns are preserved by the conflict lookup.
-                    
-                    update_fields = []
-                    update_values = []
-                    changes = []
-                    
-                    # Define all fields to check (excluding unique key fields)
-                    fields_to_check = [
-                        ('disposal', 'DISPOSAL'),
-                        ('case_status', 'CASE_STATUS'),
-                        ('date_created', 'DATE_CREATED'),
-                        ('date_modified', 'DATE_MODIFIED')
-                    ]
-                    
-                    for db_field, api_field in fields_to_check:
-                        existing_val = existing.get(db_field)
-                        new_val = disposal.get(db_field)
-                        
-                        if existing_val != new_val:
-                            update_fields.append(f"{db_field} = %s")
-                            update_values.append(new_val)
-                            changes.append(f"{db_field}: {existing_val} → {new_val}")
-                            logger.trace(f"  Will update {db_field}: {existing_val} → {new_val}")
-                    
-                    # Only update if there are changes
-                    if update_fields:
-                        update_query = f"""
-                            UPDATE {DISPOSAL_TABLE} SET
-                                {', '.join(update_fields)}
-                            WHERE crime_id = %s
-                              AND disposal_type IS NOT DISTINCT FROM %s
-                              AND disposed_at IS NOT DISTINCT FROM %s
-                        """
-                        update_values.extend([crime_id, disposal_type, disposed_at])
-                        cursor.execute(update_query, tuple(update_values))
-                        with self.stats_lock:
-                            self.stats['total_disposals_updated'] += 1
-                        logger.debug(f"Updated disposal: crime_id={crime_id}, disposal_type={disposal_type} ({len(changes)} fields changed)")
-                        logger.trace(f"Changes: {', '.join(changes)}")
-                        conn.commit()
-                        logger.trace(f"Transaction committed for updated disposal")
-                        return True, 'updated'
-                    else:
-                        # No changes needed
-                        with self.stats_lock:
-                            self.stats['total_disposals_no_change'] += 1
-                        logger.trace(f"No changes needed for disposal (all fields match or preserved)")
-                        return True, 'no_change'
-                else:
-                    # Exists check returned True but couldn't fetch - treat as new insert
-                    logger.warning(f"⚠️  Disposal exists but couldn't fetch, treating as new insert")
-                    # Fall through to insert logic
-            else:
-                # Insert new disposal
-                logger.trace(f"Inserting new disposal: crime_id={crime_id}, disposal_type={disposal_type}")
-                insert_query = f"""
-                    INSERT INTO {DISPOSAL_TABLE} (
-                        crime_id, disposal_type, disposed_at, disposal, case_status,
-                        date_created, date_modified
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                cursor.execute(insert_query, (
-                    crime_id,
-                    disposal_type,
-                    disposed_at,
-                    disposal.get('disposal'),
-                    disposal.get('case_status'),
-                    disposal.get('date_created'),
-                    disposal.get('date_modified')
-                ))
+
+            upsert_query = f"""
+                INSERT INTO {DISPOSAL_TABLE} (
+                    crime_id, disposal_type, disposed_at, disposal, case_status,
+                    date_created, date_modified
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (crime_id, disposal_type, disposed_at) DO UPDATE SET
+                    disposal = EXCLUDED.disposal,
+                    case_status = EXCLUDED.case_status,
+                    date_created = EXCLUDED.date_created,
+                    date_modified = EXCLUDED.date_modified
+                WHERE (
+                    {DISPOSAL_TABLE}.disposal IS DISTINCT FROM EXCLUDED.disposal OR
+                    {DISPOSAL_TABLE}.case_status IS DISTINCT FROM EXCLUDED.case_status OR
+                    {DISPOSAL_TABLE}.date_created IS DISTINCT FROM EXCLUDED.date_created OR
+                    {DISPOSAL_TABLE}.date_modified IS DISTINCT FROM EXCLUDED.date_modified
+                )
+                RETURNING (xmax = 0) AS inserted
+            """
+
+            cursor.execute(upsert_query, (
+                crime_id,
+                disposal_type,
+                disposed_at,
+                disposal.get('disposal'),
+                disposal.get('case_status'),
+                disposal.get('date_created'),
+                disposal.get('date_modified')
+            ))
+
+            result = cursor.fetchone()
+            conn.commit()
+
+            if result is None:
+                with self.stats_lock:
+                    self.stats['total_disposals_no_change'] += 1
+                return True, 'no_change'
+
+            if result[0]:
                 with self.stats_lock:
                     self.stats['total_disposals_inserted'] += 1
-                logger.debug(f"Inserted disposal: crime_id={crime_id}, disposal_type={disposal_type}")
-                logger.trace(f"Insert query executed for disposal")
-                conn.commit()
-                logger.trace(f"Transaction committed for inserted disposal")
                 return True, 'inserted'
+
+            with self.stats_lock:
+                self.stats['total_disposals_updated'] += 1
+            return True, 'updated'
             
         except psycopg2.IntegrityError as e:
             conn.rollback()
@@ -1446,6 +1438,8 @@ class DisposalETL:
         if not self.run_preflight_checks():
             logger.error("\n❌ PRE-FLIGHT CHECKS FAILED - Aborting ETL run")
             return False
+
+        self.ensure_run_state_table()
         
         # Calculate date range
         # Calculate end date: Yesterday at 23:59:59+05:30 (IST)
@@ -1457,6 +1451,12 @@ class DisposalETL:
         try:
             # Get effective start date (check if table has data, or use API_DATA_START_DATE)
             effective_start_date = self.get_effective_start_date()
+            checkpoint_date = self.get_run_checkpoint('disposal')
+            if checkpoint_date:
+                checkpoint_iso = checkpoint_date.isoformat()
+                if parse_iso_date(checkpoint_iso) > parse_iso_date(effective_start_date):
+                    effective_start_date = checkpoint_iso
+
             logger.info(f"Effective Start Date (for this run): {effective_start_date}")
             
             # Get table columns for schema evolution
@@ -1551,6 +1551,8 @@ class DisposalETL:
             logger.info(f"")
             logger.info(f"Errors:               {len(self.stats['errors'])}")
             logger.info("=" * 80)
+
+            self.update_run_checkpoint('disposal', calculated_end_date)
             
             if self.stats['errors']:
                 logger.warning("⚠️  Errors encountered:")

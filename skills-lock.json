@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "vibe-coding": {
+      "source": "refoundai/lenny-skills",
+      "sourceType": "github",
+      "computedHash": "6e31a086952e810305b9b57176946bb56ad08edbaf59c6121230d1a1151eba93"
+    }
+  }
+}

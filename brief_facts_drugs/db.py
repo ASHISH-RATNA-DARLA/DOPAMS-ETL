@@ -3,14 +3,19 @@ from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import config
 import logging
+import json
+import re
 
 logger = logging.getLogger(__name__)
+
+UNIFIED_TABLE_NAME = "brief_facts_ai"
 
 import sys
 import os
 # Import PostgreSQLConnectionPool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import get_db_connection as get_pooled_connection
+from db_pooling import return_db_connection
 
 def get_db_connection():
     """Establishes a connection to the PostgreSQL database via pool."""
@@ -30,7 +35,7 @@ def ensure_connection(conn):
     except Exception:
         logger.warning("DB connection lost. Reconnecting...")
         try:
-            conn.close()
+            return_db_connection(conn, close_conn=True)
         except Exception:
             pass
         return get_db_connection()
@@ -167,6 +172,31 @@ def fetch_unprocessed_crimes(conn, limit=100):
     Fetches crimes that do NOT yet have an entry in the configured drug table.
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        if (config.DRUG_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME:
+            # Unified mode: only process crimes already present in brief_facts_ai
+            # that do not yet have drugs populated.
+            cur.execute(
+                """
+                SELECT c.crime_id, c.brief_facts
+                FROM crimes c
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM public.brief_facts_ai b
+                    WHERE b.crime_id = c.crime_id
+                )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM public.brief_facts_ai b
+                    WHERE b.crime_id = c.crime_id
+                      AND b.drugs IS NOT NULL
+                )
+                ORDER BY c.crime_id ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return cur.fetchall()
+
         query = sql.SQL("""
             SELECT c.crime_id, c.brief_facts
             FROM crimes c
@@ -178,6 +208,222 @@ def fetch_unprocessed_crimes(conn, limit=100):
 
         cur.execute(query, (limit,))
         return cur.fetchall()
+
+
+def _select_primary_bf_accused_id(conn, crime_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT bf_accused_id
+            FROM public.brief_facts_ai
+            WHERE crime_id = %s
+            ORDER BY
+                CASE
+                    WHEN seq_num ~ '^[0-9]+$' THEN seq_num::int
+                    ELSE 2147483647
+                END,
+                bf_accused_id
+            LIMIT 1
+            """,
+            (crime_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def _fetch_bfai_rows_for_crime(conn, crime_id):
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT bf_accused_id, person_code, seq_num, role_in_crime, accused_id
+            FROM public.brief_facts_ai
+            WHERE crime_id = %s
+            ORDER BY
+                CASE
+                    WHEN seq_num ~ '^[0-9]+$' THEN seq_num::int
+                    ELSE 2147483647
+                END,
+                bf_accused_id
+            """,
+            (crime_id,),
+        )
+        return cur.fetchall()
+
+
+def _norm_person_code(value):
+    if not value:
+        return None
+    v = str(value).upper().strip()
+    m = re.search(r'A\s*[-.]?\s*(\d+)', v)
+    if m:
+        return f"A-{int(m.group(1))}"
+    return None
+
+
+def _extract_person_codes(drug_data):
+    codes = set()
+    meta = drug_data.get('extraction_metadata') or {}
+    source_sentence = str(meta.get('source_sentence') or '')
+    for raw in re.findall(r'\bA\s*[-.]?\s*\d+\b', source_sentence, flags=re.IGNORECASE):
+        normalized = _norm_person_code(raw)
+        if normalized:
+            codes.add(normalized)
+
+    accused_ref = meta.get('accused_ref')
+    if accused_ref:
+        normalized = _norm_person_code(accused_ref)
+        if normalized:
+            codes.add(normalized)
+
+    return codes
+
+
+def _as_num_or_none(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == '':
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _build_drug_element(drug_data, attribution_source, attribution_ref=None, nullify_quantity=False):
+    raw_quantity = 0.0 if attribution_source == 'NO_DRUGS_DETECTED' else _as_num_or_none(drug_data.get('raw_quantity'))
+    weight_g = 0.0 if attribution_source == 'NO_DRUGS_DETECTED' else _as_num_or_none(drug_data.get('weight_g'))
+    weight_kg = 0.0 if attribution_source == 'NO_DRUGS_DETECTED' else _as_num_or_none(drug_data.get('weight_kg'))
+    volume_ml = 0.0 if attribution_source == 'NO_DRUGS_DETECTED' else _as_num_or_none(drug_data.get('volume_ml'))
+    volume_l = 0.0 if attribution_source == 'NO_DRUGS_DETECTED' else _as_num_or_none(drug_data.get('volume_l'))
+    count_total = 0.0 if attribution_source == 'NO_DRUGS_DETECTED' else _as_num_or_none(drug_data.get('count_total'))
+
+    if nullify_quantity:
+        raw_quantity = None
+        weight_g = None
+        weight_kg = None
+        volume_ml = None
+        volume_l = None
+        count_total = None
+
+    return {
+        'raw_drug_name': drug_data.get('raw_drug_name'),
+        'raw_quantity': raw_quantity,
+        'raw_unit': drug_data.get('raw_unit'),
+        'primary_drug_name': drug_data.get('primary_drug_name'),
+        'drug_form': drug_data.get('drug_form'),
+        'weight_g': weight_g,
+        'weight_kg': weight_kg,
+        'volume_ml': volume_ml,
+        'volume_l': volume_l,
+        'count_total': count_total,
+        'confidence_score': _as_num_or_none(drug_data.get('confidence_score')),
+        'is_commercial': bool(drug_data.get('is_commercial', False)),
+        'seizure_worth': _as_num_or_none(drug_data.get('seizure_worth')),
+        'worth_scope': drug_data.get('worth_scope', 'individual'),
+        'extraction_metadata': drug_data.get('extraction_metadata') or {},
+        'drug_attribution_source': attribution_source,
+        'drug_attribution_ref': attribution_ref,
+    }
+
+
+def _write_drugs_by_accused(conn, crime_id, drug_rows):
+    rows = _fetch_bfai_rows_for_crime(conn, crime_id)
+    if not rows:
+        logger.warning(f"No brief_facts_ai rows found for crime {crime_id}. Skipping drug write.")
+        return {}
+
+    rows_by_code = {}
+    per_row_drugs = {str(r['bf_accused_id']): [] for r in rows}
+    for row in rows:
+        normalized = _norm_person_code(row.get('person_code'))
+        if normalized:
+            rows_by_code[normalized] = row
+
+    orphan_row = next((r for r in rows if r.get('role_in_crime') == 'NO_ACCUSED_DRUGS_ONLY'), None)
+    real_rows = [r for r in rows if r.get('accused_id')]
+    ordered_real_rows = real_rows if real_rows else rows
+    primary_row = ordered_real_rows[0] if ordered_real_rows else rows[0]
+    primary_code = _norm_person_code(primary_row.get('person_code'))
+
+    for drug_data in drug_rows:
+        primary_name = str(drug_data.get('primary_drug_name') or '').strip().upper()
+
+        if orphan_row:
+            orphan_elem = _build_drug_element(drug_data, 'NO_ACCUSED_ORPHAN')
+            per_row_drugs[str(orphan_row['bf_accused_id'])].append(orphan_elem)
+            continue
+
+        if primary_name == 'NO_DRUGS_DETECTED':
+            for row in ordered_real_rows:
+                elem = _build_drug_element(drug_data, 'NO_DRUGS_DETECTED')
+                per_row_drugs[str(row['bf_accused_id'])].append(elem)
+            continue
+
+        mentioned_codes = _extract_person_codes(drug_data)
+        matched_rows = [rows_by_code[c] for c in sorted(mentioned_codes) if c in rows_by_code]
+
+        if len(matched_rows) == 1:
+            target = matched_rows[0]
+            elem = _build_drug_element(drug_data, 'INDIVIDUAL')
+            per_row_drugs[str(target['bf_accused_id'])].append(elem)
+            continue
+
+        if len(matched_rows) > 1:
+            holder = matched_rows[0]
+            holder_code = _norm_person_code(holder.get('person_code'))
+            holder_elem = _build_drug_element(drug_data, 'COLLECTIVE_TOTAL')
+            per_row_drugs[str(holder['bf_accused_id'])].append(holder_elem)
+            for row in matched_rows[1:]:
+                ref_elem = _build_drug_element(
+                    drug_data,
+                    'REFERENCED_A1',
+                    attribution_ref=holder_code,
+                    nullify_quantity=True,
+                )
+                per_row_drugs[str(row['bf_accused_id'])].append(ref_elem)
+            continue
+
+        # Unattributed fallback: full quantity on A1, references on remaining accused
+        holder = primary_row
+        holder_code = primary_code
+        holder_elem = _build_drug_element(drug_data, 'UNATTRIBUTED_FALLBACK_A1')
+        per_row_drugs[str(holder['bf_accused_id'])].append(holder_elem)
+        for row in ordered_real_rows:
+            if row['bf_accused_id'] == holder['bf_accused_id']:
+                continue
+            ref_elem = _build_drug_element(
+                drug_data,
+                'REFERENCED_A1',
+                attribution_ref=holder_code,
+                nullify_quantity=True,
+            )
+            per_row_drugs[str(row['bf_accused_id'])].append(ref_elem)
+
+    return per_row_drugs
+
+
+def _write_drugs_to_unified_table(conn, crime_id, drug_rows):
+    """
+    Unified mode persistence:
+    - Writes accused-wise drug arrays for all rows of the crime.
+    - Uses attribution fallback states for non-attributed or group seizures.
+    """
+    per_row_drugs = _write_drugs_by_accused(conn, crime_id, drug_rows)
+    if not per_row_drugs:
+        return
+
+    with conn.cursor() as cur:
+        for row_id, row_drugs in per_row_drugs.items():
+            drugs_json = json.dumps(row_drugs) if row_drugs else None
+            cur.execute(
+                """
+                UPDATE public.brief_facts_ai
+                SET drugs = %s::jsonb,
+                    date_modified = CURRENT_TIMESTAMP
+                WHERE bf_accused_id = %s
+                """,
+                (drugs_json, row_id),
+            )
 
 
 def _prepare_insert_values(crime_id, drug_data):
@@ -207,6 +453,11 @@ def _prepare_insert_values(crime_id, drug_data):
 
 def insert_drug_facts(conn, crime_id, drug_data):
     """Inserts extracted drug information into the database (single row)."""
+    if (config.DRUG_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME:
+        _write_drugs_to_unified_table(conn, crime_id, [drug_data])
+        conn.commit()
+        return
+
     with conn.cursor() as cur:
         query = sql.SQL("""
             INSERT INTO {table}
@@ -229,6 +480,22 @@ def batch_insert_drug_facts(conn, inserts):
     """
     if not inserts:
         return
+
+    if (config.DRUG_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME:
+        per_crime = {}
+        for crime_id, drug_data in inserts:
+            per_crime.setdefault(crime_id, []).append(drug_data)
+
+        try:
+            for crime_id, drugs in per_crime.items():
+                _write_drugs_to_unified_table(conn, crime_id, drugs)
+            conn.commit()
+            logger.info(f"Unified drug write committed: {len(per_crime)} crimes.")
+            return
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Unified drug write failed, rolling back: {e}")
+            raise
 
     query = sql.SQL("""
         INSERT INTO {table}

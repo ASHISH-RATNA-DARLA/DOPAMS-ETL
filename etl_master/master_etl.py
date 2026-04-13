@@ -1,225 +1,382 @@
-import os
-import sys
-import subprocess
-import logging
 import argparse
-import re
-from datetime import datetime
+import logging
+import os
+import subprocess
+import sys
 import time
+from datetime import datetime
 
-# Configure Logging
-log_file = 'master_etl.log'
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler(sys.stdout)
-    ]
+from preflight_check import (
+    PreflightError,
+    parse_input_file,
+    run_preflight,
 )
-logger = logging.getLogger(__name__)
 
-def parse_input_file(file_path):
-    """
-    Parses the input configuration file to extract ordered process blocks.
-    
-    Args:
-        file_path (str): Path to the configuration file.
-        
-    Returns:
-        list of dict: A list of process blocks, e.g., [{'order': '1', 'commands': [...]}]
-    """
-    if not os.path.exists(file_path):
-        logger.error(f"Configuration file not found: {file_path}")
-        sys.exit(1)
 
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
+def build_logger() -> logging.Logger:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    preferred_log_dir = "/logs"
+    fallback_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
-    processes = []
-    current_block = None
-    
-    # Regex to identify order headers like [Order 1], [Order 2]
-    header_pattern = re.compile(r'^\[Order\s+(\d+)\]', re.IGNORECASE)
+    log_dir = preferred_log_dir
+    try:
+        os.makedirs(preferred_log_dir, exist_ok=True)
+    except OSError:
+        log_dir = fallback_log_dir
+        os.makedirs(log_dir, exist_ok=True)
 
-    for line in lines:
-        line = line.strip()
-        
-        # Skip empty lines
-        if not line:
-            continue
-            
-        # Check for headers
-        match = header_pattern.match(line)
-        if match:
-            # Save previous block if it exists
-            if current_block:
-                processes.append(current_block)
-            
-            # Start new block
-            current_block = {
-                'order': match.group(1),
-                'name': None,
-                'commands': []
-            }
-            continue
+    log_file = os.path.join(log_dir, f"etl_run_{timestamp}.log")
 
-        # If we are inside a block, add commands
-        if current_block:
-            # Skip comments
-            if line.startswith('#'):
-                continue
-            
-            # Check if this is the first line in the block (potentially a name)
-            # Heuristic: If it's a single word and not a command start
-            if not current_block['commands'] and not current_block['name']:
-                # If line is single word and doesn't look like a path/command
-                # OR if the user format is consistently Name then Command
-                # We'll allow spaces in names too, so we check for command indicators
-                is_command_like = (
-                    line.startswith('/') or 
-                    line.startswith('./') or 
-                    line.startswith('cd ') or 
-                    line.startswith('source ') or 
-                    line.startswith('python') or 
-                    '=' in line
-                )
-                
-                if not is_command_like:
-                    current_block['name'] = line
-                    continue
+    logger = logging.getLogger("master_etl")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
 
-            current_block['commands'].append(line)
-            
-    # Append the last block
-    if current_block:
-        processes.append(current_block)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-    # Validate commands in all processes
-    for process in processes:
-        for command in process['commands']:
-            # Heuristic check for missing 'cd'
-            # If command looks like an absolute path and doesn't start with typical command indicators
-            if command.startswith('/') and ' ' not in command:
-                logger.warning(
-                    f"Potential Issue in [Order {process.get('order')}]: "
-                    f"Command '{command}' looks like a path but lacks 'cd'. "
-                    f"Verify if this should be 'cd {command}'."
-                )
-        
-    return processes
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.propagate = False
+
+    logger.info("Structured run log: %s", log_file)
+    return logger
+
+
+logger = build_logger()
+
+
+class StepExecutionError(Exception):
+    def __init__(self, command: str, original_error: Exception):
+        super().__init__(f"command='{command}' error='{str(original_error)}'")
+        self.command = command
+        self.original_error = original_error
+
 
 def validate_mo_seizures_wiring(processes, config_path):
-    """
-    Hardening check to ensure top-level orchestrator explicitly includes
-    the corrected MO Seizures ingestion module.
-
-    This does not block execution, but emits a clear warning so accidental
-    reliance on files-only extraction is avoided.
-    """
     has_mo_seizure_loader = False
 
     for process in processes:
-        commands = process.get('commands', [])
+        commands = process.get("commands", [])
         command_blob = " ".join(commands).lower()
-
-        # Corrected row-level MO Seizures loader path
-        if 'etl_mo_seizure.py' in command_blob and 'etl_mo_seizures' in command_blob:
+        if "etl_mo_seizure.py" in command_blob and "etl_mo_seizures" in command_blob:
             has_mo_seizure_loader = True
             break
 
     if has_mo_seizure_loader:
         logger.info(
-            "✓ Orchestration hardening: corrected MO Seizures loader is explicitly wired "
-            f"in {config_path}"
+            "Orchestration hardening: corrected MO Seizures loader is explicitly wired in %s",
+            config_path,
         )
     else:
         logger.warning(
-            "⚠ Orchestration hardening: corrected MO Seizures loader was NOT found in "
-            f"{config_path}. Ensure config contains 'cd .../etl_mo_seizures' + 'python3 etl_mo_seizure.py'."
+            "Orchestration hardening: corrected MO Seizures loader was NOT found in %s",
+            config_path,
         )
 
-def execute_process(process):
-    """
-    Executes a single process block.
-    
-    Args:
-        process (dict): Process info containing 'order', 'name', and 'commands'.
-    """
-    order = process['order']
-    name = process.get('name', 'Unnamed Process')
-    commands = process['commands']
-    
-    logger.info(f"--- Starting Process [Order {order}: {name}] ---")
-    
-    if not commands:
-        logger.warning(f"Process [Order {order}: {name}] has no commands. Skipping.")
-        return True
 
-    # Combine commands into a single shell command string.
-    # We join with ' && ' so that if one step fails, the whole block fails immediately.
-    full_command = " && ".join(commands)
-
-    # Extract working directory from the 'cd' command so logs are written
-    # to master_output.log inside each individual ETL folder.
-    working_dir = None
-    for cmd in commands:
-        if cmd.startswith('cd '):
-            working_dir = cmd[3:].strip()
-            break
-
-    log_path = os.path.join(working_dir, 'master_output.log') if working_dir else 'master_output.log'
-
-    # `set -o pipefail` keeps failures visible even when piping through tee.
-    logged_command = f"set -o pipefail; ( {full_command} ) 2>&1 | tee {log_path}"
-
-    logger.info(f"Executing: {full_command}")
-    logger.info(f"Subprocess logs will be written to: {log_path}")
-    
-    try:
-        # executable='/bin/bash' is crucial for 'source' to work
-        subprocess.run(
-            logged_command, 
-            shell=True, 
-            executable='/bin/bash', 
-            check=True,
-            text=True
-        )
-        logger.info(f"--- Completed Process [Order {order}: {name}] Successfully ---\n")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Process [Order {order}: {name}] FAILED with exit code {e.returncode}")
-        logger.error("Stopping Master ETL execution.")
-        return False
-
-def main():
-    parser = argparse.ArgumentParser(description="Master ETL Orchestrator")
-    parser.add_argument('--config', default='input.txt', help='Path to process configuration file')
-    args = parser.parse_args()
-
-    logger.info("Starting Master ETL Orchestrator")
-    logger.info(f"Reading configuration from: {args.config}")
-
-    processes = parse_input_file(args.config)
-    validate_mo_seizures_wiring(processes, args.config)
-    
-    if not processes:
-        logger.warning("No process blocks found in configuration file.")
-        logger.warning("Ensure blocks start with [Order X]")
-        return
-
-    logger.info(f"Found {len(processes)} processes to execute.")
+def normalize_processes_for_unified_mode(processes):
+    normalized = []
+    found_unified_block = False
 
     for process in processes:
-        success = execute_process(process)
-        if not success:
+        process_name = (process.get("name") or "").strip().lower()
+
+        if process_name == "brief_facts_ai":
+            normalized.append(process)
+            found_unified_block = True
+            continue
+
+        if process_name == "brief_facts_accused":
+            unified_block = dict(process)
+            unified_block["name"] = "brief_facts_ai"
+            normalized.append(unified_block)
+            found_unified_block = True
+            continue
+
+        if process_name in {"brief_facts_drugs", "drug_standardization"}:
+            logger.info(
+                "Unified brief_facts_ai mode: skipping legacy block [Order %s: %s]",
+                process.get("order"),
+                process.get("name"),
+            )
+            continue
+
+        normalized.append(process)
+
+    if not found_unified_block:
+        logger.warning(
+            "Unified brief_facts_ai mode is enabled, but no brief_facts_ai/brief_facts_accused block was found"
+        )
+
+    return normalized
+
+
+def validate_brief_facts_ai_wiring(processes, config_path):
+    has_unified_block = any((process.get("name") or "").strip().lower() == "brief_facts_ai" for process in processes)
+    has_legacy_accused = any((process.get("name") or "").strip().lower() == "brief_facts_accused" for process in processes)
+
+    if has_unified_block or has_legacy_accused:
+        logger.info("Unified brief_facts_ai orchestration enabled")
+    else:
+        logger.warning(
+            "Unified brief_facts_ai orchestration enabled, but no matching block was found in %s",
+            config_path,
+        )
+
+
+def optimize_refresh_steps(processes):
+    refresh_indexes = []
+
+    for idx, process in enumerate(processes):
+        process_name = (process.get("name") or "").strip().lower()
+        command_blob = " ".join(process.get("commands", [])).lower()
+        if process_name == "refresh_views" or "views_refresh_sql.py" in command_blob:
+            refresh_indexes.append(idx)
+
+    if len(refresh_indexes) <= 1:
+        return processes
+
+    keep_index = refresh_indexes[-1]
+    optimized = []
+
+    refresh_process = processes[keep_index]
+
+    for idx, process in enumerate(processes):
+        if idx in refresh_indexes and idx != keep_index:
+            logger.info(
+                "Removing duplicate refresh step [Order %s: %s]; refresh will run once at pipeline end",
+                process.get("order"),
+                process.get("name"),
+            )
+            continue
+        if idx == keep_index:
+            continue
+        optimized.append(process)
+
+    optimized.append(refresh_process)
+
+    return optimized
+
+
+def extract_execution_context(process):
+    working_dir = None
+    runtime_env = os.environ.copy()
+    executable_commands = []
+
+    for raw_cmd in process.get("commands", []):
+        cmd = raw_cmd.strip()
+        if not cmd:
+            continue
+
+        if cmd.startswith("cd "):
+            working_dir = cmd[3:].strip()
+            continue
+
+        if cmd.startswith("source "):
+            activation_script = cmd[7:].strip()
+            if activation_script.endswith("/bin/activate"):
+                venv_root = os.path.dirname(os.path.dirname(activation_script))
+                venv_bin = os.path.join(venv_root, "bin")
+                runtime_env["VIRTUAL_ENV"] = venv_root
+                runtime_env["PATH"] = f"{venv_bin}:{runtime_env.get('PATH', '')}"
+                logger.info("Virtual environment detected: %s", venv_root)
+            else:
+                logger.warning("Unsupported source command retained as executable step: %s", cmd)
+                executable_commands.append(cmd)
+            continue
+
+        executable_commands.append(cmd)
+
+    return working_dir, runtime_env, executable_commands
+
+
+def run_command(command, cwd, env):
+    # Linux-targeted orchestration: execute in bash without shell chaining.
+    subprocess.run(
+        ["/bin/bash", "-lc", command],
+        cwd=cwd,
+        env=env,
+        check=True,
+        text=True,
+    )
+
+
+def run_process_once(process):
+    order = process["order"]
+    name = process.get("name") or "Unnamed Process"
+    cwd, env, commands = extract_execution_context(process)
+
+    if not commands:
+        logger.warning("[Order %s: %s] has no executable commands; skipping", order, name)
+        return
+
+    for idx, command in enumerate(commands, start=1):
+        logger.info("[Order %s: %s] command %d start: %s", order, name, idx, command)
+        try:
+            run_command(command, cwd, env)
+        except Exception as exc:
+            raise StepExecutionError(command, exc) from exc
+        logger.info("[Order %s: %s] command %d success", order, name, idx)
+
+
+def run_process_with_retry(process, process_index, max_retries=2):
+    order = process["order"]
+    name = process.get("name") or "Unnamed Process"
+    retry_delays = [2, 5]
+    attempts = max_retries + 1
+    last_error = None
+
+    for attempt in range(1, attempts + 1):
+        process_start = time.time()
+        logger.info("Step %d [Order %s: %s] started (attempt %d/%d)", process_index, order, name, attempt, attempts)
+
+        try:
+            run_process_once(process)
+            duration = time.time() - process_start
+            logger.info(
+                "Step %d [Order %s: %s] ended | duration=%.2fs | status=SUCCESS",
+                process_index,
+                order,
+                name,
+                duration,
+            )
+            return True
+        except Exception as exc:
+            duration = time.time() - process_start
+            last_error = exc
+            logger.error(
+                "Step %d [Order %s: %s] ended | duration=%.2fs | status=FAILED",
+                process_index,
+                order,
+                name,
+                duration,
+            )
+            logger.error(
+                "FAILED STEP => number=%d, script=%s, error=%s",
+                process_index,
+                name,
+                str(exc),
+            )
+            if isinstance(exc, StepExecutionError):
+                logger.error("FAILED COMMAND => %s", exc.command)
+
+            if attempt <= max_retries:
+                delay = retry_delays[attempt - 1]
+                logger.info(
+                    "Retrying step %d [Order %s: %s] in %d seconds",
+                    process_index,
+                    order,
+                    name,
+                    delay,
+                )
+                time.sleep(delay)
+
+    logger.error(
+        "Step %d [Order %s: %s] exhausted retries and failed permanently: %s",
+        process_index,
+        order,
+        name,
+        str(last_error),
+    )
+    return False
+
+
+def resolve_config_path(args):
+    """Prefer --config, but keep --input-file as backward-compatible alias."""
+    if args.config:
+        return args.config
+    if args.input_file:
+        logger.warning("--input-file is deprecated; use --config going forward")
+        return args.input_file
+    return "input.txt"
+
+
+def filter_processes_by_order(processes, start_order=None, end_order=None):
+    """Optionally run a subset of ordered blocks for resume/debug compatibility."""
+    if start_order is None and end_order is None:
+        return processes
+
+    filtered = []
+    for process in processes:
+        order = int(process.get("order"))
+        if start_order is not None and order < start_order:
+            continue
+        if end_order is not None and order > end_order:
+            continue
+        filtered.append(process)
+
+    if not filtered:
+        raise ValueError(
+            f"No processes found for requested order window start={start_order}, end={end_order}"
+        )
+
+    return filtered
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Master ETL Orchestrator (Ubuntu-safe)")
+    parser.add_argument("--config", default=None, help="Path to process configuration file")
+    parser.add_argument("--input-file", dest="input_file", default=None, help="Deprecated alias for --config")
+    parser.add_argument("--env", default="prod", help="Runtime environment name, e.g., prod")
+    parser.add_argument("--start-order", type=int, default=None, help="Optional first order to execute")
+    parser.add_argument("--end-order", type=int, default=None, help="Optional last order to execute")
+    args = parser.parse_args()
+
+    config_path = resolve_config_path(args)
+
+    if args.start_order is not None and args.end_order is not None and args.start_order > args.end_order:
+        logger.error("Invalid order range: --start-order cannot be greater than --end-order")
+        sys.exit(1)
+
+    if os.name != "posix":
+        logger.error("This orchestrator is Linux-only and is intended for Ubuntu execution.")
+        sys.exit(1)
+
+    logger.info("Starting Master ETL Orchestrator")
+    logger.info(
+        "Using config=%s env=%s start_order=%s end_order=%s",
+        config_path,
+        args.env,
+        args.start_order,
+        args.end_order,
+    )
+
+    try:
+        run_preflight(config_path, args.env)
+    except PreflightError as exc:
+        logger.error("Preflight failed: %s", str(exc))
+        sys.exit(1)
+
+    processes = parse_input_file(config_path)
+    validate_mo_seizures_wiring(processes, config_path)
+    processes = normalize_processes_for_unified_mode(processes)
+    validate_brief_facts_ai_wiring(processes, config_path)
+    processes = optimize_refresh_steps(processes)
+
+    try:
+        processes = filter_processes_by_order(processes, args.start_order, args.end_order)
+    except ValueError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
+    if not processes:
+        logger.error("No process blocks found in configuration file. Ensure blocks start with [Order X].")
+        sys.exit(1)
+
+    logger.info("Found %d processes to execute.", len(processes))
+
+    for process_index, process in enumerate(processes, start=1):
+        if not run_process_with_retry(process, process_index=process_index, max_retries=2):
+            logger.error("Master ETL execution stopped due to step failure.")
             sys.exit(1)
-        
-        # Add a delay between processes to avoid rate limiting/connection issues
-        logger.info("Waiting 5 seconds before next process...")
-        time.sleep(5)
 
     logger.info("All ETL processes finished successfully.")
+
 
 if __name__ == "__main__":
     main()

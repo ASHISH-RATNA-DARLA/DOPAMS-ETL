@@ -135,6 +135,44 @@ class PropertiesETL:
         if self.db_pool:
             self.db_pool.close_all()
         logger.info("Database connection closed")
+
+    def ensure_run_state_table(self):
+        """Ensure ETL run-state table exists."""
+        with self.db_pool.get_connection_context() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS etl_run_state (
+                        module_name TEXT PRIMARY KEY,
+                        last_successful_end TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+
+    def get_run_checkpoint(self, module_name: str) -> Optional[datetime]:
+        """Get last successful run checkpoint for a module."""
+        with self.db_pool.get_connection_context() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                    (module_name,)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+
+    def update_run_checkpoint(self, module_name: str, end_date_iso: str):
+        """Persist successful run completion boundary."""
+        end_dt = parse_iso_date(end_date_iso)
+        with self.db_pool.get_connection_context() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (module_name) DO UPDATE SET
+                        last_successful_end = EXCLUDED.last_successful_end,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (module_name, end_dt))
+                conn.commit()
     
     def ensure_pending_table(self):
         """Create the properties_pending_fk table if it doesn't exist."""
@@ -860,117 +898,102 @@ class PropertiesETL:
             True if successful, False otherwise
         """
         try:
-            # Check if property already exists
-            if self.property_exists(prop['property_id'], cursor):
-                # Update existing property
-                # Overwrite with API values (source of truth), including explicit nulls.
-                update_query = f"""
-                    UPDATE {PROPERTIES_TABLE} SET
-                        crime_id = %s,
-                        case_property_id = %s,
-                        property_status = %s,
-                        recovered_from = %s,
-                        place_of_recovery = %s,
-                        date_of_seizure = %s,
-                        nature = %s,
-                        belongs = %s,
-                        estimate_value = %s,
-                        recovered_value = %s,
-                        particular_of_property = %s,
-                        category = %s,
-                        additional_details = %s,
-                        media = %s,
-                        date_created = %s,
-                        date_modified = %s
-                    WHERE property_id = %s
-                """
-                cursor.execute(update_query, (
-                    prop['crime_id'],
-                    prop['case_property_id'],
-                    prop['property_status'],
-                    prop['recovered_from'],
-                    prop['place_of_recovery'],
-                    prop['date_of_seizure'],
-                    prop['nature'],
-                    prop['belongs'],
-                    prop['estimate_value'],
-                    prop['recovered_value'],
-                    prop['particular_of_property'],
-                    prop['category'],
-                    self.to_jsonb_param(prop['additional_details']),
-                    self.to_jsonb_param(prop['media']),
-                    prop['date_created'],
-                    prop['date_modified'],
-                    prop['property_id']
-                ))
+            upsert_query = f"""
+                INSERT INTO {PROPERTIES_TABLE} (
+                    property_id, crime_id, case_property_id, property_status,
+                    recovered_from, place_of_recovery, date_of_seizure, nature,
+                    belongs, estimate_value, recovered_value, particular_of_property,
+                    category, additional_details, media,
+                    date_created, date_modified
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (property_id) DO UPDATE SET
+                    crime_id = EXCLUDED.crime_id,
+                    case_property_id = EXCLUDED.case_property_id,
+                    property_status = EXCLUDED.property_status,
+                    recovered_from = EXCLUDED.recovered_from,
+                    place_of_recovery = EXCLUDED.place_of_recovery,
+                    date_of_seizure = EXCLUDED.date_of_seizure,
+                    nature = EXCLUDED.nature,
+                    belongs = EXCLUDED.belongs,
+                    estimate_value = EXCLUDED.estimate_value,
+                    recovered_value = EXCLUDED.recovered_value,
+                    particular_of_property = EXCLUDED.particular_of_property,
+                    category = EXCLUDED.category,
+                    additional_details = EXCLUDED.additional_details,
+                    media = EXCLUDED.media,
+                    date_created = EXCLUDED.date_created,
+                    date_modified = EXCLUDED.date_modified
+                WHERE (
+                    {PROPERTIES_TABLE}.crime_id IS DISTINCT FROM EXCLUDED.crime_id OR
+                    {PROPERTIES_TABLE}.case_property_id IS DISTINCT FROM EXCLUDED.case_property_id OR
+                    {PROPERTIES_TABLE}.property_status IS DISTINCT FROM EXCLUDED.property_status OR
+                    {PROPERTIES_TABLE}.recovered_from IS DISTINCT FROM EXCLUDED.recovered_from OR
+                    {PROPERTIES_TABLE}.place_of_recovery IS DISTINCT FROM EXCLUDED.place_of_recovery OR
+                    {PROPERTIES_TABLE}.date_of_seizure IS DISTINCT FROM EXCLUDED.date_of_seizure OR
+                    {PROPERTIES_TABLE}.nature IS DISTINCT FROM EXCLUDED.nature OR
+                    {PROPERTIES_TABLE}.belongs IS DISTINCT FROM EXCLUDED.belongs OR
+                    {PROPERTIES_TABLE}.estimate_value IS DISTINCT FROM EXCLUDED.estimate_value OR
+                    {PROPERTIES_TABLE}.recovered_value IS DISTINCT FROM EXCLUDED.recovered_value OR
+                    {PROPERTIES_TABLE}.particular_of_property IS DISTINCT FROM EXCLUDED.particular_of_property OR
+                    {PROPERTIES_TABLE}.category IS DISTINCT FROM EXCLUDED.category OR
+                    {PROPERTIES_TABLE}.additional_details IS DISTINCT FROM EXCLUDED.additional_details OR
+                    {PROPERTIES_TABLE}.media IS DISTINCT FROM EXCLUDED.media OR
+                    {PROPERTIES_TABLE}.date_created IS DISTINCT FROM EXCLUDED.date_created OR
+                    {PROPERTIES_TABLE}.date_modified IS DISTINCT FROM EXCLUDED.date_modified
+                )
+                RETURNING (xmax = 0) AS inserted
+            """
 
-                self.upsert_property_additional_details(
-                    prop['property_id'],
-                    prop['additional_details'],
-                    prop['date_created'],
-                    prop['date_modified'],
-                    cursor,
-                )
-                self.replace_property_media(
-                    prop['property_id'],
-                    prop['media'],
-                    prop['date_created'],
-                    prop['date_modified'],
-                    cursor,
-                )
+            cursor.execute(upsert_query, (
+                prop['property_id'],
+                prop['crime_id'],
+                prop['case_property_id'],
+                prop['property_status'],
+                prop['recovered_from'],
+                prop['place_of_recovery'],
+                prop['date_of_seizure'],
+                prop['nature'],
+                prop['belongs'],
+                prop['estimate_value'],
+                prop['recovered_value'],
+                prop['particular_of_property'],
+                prop['category'],
+                self.to_jsonb_param(prop['additional_details']),
+                self.to_jsonb_param(prop['media']),
+                prop['date_created'],
+                prop['date_modified']
+            ))
+
+            upsert_result = cursor.fetchone()
+
+            self.upsert_property_additional_details(
+                prop['property_id'],
+                prop['additional_details'],
+                prop['date_created'],
+                prop['date_modified'],
+                cursor,
+            )
+            self.replace_property_media(
+                prop['property_id'],
+                prop['media'],
+                prop['date_created'],
+                prop['date_modified'],
+                cursor,
+            )
+
+            if upsert_result is None:
                 with self.stats_lock:
-                    self.stats['total_properties_updated'] += 1
-                logger.debug(f"Updated property: {prop['property_id']}")
-            else:
-                # Insert new property
-                insert_query = f"""
-                    INSERT INTO {PROPERTIES_TABLE} (
-                        property_id, crime_id, case_property_id, property_status,
-                        recovered_from, place_of_recovery, date_of_seizure, nature,
-                        belongs, estimate_value, recovered_value, particular_of_property,
-                        category, additional_details, media,
-                        date_created, date_modified
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                cursor.execute(insert_query, (
-                    prop['property_id'],
-                    prop['crime_id'],
-                    prop['case_property_id'],
-                    prop['property_status'],
-                    prop['recovered_from'],
-                    prop['place_of_recovery'],
-                    prop['date_of_seizure'],
-                    prop['nature'],
-                    prop['belongs'],
-                    prop['estimate_value'],
-                    prop['recovered_value'],
-                    prop['particular_of_property'],
-                    prop['category'],
-                    self.to_jsonb_param(prop['additional_details']),
-                    self.to_jsonb_param(prop['media']),
-                    prop['date_created'],
-                    prop['date_modified']
-                ))
-
-                self.upsert_property_additional_details(
-                    prop['property_id'],
-                    prop['additional_details'],
-                    prop['date_created'],
-                    prop['date_modified'],
-                    cursor,
-                )
-                self.replace_property_media(
-                    prop['property_id'],
-                    prop['media'],
-                    prop['date_created'],
-                    prop['date_modified'],
-                    cursor,
-                )
+                    self.stats['total_properties_no_change'] += 1
+            elif upsert_result[0]:
                 with self.stats_lock:
                     self.stats['total_properties_inserted'] += 1
                 logger.debug(f"Inserted property: {prop['property_id']}")
+            else:
+                with self.stats_lock:
+                    self.stats['total_properties_updated'] += 1
+                logger.debug(f"Updated property: {prop['property_id']}")
             
             # The commit action for db pool is moved to process_date_range process_prop function 
             return True
@@ -1106,6 +1129,8 @@ class PropertiesETL:
             return False
         
         try:
+            self.ensure_run_state_table()
+
             # Ensure the pending FK retry queue table exists
             self.ensure_pending_table()
 
@@ -1131,6 +1156,12 @@ class PropertiesETL:
 
             # Get effective start date (check if table has data)
             effective_start_date = self.get_effective_start_date()
+            checkpoint_date = self.get_run_checkpoint('properties')
+            if checkpoint_date:
+                checkpoint_iso = checkpoint_date.isoformat()
+                if parse_iso_date(checkpoint_iso) > parse_iso_date(effective_start_date):
+                    effective_start_date = checkpoint_iso
+
             logger.info(f"Effective Start Date: {effective_start_date}")
             
             # Get table columns for schema evolution
@@ -1209,6 +1240,8 @@ class PropertiesETL:
                     logger.warning(f"  - {error}")
                 if len(self.stats['errors']) > 10:
                     logger.warning(f"  ... and {len(self.stats['errors']) - 10} more")
+
+            self.update_run_checkpoint('properties', calculated_end_date)
             
             logger.info("✅ ETL Pipeline completed successfully!")
             return True

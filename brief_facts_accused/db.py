@@ -9,6 +9,9 @@ import config
 
 logger = logging.getLogger(__name__)
 
+UNIFIED_TABLE_NAME = "brief_facts_ai"
+PROCESSING_LOG_TABLE = "etl_crime_processing_log"
+
 # ---------------------------------------------------------------------------
 # Column Length Constants (match DB-schema.sql)
 # ---------------------------------------------------------------------------
@@ -46,19 +49,48 @@ def fetch_crimes_by_ids(conn, crime_ids):
         return []
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        query = "SELECT crime_id, brief_facts FROM crimes WHERE crime_id = ANY(%s)"
+        query = "SELECT crime_id, ps_code, brief_facts FROM crimes WHERE crime_id = ANY(%s)"
         cur.execute(query, (crime_ids,))
         return cur.fetchall()
 
 
 def fetch_unprocessed_crimes(conn, limit=100):
     """
-    Fetches crimes that do NOT yet have an entry in the configured accused table.
-    Uses NOT EXISTS (faster and safer than LEFT JOIN for existence checks).
+    Fetches crimes that need processing.
+
+    In unified mode, a crime is selected when:
+      - it has never completed successfully, or
+      - the source crime row has been modified after the last successful run.
+
+    In legacy mode, the old NOT EXISTS behavior is preserved.
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        if (config.ACCUSED_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME:
+            query = """
+                SELECT
+                    c.crime_id,
+                    c.ps_code,
+                    c.brief_facts,
+                    COALESCE(c.date_modified, c.date_created) AS source_changed_at,
+                    last_run.last_completed_at
+                FROM crimes c
+                LEFT JOIN LATERAL (
+                    SELECT MAX(l.completed_at) AS last_completed_at
+                    FROM public.etl_crime_processing_log l
+                    WHERE l.crime_id = c.crime_id
+                      AND l.status = 'complete'
+                ) last_run ON TRUE
+                WHERE last_run.last_completed_at IS NULL
+                   OR COALESCE(c.date_modified, c.date_created) > last_run.last_completed_at
+                ORDER BY COALESCE(c.date_modified, c.date_created) DESC NULLS LAST,
+                         c.date_created DESC NULLS LAST
+                LIMIT %s
+            """
+            cur.execute(query, (limit,))
+            return cur.fetchall()
+
         query = sql.SQL("""
-            SELECT c.crime_id, c.brief_facts
+            SELECT c.crime_id, c.ps_code, c.brief_facts
             FROM crimes c
             WHERE NOT EXISTS (
                 SELECT 1
@@ -71,6 +103,159 @@ def fetch_unprocessed_crimes(conn, limit=100):
 
         cur.execute(query, (limit,))
         return cur.fetchall()
+
+
+def delete_brief_facts_for_crime(conn, crime_id):
+    """Remove all unified brief_facts rows for a crime before a refresh run."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM public.brief_facts_ai
+            WHERE crime_id = %s
+            """,
+            (crime_id,),
+        )
+
+
+def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limit=200):
+    """
+    Candidate retrieval for canonical identity resolution from brief_facts_ai.
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+                        SELECT bfa.bf_accused_id,
+                                     bfa.canonical_person_id,
+                                     bfa.accused_id,
+                                     bfa.person_code,
+                                     bfa.full_name,
+                                     bfa.alias_name,
+                                     bfa.age,
+                                     bfa.gender,
+                                     bfa.address,
+                                     bfa.source_accused_fields,
+                                     bfa.crime_id,
+                                     c.major_head,
+                                     c.minor_head,
+                                     c.crime_type,
+                                     c.acts_sections
+                        FROM public.brief_facts_ai bfa
+                        LEFT JOIN public.crimes c ON c.crime_id = bfa.crime_id
+                        WHERE bfa.crime_id != %s
+                            AND bfa.full_name IS NOT NULL
+              AND (
+                                        SOUNDEX(bfa.full_name) = SOUNDEX(%s)
+                                        OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s)
+                                        OR bfa.source_accused_fields->>'ps_code' = %s
+                  )
+            LIMIT %s
+            """,
+                        (current_crime_id, full_name or '', full_name or '', ps_code, limit),
+        )
+        return cur.fetchall()
+
+
+def fetch_crime_profile(conn, crime_id):
+    """Fetches contextual offense metadata used for dedup scoring boosts."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT crime_id, major_head, minor_head, crime_type, acts_sections
+            FROM public.crimes
+            WHERE crime_id = %s
+            LIMIT 1
+            """,
+            (crime_id,),
+        )
+        return cur.fetchone() or {}
+
+
+def fetch_crime_associate_person_codes(conn, crime_id):
+    """
+    Returns normalized person-code set (A-<n>) for accused in a crime,
+    used as co-accused network signal in dedup scoring.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT person_code
+            FROM public.brief_facts_ai
+            WHERE crime_id = %s
+              AND accused_id IS NOT NULL
+              AND person_code IS NOT NULL
+            """,
+            (crime_id,),
+        )
+        rows = cur.fetchall()
+
+    normalized = set()
+    for row in rows:
+        code = row[0] if row else None
+        if not code:
+            continue
+        match = re.search(r'A\s*[-.]?\s*(\d+)', str(code), flags=re.IGNORECASE)
+        if match:
+            normalized.add(f"A-{int(match.group(1))}")
+    return normalized
+
+
+def update_sentinel_role(conn, crime_id, old_role, new_role):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE public.brief_facts_ai
+            SET role_in_crime = %s,
+                date_modified = CURRENT_TIMESTAMP
+            WHERE crime_id = %s
+              AND role_in_crime = %s
+            """,
+            (new_role, crime_id, old_role),
+        )
+
+
+def start_crime_processing_run(conn, crime_id):
+    """Create a new processing-log run row and return run_id."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO public.etl_crime_processing_log (crime_id, status)
+            VALUES (%s, 'in_progress')
+            RETURNING run_id
+            """,
+            (crime_id,),
+        )
+        return str(cur.fetchone()[0])
+
+
+def complete_crime_processing_run(conn, run_id, accused_count_written):
+    """Mark a processing-log run complete."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE public.etl_crime_processing_log
+            SET status = 'complete',
+                accused_count_written = %s,
+                completed_at = CURRENT_TIMESTAMP,
+                error_detail = NULL
+            WHERE run_id = %s
+            """,
+            (accused_count_written, run_id),
+        )
+
+
+def fail_crime_processing_run(conn, run_id, error_detail):
+    """Mark a processing-log run failed."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE public.etl_crime_processing_log
+            SET status = 'failed',
+                completed_at = CURRENT_TIMESTAMP,
+                error_detail = %s
+            WHERE run_id = %s
+            """,
+            (str(error_detail)[:4000], run_id),
+        )
 
 
 def fetch_existing_accused_for_crime(conn, crime_id):
@@ -310,23 +495,51 @@ def insert_accused_facts(conn, item_data):
     Catches DB errors per-row so a single bad row doesn't abort the batch.
     """
     with conn.cursor() as cur:
-        query = sql.SQL("""
-            INSERT INTO {table} 
-            (
-                bf_accused_id, crime_id, 
-                accused_id, person_id, person_code, seq_num, existing_accused,
-                full_name, alias_name, age, gender, occupation, address, phone_numbers,
-                role_in_crime, key_details, accused_type, status, is_ccl,
-                source_person_fields, source_accused_fields, source_summary_fields
-            )
-            VALUES (
-                %s, %s, 
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s
-            )
-        """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
+        unified_mode = (config.ACCUSED_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME
+
+        if unified_mode:
+            query = """
+                INSERT INTO public.brief_facts_ai
+                (
+                    bf_accused_id, crime_id,
+                    accused_id, person_id, canonical_person_id,
+                    person_code, seq_num, existing_accused,
+                    full_name, alias_name, age, gender, occupation, address, phone_numbers,
+                    role_in_crime, key_details, accused_type, status, is_ccl,
+                    dedup_match_tier, dedup_confidence, dedup_review_flag,
+                    source_person_fields, source_accused_fields, source_summary_fields,
+                    drugs, etl_run_id
+                )
+                VALUES (
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s
+                )
+                ON CONFLICT (crime_id, accused_id) DO NOTHING
+            """
+        else:
+            query = sql.SQL("""
+                INSERT INTO {table} 
+                (
+                    bf_accused_id, crime_id, 
+                    accused_id, person_id, person_code, seq_num, existing_accused,
+                    full_name, alias_name, age, gender, occupation, address, phone_numbers,
+                    role_in_crime, key_details, accused_type, status, is_ccl,
+                    source_person_fields, source_accused_fields, source_summary_fields
+                )
+                VALUES (
+                    %s, %s, 
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s
+                )
+            """).format(table=sql.Identifier(config.ACCUSED_TABLE_NAME))
 
         bf_id = str(uuid.uuid4())
 
@@ -346,30 +559,82 @@ def insert_accused_facts(conn, item_data):
         seq_num     = truncate_varchar(item_data.get('seq_num'), 50)
 
         try:
-            cur.execute(query, (
-                bf_id,
-                item_data.get('crime_id'),
-                item_data.get('accused_id'),
-                item_data.get('person_id'),
-                person_code,
-                seq_num,
-                item_data.get('existing_accused', False),
-                full_name,
-                alias_name,
-                age,
-                gender,
-                occupation,
-                item_data.get('address'),
-                phone_numbers,
-                item_data.get('role_in_crime'),
-                item_data.get('key_details'),
-                item_data.get('accused_type'),
-                status,
-                item_data.get('is_ccl', False),
-                json.dumps(item_data.get('source_person_fields', {})),
-                json.dumps(item_data.get('source_accused_fields', {})),
-                json.dumps(item_data.get('source_summary_fields', {}))
-            ))
+            if unified_mode:
+                etl_run_id = item_data.get('etl_run_id')
+                if not etl_run_id:
+                    raise ValueError("etl_run_id is required for brief_facts_ai inserts")
+
+                role_in_crime = item_data.get('role_in_crime')
+                if not item_data.get('accused_id') and role_in_crime in {
+                    'LLM_EXTRACTION_FAILED',
+                    'NO_ACCUSED_IN_TEXT',
+                    'NO_ACCUSED_DRUGS_ONLY',
+                }:
+                    cur.execute(
+                        """
+                        DELETE FROM public.brief_facts_ai
+                        WHERE crime_id = %s
+                          AND role_in_crime = %s
+                          AND accused_id IS NULL
+                        """,
+                        (item_data.get('crime_id'), role_in_crime),
+                    )
+
+                cur.execute(query, (
+                    bf_id,
+                    item_data.get('crime_id'),
+                    item_data.get('accused_id'),
+                    item_data.get('person_id'),
+                    item_data.get('canonical_person_id'),
+                    person_code,
+                    seq_num,
+                    item_data.get('existing_accused', False),
+                    full_name,
+                    alias_name,
+                    age,
+                    gender,
+                    occupation,
+                    item_data.get('address'),
+                    phone_numbers,
+                    item_data.get('role_in_crime'),
+                    item_data.get('key_details'),
+                    item_data.get('accused_type'),
+                    status,
+                    item_data.get('is_ccl', False),
+                    item_data.get('dedup_match_tier'),
+                    item_data.get('dedup_confidence'),
+                    item_data.get('dedup_review_flag', False),
+                    json.dumps(item_data.get('source_person_fields', {})),
+                    json.dumps(item_data.get('source_accused_fields', {})),
+                    json.dumps(item_data.get('source_summary_fields', {})),
+                    json.dumps(item_data.get('drugs')) if item_data.get('drugs') is not None else None,
+                    etl_run_id,
+                ))
+            else:
+                cur.execute(query, (
+                    bf_id,
+                    item_data.get('crime_id'),
+                    item_data.get('accused_id'),
+                    item_data.get('person_id'),
+                    person_code,
+                    seq_num,
+                    item_data.get('existing_accused', False),
+                    full_name,
+                    alias_name,
+                    age,
+                    gender,
+                    occupation,
+                    item_data.get('address'),
+                    phone_numbers,
+                    item_data.get('role_in_crime'),
+                    item_data.get('key_details'),
+                    item_data.get('accused_type'),
+                    status,
+                    item_data.get('is_ccl', False),
+                    json.dumps(item_data.get('source_person_fields', {})),
+                    json.dumps(item_data.get('source_accused_fields', {})),
+                    json.dumps(item_data.get('source_summary_fields', {}))
+                ))
         except psycopg2.Error as e:
             logger.error(
                 f"DB insert failed for crime={item_data.get('crime_id')} "
