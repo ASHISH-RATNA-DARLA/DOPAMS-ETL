@@ -27,6 +27,9 @@ ROOT_DIR="/data-drive/etl-process-dev"
 MASTER_DIR="$ROOT_DIR/etl_master"
 SCHEMA_SQL="$ROOT_DIR/DB-schema.sql"
 UNIFIED_SQL="$ROOT_DIR/unified_brief_facts_etl.sql"
+LOG_DIR="$ROOT_DIR/logs"
+RUN_TS=$(date +"%Y%m%d_%H%M%S")
+RUN_LOG_FILE="$LOG_DIR/fresh_db_run_${RUN_TS}.log"
 
 if [[ ! -f "$SCHEMA_SQL" ]]; then
   echo "ERROR: Missing schema file: $SCHEMA_SQL"
@@ -37,6 +40,10 @@ if [[ ! -f "$UNIFIED_SQL" ]]; then
   echo "ERROR: Missing unified schema file: $UNIFIED_SQL"
   exit 1
 fi
+
+mkdir -p "$LOG_DIR"
+exec > >(tee -a "$RUN_LOG_FILE") 2>&1
+echo "Logging fresh DB run output to: $RUN_LOG_FILE"
 
 source "$ROOT_DIR/venv/bin/activate"
 
@@ -103,3 +110,4 @@ python3 master_etl.py --config input.txt --env prod
 
 echo "[5/5] Completed"
 echo "Fresh DB unified ETL run completed successfully."
+echo "Run log saved at: $RUN_LOG_FILE"
