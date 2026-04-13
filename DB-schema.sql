@@ -2,7 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict oW8ttN28sxYVD95iELzF14rRLhhcglE9xD0jLAUM7Jau0bZowIZpk69tejje8fN
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-1.pgdg24.04+1)
 -- Dumped by pg_dump version 17.6
@@ -12,7 +11,6 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -8290,5 +8288,4 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dopamasprd_ur IN SCHEMA public GRANT SELECT,IN
 -- PostgreSQL database dump complete
 --
 
-\unrestrict oW8ttN28sxYVD95iELzF14rRLhhcglE9xD0jLAUM7Jau0bZowIZpk69tejje8fN
 
