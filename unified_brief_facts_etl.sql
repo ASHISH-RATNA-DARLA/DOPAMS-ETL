@@ -2,7 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS fuzzystrmatch WITH SCHEMA public;
 
 -- 1. Create brief_facts_ai table
-CREATE TABLE public.brief_facts_ai (
+CREATE TABLE IF NOT EXISTS public.brief_facts_ai (
     bf_accused_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     crime_id VARCHAR(50) NOT NULL,
     accused_id VARCHAR(50),
@@ -48,15 +48,15 @@ CREATE TABLE public.brief_facts_ai (
     UNIQUE (crime_id, accused_id)
 );
 
-CREATE INDEX idx_bfai_crime_id ON public.brief_facts_ai (crime_id);
-CREATE INDEX idx_bfai_accused_id ON public.brief_facts_ai (accused_id);
-CREATE INDEX idx_bfai_person_id ON public.brief_facts_ai (person_id);
-CREATE INDEX idx_bfai_canonical_person_id ON public.brief_facts_ai (canonical_person_id);
-CREATE INDEX idx_bfai_soundex_name ON public.brief_facts_ai (SOUNDEX(full_name));
-CREATE INDEX idx_bfai_drugs_gin ON public.brief_facts_ai USING GIN (drugs);
+CREATE INDEX IF NOT EXISTS idx_bfai_crime_id ON public.brief_facts_ai (crime_id);
+CREATE INDEX IF NOT EXISTS idx_bfai_accused_id ON public.brief_facts_ai (accused_id);
+CREATE INDEX IF NOT EXISTS idx_bfai_person_id ON public.brief_facts_ai (person_id);
+CREATE INDEX IF NOT EXISTS idx_bfai_canonical_person_id ON public.brief_facts_ai (canonical_person_id);
+CREATE INDEX IF NOT EXISTS idx_bfai_soundex_name ON public.brief_facts_ai (SOUNDEX(full_name));
+CREATE INDEX IF NOT EXISTS idx_bfai_drugs_gin ON public.brief_facts_ai USING GIN (drugs);
 
 -- 2. Create etl_crime_processing_log table
-CREATE TABLE public.etl_crime_processing_log (
+CREATE TABLE IF NOT EXISTS public.etl_crime_processing_log (
     run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     crime_id VARCHAR(50) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'in_progress',
@@ -66,7 +66,7 @@ CREATE TABLE public.etl_crime_processing_log (
     error_detail TEXT
 );
 
-CREATE INDEX idx_etl_log_crime_status ON public.etl_crime_processing_log (crime_id, status);
+CREATE INDEX IF NOT EXISTS idx_etl_log_crime_status ON public.etl_crime_processing_log (crime_id, status);
 
 -- 3. Drop existing materialized views
 DROP MATERIALIZED VIEW IF EXISTS public.firs_mv CASCADE;

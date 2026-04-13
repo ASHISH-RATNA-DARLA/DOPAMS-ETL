@@ -94,7 +94,7 @@ echo "[1/5] Applying base schema..."
 "${PSQL[@]}" -f "$SCHEMA_SQL"
 
 echo "[2/5] Applying unified brief_facts_ai schema updates (if needed)..."
-BRIEF_FACTS_AI_EXISTS=$("${PSQL[@]}" -tAc "SELECT to_regclass('public.brief_facts_ai') IS NOT NULL;")
+BRIEF_FACTS_AI_EXISTS=$("${PSQL[@]}" -tAc "SELECT to_regclass('public.brief_facts_ai') IS NOT NULL;" | tr -d '[:space:]')
 if [[ "$BRIEF_FACTS_AI_EXISTS" == "t" ]]; then
   echo "brief_facts_ai already exists from base schema; skipping unified_brief_facts_etl.sql"
 else
