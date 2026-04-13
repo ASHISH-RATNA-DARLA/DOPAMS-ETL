@@ -1143,8 +1143,16 @@ class PersonsETL:
                         present_locality_village=COALESCE(%s, present_locality_village),
                         present_area_mandal=COALESCE(%s, present_area_mandal),
                         present_district=COALESCE(%s, present_district),
-                        present_state_ut=COALESCE(%s, present_state_ut),
-                        present_country=COALESCE(%s, present_country),
+                        present_state_ut=CASE
+                            WHEN NULLIF(TRIM(present_state_ut), '') IS NULL
+                                THEN COALESCE(NULLIF(TRIM(%s), ''), present_state_ut)
+                            ELSE present_state_ut
+                        END,
+                        present_country=CASE
+                            WHEN NULLIF(TRIM(present_country), '') IS NULL
+                                THEN COALESCE(NULLIF(TRIM(%s), ''), present_country)
+                            ELSE present_country
+                        END,
                         present_residency_type=COALESCE(%s, present_residency_type),
                         present_pin_code=COALESCE(%s, present_pin_code),
                         present_jurisdiction_ps=COALESCE(%s, present_jurisdiction_ps),
@@ -1155,8 +1163,16 @@ class PersonsETL:
                         permanent_locality_village=COALESCE(%s, permanent_locality_village),
                         permanent_area_mandal=COALESCE(%s, permanent_area_mandal),
                         permanent_district=COALESCE(%s, permanent_district),
-                        permanent_state_ut=COALESCE(%s, permanent_state_ut),
-                        permanent_country=COALESCE(%s, permanent_country),
+                        permanent_state_ut=CASE
+                            WHEN NULLIF(TRIM(permanent_state_ut), '') IS NULL
+                                THEN COALESCE(NULLIF(TRIM(%s), ''), permanent_state_ut)
+                            ELSE permanent_state_ut
+                        END,
+                        permanent_country=CASE
+                            WHEN NULLIF(TRIM(permanent_country), '') IS NULL
+                                THEN COALESCE(NULLIF(TRIM(%s), ''), permanent_country)
+                            ELSE permanent_country
+                        END,
                         permanent_residency_type=COALESCE(%s, permanent_residency_type),
                         permanent_pin_code=COALESCE(%s, permanent_pin_code),
                         permanent_jurisdiction_ps=COALESCE(%s, permanent_jurisdiction_ps),

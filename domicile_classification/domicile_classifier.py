@@ -223,25 +223,36 @@ def classify_domicile(
 
 
 def process_persons(cursor=None):
-    """Process all persons and classify their domicile using parallel batch processing."""
+    """Recompute domicile deterministically and update only rows whose value changed."""
     try:
         max_workers = int(os.environ.get('MAX_WORKERS', min(32, (os.cpu_count() or 1) * 4)))
         pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_workers + 5)
         
-        # Fetch all persons with relevant data
+        # Recompute classifications from current geo data so downstream fixes are rerunnable.
         logger.info("Fetching persons data...")
         with pool.get_connection_context() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT person_id, permanent_state_ut, permanent_country, present_state_ut, present_country 
+                    SELECT
+                        person_id,
+                        permanent_state_ut,
+                        permanent_country,
+                        present_state_ut,
+                        present_country,
+                        domicile_classification
                     FROM persons
-                    WHERE domicile_classification IS NULL OR TRIM(domicile_classification) = ''
+                    WHERE
+                        NULLIF(TRIM(COALESCE(permanent_state_ut, '')), '') IS NOT NULL
+                        OR NULLIF(TRIM(COALESCE(permanent_country, '')), '') IS NOT NULL
+                        OR NULLIF(TRIM(COALESCE(present_state_ut, '')), '') IS NOT NULL
+                        OR NULLIF(TRIM(COALESCE(present_country, '')), '') IS NOT NULL
+                        OR NULLIF(TRIM(COALESCE(domicile_classification, '')), '') IS NOT NULL
                     ORDER BY person_id;
                 """)
                 persons = cur.fetchall()
-        
+
         total_persons = len(persons)
-        logger.info(f"Found {total_persons} persons to process")
+        logger.info(f"Found {total_persons} persons to evaluate")
         
         # Statistics
         stats_lock = threading.Lock()
@@ -249,19 +260,27 @@ def process_persons(cursor=None):
             CLASSIFICATION_NATIVE: 0,
             CLASSIFICATION_INTER: 0,
             CLASSIFICATION_INTERNATIONAL: 0,
-            'null': 0
+            'null': 0,
+            'changed': 0
         }
-        
+
         def process_batch(batch):
             updates = []
-            local_stats = {CLASSIFICATION_NATIVE: 0, CLASSIFICATION_INTER: 0, CLASSIFICATION_INTERNATIONAL: 0, 'null': 0}
+            local_stats = {
+                CLASSIFICATION_NATIVE: 0,
+                CLASSIFICATION_INTER: 0,
+                CLASSIFICATION_INTERNATIONAL: 0,
+                'null': 0,
+                'changed': 0
+            }
             for person in batch:
                 person_id = person['person_id']
                 perm_state = person['permanent_state_ut']
                 perm_country = person['permanent_country']
                 pres_state = person['present_state_ut']
                 pres_country = person['present_country']
-                
+                current_classification = normalize_text(person['domicile_classification'])
+
                 # Classify
                 classification = classify_domicile(perm_state, perm_country, pres_state, pres_country)
                 
@@ -270,9 +289,11 @@ def process_persons(cursor=None):
                     local_stats['null'] += 1
                 else:
                     local_stats[classification] += 1
-                
-                updates.append((classification, person_id))
-            
+
+                if current_classification != classification:
+                    updates.append((classification, person_id))
+                    local_stats['changed'] += 1
+
             with stats_lock:
                 for k in stats:
                     stats[k] += local_stats[k]
@@ -310,7 +331,8 @@ def process_persons(cursor=None):
         logger.info(f"  - Inter State: {stats[CLASSIFICATION_INTER]}")
         logger.info(f"  - International: {stats[CLASSIFICATION_INTERNATIONAL]}")
         logger.info(f"  - NULL/Empty: {stats['null']}")
-        
+        logger.info(f"  - Rows Updated: {stats['changed']}")
+
         return stats
         
     except Exception as e:
@@ -378,5 +400,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
