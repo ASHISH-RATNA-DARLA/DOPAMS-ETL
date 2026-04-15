@@ -50,6 +50,7 @@ from typing import Optional, Tuple
 import psycopg2
 import requests
 import colorlog
+from env_utils import first_env, get_bool_env, get_int_env
 
 # Allow running this file directly as a script as well as via `python -m`.
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -66,23 +67,20 @@ from config import DB_CONFIG, API_CONFIG, LOG_CONFIG
 # -----------------------------------------------------------------------------
 
 # Table name for files metadata
-FILES_TABLE = os.getenv("FILES_TABLE", "files")
+FILES_TABLE = first_env("FILES_TABLE", default="files")
 
 # Base path on the Tomcat media server - ALWAYS read from env
-BASE_MEDIA_PATH = os.getenv(
-    "FILES_MEDIA_BASE_PATH",
-    "/mnt/shared-etl-files",
-)
+BASE_MEDIA_PATH = first_env("FILES_MEDIA_BASE_PATH", default="/mnt/shared-etl-files")
 
 # Files API rate limit: reduced to 5 requests per minute to avoid connection blocking
 FILES_API_MAX_RPM = 5
 SECONDS_PER_REQUEST = 60.0 / FILES_API_MAX_RPM  # 12.0 seconds
 
 # Hard cap to avoid retrying permanently bad file_ids forever across runs.
-MAX_TOTAL_ATTEMPTS = int(os.getenv("FILES_MAX_TOTAL_ATTEMPTS", "5"))
+MAX_TOTAL_ATTEMPTS = get_int_env("FILES_MAX_TOTAL_ATTEMPTS", 5)
 
 # By default, do not requeue terminal failures (PERMANENT:*).
-RETRY_PERMANENT_ERRORS = os.getenv("FILES_RETRY_PERMANENT_ERRORS", "false").lower() == "true"
+RETRY_PERMANENT_ERRORS = get_bool_env("FILES_RETRY_PERMANENT_ERRORS", False)
 
 # -----------------------------------------------------------------------------
 # Logging setup
@@ -704,7 +702,7 @@ class FilesMediaServerETL:
                             logger.error(f"   Directory: {os.path.dirname(dest_path)}")
                             logger.error(f"   Directory exists: {os.path.exists(os.path.dirname(dest_path))}")
                             logger.error(f"   Directory writable: {os.access(os.path.dirname(dest_path), os.W_OK)}")
-                            logger.error(f"   Current user: {os.getenv('USER', 'unknown')}")
+                            logger.error(f"   Current user: {first_env('USER', default='unknown')}")
                             logger.error(f"   Current UID: {os.getuid()}")
                             logger.error(f"   Solution: Run chmod -R 777 {BASE_MEDIA_PATH}")
                             raise

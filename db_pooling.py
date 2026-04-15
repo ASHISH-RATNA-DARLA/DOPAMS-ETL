@@ -23,6 +23,8 @@ from contextlib import contextmanager
 from typing import List, Dict, Any, Optional, Tuple
 from functools import wraps
 
+from env_utils import load_repo_environment, resolve_db_config
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -143,32 +145,17 @@ class PostgreSQLConnectionPool:
     def _initialize_pool(self):
         """Create the connection pool"""
         try:
-            import os
-            from dotenv import load_dotenv
-            
-            # Robust .env loading: Search in script directory, then one level up, then two
-            # This ensures connectivity whether run from root, etl_master, or a child etl-x subdir
-            from pathlib import Path
-            current_dir = Path(__file__).resolve().parent
-            env_found = False
-            for p in [current_dir, current_dir.parent, current_dir.parent.parent]:
-                env_path = p / '.env'
-                if env_path.exists():
-                    load_dotenv(str(env_path))
-                    logger.debug(f"Loaded environment from {env_path}")
-                    env_found = True
-                    break
-            
-            if not env_found:
-                load_dotenv() # Fallback to default behavior
+            load_repo_environment()
+            pg_config = resolve_db_config()
 
-            
+            print(f"[DB CONNECT] host={pg_config['host']} db={pg_config['dbname']} user={pg_config['user']}")
+
             dsn = (
-                f"dbname={os.getenv('DB_NAME')} "
-                f"user={os.getenv('DB_USER')} "
-                f"password={os.getenv('DB_PASSWORD')} "
-                f"host={os.getenv('DB_HOST')} "
-                f"port={os.getenv('DB_PORT', '5432')} "
+                f"dbname={pg_config['dbname']} "
+                f"user={pg_config['user']} "
+                f"password={pg_config['password']} "
+                f"host={pg_config['host']} "
+                f"port={pg_config['port']} "
                 f"connect_timeout=10 "
                 f"application_name='dopams-etl'"
             )

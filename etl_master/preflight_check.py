@@ -1,11 +1,18 @@
 import argparse
 import os
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import psycopg2
-from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT.parent))
+
+from env_utils import get_bool_env, load_repo_environment, resolve_db_config
 
 
 class PreflightError(Exception):
@@ -138,33 +145,15 @@ def validate_scripts(processes: List[Dict[str, object]]) -> None:
 
 
 def resolve_db_env(env_name: str) -> Dict[str, str]:
-    upper_env = env_name.upper()
-
-    required_fields = [
-        "DB_HOST",
-        "DB_PORT",
-        "DB_NAME",
-        "DB_USER",
-        "DB_PASSWORD",
-    ]
-
-    resolved = {}
-    missing = []
-
-    for field in required_fields:
-        env_specific_key = f"{upper_env}_{field}"
-        value = os.getenv(env_specific_key) or os.getenv(field)
-        if value is None or value == "":
-            missing.append(f"{env_specific_key} or {field}")
-        else:
-            resolved[field] = value
-
-    if missing:
-        raise PreflightError(
-            "Missing required environment variables: " + ", ".join(missing)
-        )
-
-    return resolved
+    resolved = resolve_db_config()
+    return {
+        "DB_HOST": str(resolved["host"]),
+        "DB_PORT": str(resolved["port"]),
+        "DB_NAME": str(resolved["dbname"]),
+        "DB_USER": str(resolved["user"]),
+        "DB_PASSWORD": str(resolved["password"]),
+        "DB_SOURCE": str(resolved["source"]),
+    }
 
 
 def validate_db_connection(db_env: Dict[str, str]) -> None:
@@ -178,11 +167,7 @@ def validate_db_connection(db_env: Dict[str, str]) -> None:
             connect_timeout=10,
         )
 
-        skip_schema_check = os.getenv("ETL_PREFLIGHT_SKIP_SCHEMA_CHECK", "false").lower() in {
-            "1",
-            "true",
-            "yes",
-        }
+        skip_schema_check = get_bool_env("ETL_PREFLIGHT_SKIP_SCHEMA_CHECK", False)
 
         if not skip_schema_check:
             validate_minimum_schema(connection)
@@ -215,15 +200,10 @@ def validate_minimum_schema(connection) -> None:
 
 def run_preflight(config_path: str, env_name: str) -> None:
     # Resolve .env from project root (one level up from etl_master)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    env_path = os.path.join(project_root, '.env')
-    
-    if os.path.exists(env_path):
-        load_dotenv(env_path)
-    else:
-        # Fallback to current directory
-        load_dotenv()
+    load_repo_environment()
+
+    resolved = resolve_db_config()
+    print(f"[CONFIG] Preflight DB target: host={resolved['host']} dbname={resolved['dbname']} user={resolved['user']} source={resolved['source']}")
 
 
     processes = parse_input_file(config_path)

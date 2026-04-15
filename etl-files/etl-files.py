@@ -28,6 +28,7 @@ import psutil
 import psycopg2
 import requests
 import colorlog
+from env_utils import first_env, get_bool_env, get_int_env
 
 try:
     from filelock import FileLock
@@ -90,7 +91,7 @@ logger = setup_logger()
 CRIMES_TABLE = TABLE_CONFIG.get("crimes", "crimes")
 
 # Output directory (MUST be set via FILES_MEDIA_BASE_PATH environment variable)
-FILES_OUTPUT_DIR = os.getenv("FILES_MEDIA_BASE_PATH")
+FILES_OUTPUT_DIR = first_env("FILES_MEDIA_BASE_PATH")
 if not FILES_OUTPUT_DIR:
     logger.error("❌ FILES_MEDIA_BASE_PATH environment variable is not set. Please set it before running.")
     sys.exit(1)
@@ -103,23 +104,23 @@ class ProductionConfig:
     """Production settings for 64GB RAM system."""
     
     # Parallel execution
-    PARALLEL_WORKERS = int(os.getenv('ETL_PARALLEL_WORKERS', '8'))
-    MAX_MEMORY_GB = int(os.getenv('ETL_MAX_MEMORY_GB', '50'))
+    PARALLEL_WORKERS = get_int_env('ETL_PARALLEL_WORKERS', 8)
+    MAX_MEMORY_GB = get_int_env('ETL_MAX_MEMORY_GB', 50)
     
     # File locking
-    ENABLE_FILE_LOCKING = os.getenv('ENABLE_FILE_LOCKING', 'true').lower() == 'true'
-    FILE_LOCK_TIMEOUT = int(os.getenv('FILES_LOCK_TIMEOUT', '60'))
+    ENABLE_FILE_LOCKING = get_bool_env('ENABLE_FILE_LOCKING', True)
+    FILE_LOCK_TIMEOUT = get_int_env('FILES_LOCK_TIMEOUT', 60)
     
     # Memory monitoring
-    ENABLE_MEMORY_MONITORING = os.getenv('ENABLE_MEMORY_MONITORING', 'true').lower() == 'true'
-    MEMORY_CHECK_INTERVAL = int(os.getenv('MEMORY_CHECK_INTERVAL_SECONDS', '30'))
-    MEMORY_ALERT_THRESHOLD = int(os.getenv('MEMORY_ALERT_THRESHOLD_PERCENT', '85'))
+    ENABLE_MEMORY_MONITORING = get_bool_env('ENABLE_MEMORY_MONITORING', True)
+    MEMORY_CHECK_INTERVAL = get_int_env('MEMORY_CHECK_INTERVAL_SECONDS', 30)
+    MEMORY_ALERT_THRESHOLD = get_int_env('MEMORY_ALERT_THRESHOLD_PERCENT', 85)
     
     # Connection pool
-    DB_POOL_SIZE = int(os.getenv('ETL_DB_POOL_SIZE', '10'))
+    DB_POOL_SIZE = get_int_env('ETL_DB_POOL_SIZE', 10)
     
     # Batch processing
-    BATCH_SIZE = int(os.getenv('ETL_BATCH_SIZE', '100'))
+    BATCH_SIZE = get_int_env('ETL_BATCH_SIZE', 100)
 
 # ============================================================================
 # MEMORY MONITORING
@@ -372,7 +373,7 @@ class FilesETL:
             
             # Download with retry logic
             max_retries = int(API_CONFIG.get("max_retries", 3))
-            base_delay = float(os.getenv("FILES_RETRY_DELAY_SECONDS", 1.0))
+            base_delay = float(first_env("FILES_RETRY_DELAY_SECONDS", default="1.0") or "1.0")
 
             for attempt in range(1, max_retries + 1):
                 try:
@@ -491,7 +492,7 @@ class FilesETL:
     def _run_sequential(self, fir_ids: List[str]) -> bool:
         """Sequential processing (original method)."""
         logger.info("Starting SEQUENTIAL file downloads...")
-        per_file_sleep = float(os.getenv("FILES_PER_FILE_SLEEP_SECONDS", 0.1))
+        per_file_sleep = float(first_env("FILES_PER_FILE_SLEEP_SECONDS", default="0.1") or "0.1")
 
         for idx, file_id in enumerate(fir_ids, start=1):
             if not file_id or not str(file_id).strip():

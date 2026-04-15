@@ -12,16 +12,14 @@ os.environ["TZ"] = "Asia/Kolkata"
 if hasattr(time, "tzset"):
     time.tzset()
 
-from dotenv import load_dotenv
-# Resolve .env from project root (one level up from etl_master)
-# Ensures credentials are loaded even if run from etl_master/ subdirectory
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
-env_path = os.path.join(project_root, '.env')
-if os.path.exists(env_path):
-    load_dotenv(env_path)
-else:
-    load_dotenv() # Fallback
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from env_utils import first_env, load_repo_environment
+
+load_repo_environment(extra_candidates=[os.path.join(script_dir, ".env.server"), os.path.join(script_dir, ".env")])
 
 from preflight_check import (
 
@@ -114,7 +112,7 @@ def acquire_run_lock():
     Returns the open file handle (caller must keep it alive for the process lifetime).
     Exits with code 1 if the lock cannot be acquired.
     """
-    lock_path = os.environ.get("MASTER_ETL_LOCK_FILE", "/tmp/master_etl.lock")
+    lock_path = first_env("MASTER_ETL_LOCK_FILE", default="/tmp/master_etl.lock")
     try:
         fh = open(lock_path, "w")
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)

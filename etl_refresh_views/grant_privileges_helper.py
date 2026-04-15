@@ -11,27 +11,27 @@ or pass them as environment variables.
 """
 import os
 import psycopg2
-from dotenv import load_dotenv
+from env_utils import first_env, load_repo_environment, resolve_db_config
 
 def grant_privileges():
     """
     Grant ownership of materialized views to dev_dopamas user.
     This must be run as a superuser.
     """
-    # Load environment variables from .env file
-    load_dotenv()
-    
+    load_repo_environment()
+    resolved = resolve_db_config()
+
     # Get database credentials - use superuser credentials
     db_config = {
-        'host': os.getenv('DB_HOST'),
-        'port': os.getenv('DB_PORT'),
-        'database': os.getenv('DB_NAME'),
-        'user': os.getenv('SUPERUSER_DB_USER'),  # Must be set in .env
-        'password': os.getenv('SUPERUSER_DB_PASSWORD')
+        'host': resolved['host'],
+        'port': resolved['port'],
+        'database': resolved['dbname'],
+        'user': first_env('SUPERUSER_DB_USER'),  # Must be set in env
+        'password': first_env('SUPERUSER_DB_PASSWORD'),
     }
     
     # Target user to grant privileges to
-    target_user = os.getenv('DB_USER')
+    target_user = first_env('DB_USER', 'POSTGRES_USER')
     
     # Validate required credentials
     if not all([db_config['database'], db_config['user'], db_config['password']]):

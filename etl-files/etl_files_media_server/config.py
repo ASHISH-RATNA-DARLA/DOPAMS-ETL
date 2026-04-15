@@ -1,149 +1,70 @@
-"""
-Configuration file for DOPAMAS ETL Pipeline
-"""
-import os
-from pathlib import Path
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
+"""Configuration file for DOPAMAS ETL Pipeline."""
 
-CONFIG_DIR = Path(__file__).resolve().parent
-ETL_FILES_DIR = CONFIG_DIR.parent
-REPO_ROOT = ETL_FILES_DIR.parent
-
-
-def load_environment():
-    """Load env vars from explicit, repo-level, or service-local env files."""
-    env_override = os.getenv("DOPAMS_ENV_FILE")
-    candidates = []
-
-    if env_override:
-        candidates.append(Path(env_override).expanduser())
-
-    candidates.extend(
-        [
-            REPO_ROOT / ".env.server",
-            REPO_ROOT / ".env",
-            CONFIG_DIR / ".env.server",
-            CONFIG_DIR / ".env",
-        ]
-    )
-
-    seen_paths = set()
-    for candidate in candidates:
-        candidate = candidate.resolve()
-        candidate_str = str(candidate)
-        if candidate_str in seen_paths:
-            continue
-
-        seen_paths.add(candidate_str)
-        if candidate.is_file():
-            load_dotenv(candidate_str, override=False)
-            return candidate_str
-
-    load_dotenv()
-    return None
-
-
-def get_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value in (None, ""):
-        return default
-
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
-LOADED_ENV_FILE = load_environment()
-
-# Database Configuration
-DB_CONFIG = {
-    'host': os.getenv('POSTGRES_HOST'),
-    'database': os.getenv('POSTGRES_DB'),
-    'user': os.getenv('POSTGRES_USER'),
-    'password': os.getenv('POSTGRES_PASSWORD'),
-    'port': get_int_env('POSTGRES_PORT', 5432)
-}
-
-# API Configuration
-# API1 (original - port 3000): crimes, persons, property, interrogation
-API1_BASE_URL = os.getenv('DOPAMAS_API_URL') or os.getenv('API1_BASE_URL')
-
-# API2 (new - port 3001): mo_seizures, chargesheets, fsl_case_property
-API2_HOST = os.getenv('API2_URL')
-API2_PORT = os.getenv('API2_PORT')
-API2_BASE_URL = (
-    os.getenv('DOPAMAS_API_URL2')
-    or os.getenv('API2_BASE_URL')
-    or (f"http://{API2_HOST}:{API2_PORT}/api/DOPAMS" if API2_HOST and API2_PORT else None)
+from env_utils import (
+    get_bool_env,
+    get_int_env,
+    load_repo_environment,
+    resolve_api_base_url,
+    resolve_db_config,
+    resolve_table_name,
 )
 
+load_repo_environment()
+
+DB_CONFIG = resolve_db_config()
+
+API1_BASE_URL = resolve_api_base_url('DOPAMAS_API_URL', 'API1_BASE_URL')
+API2_BASE_URL = resolve_api_base_url('DOPAMAS_API_URL2', 'API2_BASE_URL')
+if not API2_BASE_URL:
+    api2_host = resolve_api_base_url('API2_URL')
+    api2_port = resolve_api_base_url('API2_PORT')
+    if api2_host and api2_port:
+        API2_BASE_URL = f"http://{api2_host}:{api2_port}/api/DOPAMS"
+
 API_CONFIG = {
-    'base_url': API1_BASE_URL,  # Default to API1 for backward compatibility
+    'base_url': API1_BASE_URL,
     'api1_base_url': API1_BASE_URL,
     'api2_base_url': API2_BASE_URL,
-    'api_key': os.getenv('DOPAMAS_API_KEY'),
+    'api_key': resolve_api_base_url('DOPAMAS_API_KEY'),
     'timeout': get_int_env('API_TIMEOUT', 180),
-    'max_retries': get_int_env('API_MAX_RETRIES', 3),
-    
-    # API1 Endpoints (port 3000)
+    'max_retries': get_int_env('API_MAX_RETRIES', 5),
     'crimes_url': f"{API1_BASE_URL}/crimes",
     'accused_url': f"{API1_BASE_URL}/accused",
     'persons_url': f"{API1_BASE_URL}/person-details",
     'hierarchy_url': f"{API1_BASE_URL}/master-data/hierarchy",
     'ir_url': f"{API1_BASE_URL}/interrogation-reports/v1/",
     'files_url': f"{API1_BASE_URL}/files",
-    
-    # API2 Endpoints (port 3001)
     'mo_seizures_url': f"{API2_BASE_URL}/mo-seizures",
     'chargesheets_url': f"{API2_BASE_URL}/chargesheets",
-    'fsl_case_property_url': f"{API2_BASE_URL}/case-property"
+    'fsl_case_property_url': f"{API2_BASE_URL}/case-property",
 }
-
-# ETL Configuration
-# Date range is now calculated dynamically:
-#   - Start date: Always 2022-01-01T00:00:00+05:30 (hardcoded in ETL scripts)
-#   - End date: Yesterday at 23:59:59+05:30 IST (calculated dynamically each run)
-#   - For existing databases: ETL checks max(date_created, date_modified) and resumes from there
-#   - For new databases: ETL starts from 2022-01-01
-# Chunks are 5 days with 1-day overlap to ensure no data loss
 
 ETL_CONFIG = {
-    # NOTE: start_date and end_date are kept for backward compatibility and log headers only
-    # Actual date range is calculated dynamically in each ETL script:
-    #   - Fixed start: 2022-01-01T00:00:00+05:30 (hardcoded in ETL scripts)
-    #   - Dynamic end: Yesterday at 23:59:59+05:30 IST (calculated each run)
-    #   - For existing databases: ETL checks max(date_created, date_modified) and resumes from there
-    'start_date': '2022-01-01T00:00:00+05:30',  # Reference date for log headers (1st January 2022, 00:00:00 IST)
-    'end_date': '2025-12-31T23:59:59+05:30',    # Placeholder for log headers (not used in actual processing)
-    
-    'chunk_days': 5,  # Fetch 5 days at a time
-    'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),  # Overlap between chunks to ensure no data is missed
-    'batch_size': 100,  # Insert batch size
-    'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS') == 'true'
+    'start_date': '2022-01-01T00:00:00+05:30',
+    'end_date': '2025-12-31T23:59:59+05:30',
+    'chunk_days': 5,
+    'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),
+    'batch_size': 100,
+    'enable_embeddings': get_bool_env('ENABLE_EMBEDDINGS', False),
 }
 
-# Embedding Configuration
 EMBEDDING_CONFIG = {
-    'model_name': os.getenv('EMBEDDING_MODEL'),
-    'brief_facts_model': 'all-mpnet-base-v2',  # Better for long text
-    'pattern_model': 'all-MiniLM-L6-v2',  # Faster for shorter patterns
-    'batch_size': 32
+    'model_name': resolve_api_base_url('EMBEDDING_MODEL'),
+    'brief_facts_model': 'all-mpnet-base-v2',
+    'pattern_model': 'all-MiniLM-L6-v2',
+    'batch_size': 32,
 }
 
-# Logging Configuration
 LOG_CONFIG = {
-    'level': os.getenv('LOG_LEVEL', 'INFO'),
+    'level': resolve_api_base_url('LOG_LEVEL', default='INFO'),
     'format': '%(log_color)s%(asctime)s - %(levelname)s - %(message)s',
-    'date_format': '%Y-%m-%d %H:%M:%S'
+    'date_format': '%Y-%m-%d %H:%M:%S',
 }
 
-# Table configuration (allows redirecting ETL runs to test tables)
+
 def _table_name(env_key: str, default: str) -> str:
-    """Return override table name; fall back to default if env unset or empty."""
-    value = os.getenv(env_key, '').strip()
-    return value or default
+    return resolve_table_name(env_key, default)
+
 
 TABLE_CONFIG = {
     'crimes': _table_name('CRIMES_TABLE', 'crimes'),
@@ -151,7 +72,7 @@ TABLE_CONFIG = {
     'persons': _table_name('PERSONS_TABLE', 'persons'),
     'hierarchy': _table_name('HIERARCHY_TABLE', 'hierarchy'),
     'properties': _table_name('PROPERTIES_TABLE', 'properties'),
-    # Interrogation Reports (IR) tables
+    'disposal': _table_name('DISPOSAL_TABLE', 'disposal'),
     'interrogation_reports': _table_name('IR_TABLE', 'interrogation_reports'),
     'ir_family_history': _table_name('IR_FAMILY_HISTORY_TABLE', 'ir_family_history'),
     'ir_local_contacts': _table_name('IR_LOCAL_CONTACTS_TABLE', 'ir_local_contacts'),

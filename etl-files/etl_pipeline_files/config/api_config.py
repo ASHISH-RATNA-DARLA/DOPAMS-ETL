@@ -1,9 +1,9 @@
-"""
-API configuration parser from api-ref.txt
-"""
+"""API configuration parser from api-ref.txt."""
+
 import re
-import os
 from pathlib import Path
+
+from env_utils import first_env, load_repo_environment
 
 
 class APIConfig:
@@ -25,24 +25,20 @@ class APIConfig:
         self._parse_config()
     
     def _parse_config(self):
-        """Load configuration primarily from .env and use api-ref.txt as a fallback mapping"""
-        # Ensure .env is loaded (traverse up if necessary)
-        try:
-            from dotenv import load_dotenv, find_dotenv
-            load_dotenv(find_dotenv(), override=True)
-        except ImportError:
-            pass
+        """Load configuration from the shared environment resolver and api-ref.txt fallback."""
+        load_repo_environment()
 
-        # Primary Configuration: Environment Variables
-        self.api_key = os.getenv('DOPAMAS_API_KEY') or os.getenv('API_KEY')
-        
-        # Load Base URLs from env (fallback to default ports on localhost if completely missing)
-        env_api1 = os.getenv('DOPAMAS_API_URL')
+        self.api_key = first_env('DOPAMAS_API_KEY', 'API_KEY')
+
+        env_api1 = first_env('DOPAMAS_API_URL', 'API1_BASE_URL')
         self.base_url = env_api1.rstrip('/') if env_api1 else "http://YOUR_API_HOST:3000/api/DOPAMS"
-        
-        api2_host = os.getenv('API2_URL')
-        api2_port = os.getenv('API2_PORT')
-        if api2_host and api2_port:
+
+        api2_host = first_env('API2_URL')
+        api2_port = first_env('API2_PORT')
+        api2_base_url = first_env('DOPAMAS_API_URL2', 'API2_BASE_URL')
+        if api2_base_url:
+            self.api2_base_url = api2_base_url.rstrip('/')
+        elif api2_host and api2_port:
             self.api2_base_url = f"http://{api2_host}:{api2_port}/api/DOPAMS"
         else:
             self.api2_base_url = "http://YOUR_API_HOST:3001/api/DOPAMS"
@@ -75,7 +71,7 @@ class APIConfig:
                     content = f.read()
 
                 # If the env var was empty, try api-ref.txt
-                if not os.getenv('DOPAMAS_API_URL'):
+                if not first_env('DOPAMAS_API_URL', 'API1_BASE_URL'):
                     api1_match = re.search(r"http://([\w\.\-]+):3000/api/DOPAMS", content)
                     if api1_match:
                         self.base_url = f"http://{api1_match.group(1)}:3000/api/DOPAMS"

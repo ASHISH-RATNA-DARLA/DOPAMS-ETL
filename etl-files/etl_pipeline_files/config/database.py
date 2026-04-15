@@ -1,33 +1,19 @@
-"""
-Database configuration from .env file
-"""
-import os
-from dotenv import load_dotenv
+"""Database configuration from the shared env resolver."""
 
-load_dotenv()
+from env_utils import load_repo_environment, resolve_db_config
+
+load_repo_environment()
 
 
 def get_db_config():
-    """
-    Get database configuration from environment variables.
-    
-    Returns:
-        dict: Database connection parameters
-    """
-    config = {
-        'host': os.getenv('DB_HOST'),
-        'port': os.getenv('DB_PORT'),
-        'database': os.getenv('DB_NAME'),
-        'user': os.getenv('DB_USER'),
-        'password': os.getenv('DB_PASSWORD')
+    """Return the resolved database configuration used by file ETL modules."""
+    config = resolve_db_config()
+    return {
+        'host': config['host'],
+        'port': config['port'],
+        'database': config['dbname'],
+        'user': config['user'],
+        'password': config['password'],
+        'source': config['source'],
     }
-    
-    # Validate required fields
-    required_fields = ['host', 'database', 'user', 'password']
-    missing = [field for field in required_fields if not config.get(field)]
-    
-    if missing:
-        raise ValueError(f"Missing required database configuration: {', '.join(missing)}")
-    
-    return config
 

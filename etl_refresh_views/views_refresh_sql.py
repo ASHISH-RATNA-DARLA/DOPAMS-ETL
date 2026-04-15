@@ -1,7 +1,6 @@
-import os
 import psycopg2
 from psycopg2 import sql
-from dotenv import load_dotenv
+from env_utils import load_repo_environment, resolve_db_config
 
 def execute_sql_from_file(sql_file_path):
     """
@@ -10,16 +9,14 @@ def execute_sql_from_file(sql_file_path):
     Args:
         sql_file_path: Path to the .sql file containing SQL commands
     """
-    # Load environment variables from .env file
-    load_dotenv()
-    
-    # Get database credentials from environment variables
+    load_repo_environment()
+    resolved = resolve_db_config()
     db_config = {
-        'host': os.getenv('DB_HOST'),
-        'port': os.getenv('DB_PORT'),
-        'database': os.getenv('DB_NAME'),
-        'user': os.getenv('DB_USER'),
-        'password': os.getenv('DB_PASSWORD')
+        'host': resolved['host'],
+        'port': resolved['port'],
+        'database': resolved['dbname'],
+        'user': resolved['user'],
+        'password': resolved['password'],
     }
     
     # Validate required credentials
