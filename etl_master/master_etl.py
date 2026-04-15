@@ -373,13 +373,27 @@ def run_process_with_retry(process, process_index, max_retries=2):
 
 
 def resolve_config_path(args):
-    """Prefer --config, but keep --input-file as backward-compatible alias."""
+    """Prefer --config, but keep --input-file as backward-compatible alias.
+    Falls back to searching in the script directory if the file is not in CWD.
+    """
+    path = "input.txt"
     if args.config:
-        return args.config
-    if args.input_file:
+        path = args.config
+    elif args.input_file:
         logger.warning("--input-file is deprecated; use --config going forward")
-        return args.input_file
-    return "input.txt"
+        path = args.input_file
+    
+    if os.path.exists(path):
+        return path
+        
+    # Check if it exists in the script's directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    alt_path = os.path.join(script_dir, path)
+    if os.path.exists(alt_path):
+        return alt_path
+        
+    return path
+
 
 
 def filter_processes_by_order(processes, start_order=None, end_order=None):
