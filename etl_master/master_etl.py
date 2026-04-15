@@ -17,7 +17,7 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from env_utils import first_env, load_repo_environment
+from env_utils import build_subprocess_env, first_env, get_loaded_env_file, is_strict_env_mode, load_repo_environment
 
 load_repo_environment(extra_candidates=[os.path.join(script_dir, ".env.server"), os.path.join(script_dir, ".env")])
 
@@ -94,6 +94,12 @@ def build_logger() -> logging.Logger:
 
 
 logger = build_logger()
+
+if is_strict_env_mode():
+    logger.info(
+        "STRICT_ENV enabled. Child ETL steps will inherit only env-file values from %s",
+        get_loaded_env_file() or "the active dotenv context",
+    )
 
 
 class StepExecutionError(Exception):
@@ -265,6 +271,7 @@ def extract_execution_context(process):
 
         executable_commands.append(cmd)
 
+    runtime_env = build_subprocess_env(runtime_env)
     return working_dir, runtime_env, executable_commands
 
 
@@ -483,4 +490,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

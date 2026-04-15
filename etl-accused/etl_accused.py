@@ -24,6 +24,7 @@ import re
 # Import PostgreSQLConnectionPool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
+from env_utils import get_float_env, get_int_env
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -32,7 +33,7 @@ from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 # Set to 1 for Daily Incremental (Standard)
 # Set to 0 for Full Historical Fetch (Reset)
 # ==========================================
-RUN_MODE = int(os.environ.get('ACCUSED_RUN_MODE', '1'))
+RUN_MODE = get_int_env('ACCUSED_RUN_MODE', 1)
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -286,13 +287,13 @@ class AccusedETL:
             # Optimized parallelism for 64GB RAM server
             # We increase chunk workers and row workers to leverage more cores and memory
             # Default: 6 chunks × 8 workers = 48 concurrent threads
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '6'))
-            row_workers = int(os.environ.get('MAX_WORKERS', '8'))
+            chunk_workers = get_int_env('ACCUSED_CHUNK_WORKERS', 6)
+            row_workers = get_int_env('MAX_WORKERS', 8)
             total_workers = chunk_workers * row_workers
             
             # Connection pool sizing: workers + headroom
             # For 64GB RAM, we can easily handle 100+ connections if PostgreSQL is configured for it
-            max_connections = int(os.environ.get('DB_MAX_CONNECTIONS', max(50, total_workers + 20)))
+            max_connections = get_int_env('DB_MAX_CONNECTIONS', max(50, total_workers + 20))
                 
             self.db_pool = PostgreSQLConnectionPool(minconn=5, maxconn=max_connections, **DB_CONFIG)
             
@@ -1691,7 +1692,7 @@ class AccusedETL:
                 return {'accused_id': accused_id, 'operation': operation, 'success': success, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
 
         # Scale concurrency for 64GB server; default to 8 workers per chunk
-        requested_workers = int(os.environ.get('MAX_WORKERS', 8)) 
+        requested_workers = get_int_env('MAX_WORKERS', 8)
         # Guardrail: don't allow row-level concurrency to exceed pool capacity.
         # This prevents psycopg2.pool.PoolError: Connection pool exhausted under load.
         pool_maxconn = getattr(self.db_pool, 'maxconn', None)
@@ -1877,8 +1878,8 @@ class AccusedETL:
             # Chunk-level parallelism - defaults to 4 for DB connection safety
             # Safe default: 4 chunks × 4 workers = 16 concurrent threads
             # Can override: ACCUSED_CHUNK_WORKERS=8 MAX_WORKERS=8 for higher throughput if DB allows
-            chunk_workers = int(os.environ.get('ACCUSED_CHUNK_WORKERS', '4'))
-            inter_chunk_sleep = float(os.environ.get('ACCUSED_INTER_CHUNK_SLEEP', '0'))
+            chunk_workers = get_int_env('ACCUSED_CHUNK_WORKERS', 4)
+            inter_chunk_sleep = get_float_env('ACCUSED_INTER_CHUNK_SLEEP', 0.0)
 
             if chunk_workers <= 1:
                 for fd, td in tqdm(ranges, desc="Processing date ranges", unit="range"):
