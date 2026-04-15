@@ -214,7 +214,17 @@ def validate_minimum_schema(connection) -> None:
 
 
 def run_preflight(config_path: str, env_name: str) -> None:
-    load_dotenv()
+    # Resolve .env from project root (one level up from etl_master)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    env_path = os.path.join(project_root, '.env')
+    
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+    else:
+        # Fallback to current directory
+        load_dotenv()
+
 
     processes = parse_input_file(config_path)
     validate_execution_order(processes)

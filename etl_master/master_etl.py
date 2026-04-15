@@ -12,7 +12,19 @@ os.environ["TZ"] = "Asia/Kolkata"
 if hasattr(time, "tzset"):
     time.tzset()
 
+from dotenv import load_dotenv
+# Resolve .env from project root (one level up from etl_master)
+# Ensures credentials are loaded even if run from etl_master/ subdirectory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+env_path = os.path.join(project_root, '.env')
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+else:
+    load_dotenv() # Fallback
+
 from preflight_check import (
+
     PreflightError,
     parse_input_file,
     run_preflight,

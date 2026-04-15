@@ -146,7 +146,22 @@ class PostgreSQLConnectionPool:
             import os
             from dotenv import load_dotenv
             
-            load_dotenv()
+            # Robust .env loading: Search in script directory, then one level up, then two
+            # This ensures connectivity whether run from root, etl_master, or a child etl-x subdir
+            from pathlib import Path
+            current_dir = Path(__file__).resolve().parent
+            env_found = False
+            for p in [current_dir, current_dir.parent, current_dir.parent.parent]:
+                env_path = p / '.env'
+                if env_path.exists():
+                    load_dotenv(str(env_path))
+                    logger.debug(f"Loaded environment from {env_path}")
+                    env_found = True
+                    break
+            
+            if not env_found:
+                load_dotenv() # Fallback to default behavior
+
             
             dsn = (
                 f"dbname={os.getenv('DB_NAME')} "
