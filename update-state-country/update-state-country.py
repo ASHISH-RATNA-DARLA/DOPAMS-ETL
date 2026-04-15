@@ -45,10 +45,13 @@ Concurrency: MAX_WORKERS env-var (default: min(32, cpu*4)).
 import argparse
 import logging
 import os
+import re
 import sys
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Optional, List, Tuple
 
 from dotenv import load_dotenv
@@ -91,13 +94,37 @@ MAX_WORKERS  = int(os.environ.get("MAX_WORKERS",  str(min(32, (os.cpu_count() or
 SIM_STATE    = float(os.environ.get("GEO_SIM_STATE",    "0.85"))
 SIM_DISTRICT = float(os.environ.get("GEO_SIM_DISTRICT", "0.80"))
 SIM_MANDAL   = float(os.environ.get("GEO_SIM_MANDAL",   "0.65"))
-SIM_FOREIGN  = float(os.environ.get("GEO_SIM_FOREIGN",  "0.65"))
+SIM_FOREIGN  = float(os.environ.get("GEO_SIM_FOREIGN",  "0.50"))
+POOL_MINCONN = int(os.environ.get("GEO_POOL_MINCONN", "5"))
+POOL_MAXCONN = int(os.environ.get("GEO_POOL_MAXCONN", str(max(POOL_MINCONN, MAX_WORKERS + 5))))
 
 logger.info("DB      : %s @ %s", os.environ.get("DB_NAME", "dopamas"), os.environ.get("DB_HOST", "localhost"))
 logger.info("Table   : %s  ID: %s", TABLE_NAME, ID_COLUMN)
 logger.info("Batch   : %s  Workers: %s", BATCH_SIZE, MAX_WORKERS)
 logger.info("Thresholds — state: %.2f  district: %.2f  mandal: %.2f  foreign: %.2f",
             SIM_STATE, SIM_DISTRICT, SIM_MANDAL, SIM_FOREIGN)
+
+
+_DB_POOL: Optional[PostgreSQLConnectionPool] = None
+FOREIGN_TOKEN_ALIASES = {
+    "u s": "united states",
+    "u s a": "united states",
+    "uk": "united kingdom",
+    "u k": "united kingdom",
+    "uae": "united arab emirates",
+    "u a e": "united arab emirates",
+    "us": "united states",
+    "usa": "united states",
+    "united states of america": "united states",
+}
+
+
+def get_db_pool() -> PostgreSQLConnectionPool:
+    """Reuse one consistently-sized pool for the whole run."""
+    global _DB_POOL
+    if _DB_POOL is None:
+        _DB_POOL = PostgreSQLConnectionPool(minconn=POOL_MINCONN, maxconn=POOL_MAXCONN)
+    return _DB_POOL
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +134,56 @@ logger.info("Thresholds — state: %.2f  district: %.2f  mandal: %.2f  foreign: 
 def _val(v: Optional[str]) -> Optional[str]:
     """Return stripped value or None for empty / whitespace-only strings."""
     return v.strip() if v and v.strip() else None
+
+
+def normalize_geo_token(text: Optional[str]) -> Optional[str]:
+    """
+    Normalize geo tokens before fuzzy matching.
+
+    This removes punctuation/diacritics and collapses whitespace so
+    `U.S.A`, `u s a`, and `USA` converge to the same lookup key.
+    """
+    raw = _val(text)
+    if not raw:
+        return None
+
+    normalized = unicodedata.normalize("NFKD", raw)
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower().replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9\s]", " ", normalized)
+    normalized = " ".join(normalized.split())
+    return normalized or None
+
+
+def canonicalize_foreign_token(text: Optional[str]) -> Optional[str]:
+    """Normalize and expand well-known aliases before foreign lookup."""
+    normalized = normalize_geo_token(text)
+    if not normalized:
+        return None
+
+    canonical = FOREIGN_TOKEN_ALIASES.get(normalized, normalized)
+    if len(canonical) < 3:
+        return None
+    return canonical
+
+
+def foreign_threshold_for(token: str) -> float:
+    """
+    Use a lower threshold for short, abbreviation-heavy foreign tokens.
+    """
+    if len(token) <= 4:
+        return min(SIM_FOREIGN, 0.45)
+    if len(token) <= 7:
+        return min(SIM_FOREIGN, 0.50)
+    return SIM_FOREIGN
+
+
+def set_trgm_threshold(cur, threshold: float) -> None:
+    """Set pg_trgm threshold on the current connection safely."""
+    cur.execute(
+        "SELECT set_config('pg_trgm.similarity_threshold', %s, true)",
+        (f"{threshold:.6f}",),
+    )
 
 
 @dataclass
@@ -181,13 +258,75 @@ def _collect_foreign_candidates(rec: "PersonRecord") -> List[str]:
     seen: set = set()
     tokens: List[str] = []
     for v in raw:
-        cleaned = _val(v)
-        if cleaned and len(cleaned) >= 3:
-            key = cleaned.lower()
-            if key not in seen:
-                seen.add(key)
-                tokens.append(cleaned)
+        canonical = canonicalize_foreign_token(v)
+        if canonical and canonical not in seen:
+            seen.add(canonical)
+            tokens.append(canonical)
     return tokens
+
+
+@lru_cache(maxsize=2048)
+def _lookup_foreign_token(token: str, threshold_key: str) -> Optional[Tuple[str, Optional[str], float, str]]:
+    """
+    Resolve one normalized token against geo_countries.
+
+    Results are cached because the same foreign token values repeat heavily
+    across person records during a backfill.
+    """
+    threshold = float(threshold_key)
+    pool = get_db_pool()
+    best: Optional[ForeignMatch] = None
+
+    state_sql = """
+        SELECT
+            state_name,
+            country_name,
+            similarity(lower(state_name), %(token)s) AS sim
+        FROM geo_countries
+        WHERE lower(state_name) %% %(token)s
+          AND similarity(lower(state_name), %(token)s) >= %(thr)s
+        ORDER BY sim DESC
+        LIMIT 1
+    """
+
+    country_sql = """
+        SELECT
+            country_name,
+            similarity(lower(country_name), %(token)s) AS sim
+        FROM geo_countries
+        WHERE lower(country_name) %% %(token)s
+          AND similarity(lower(country_name), %(token)s) >= %(thr)s
+        ORDER BY sim DESC
+        LIMIT 1
+    """
+
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            set_trgm_threshold(cur, threshold)
+
+            cur.execute(state_sql, {"token": token, "thr": threshold})
+            row = cur.fetchone()
+            if row:
+                best = ForeignMatch(
+                    country=row[1],
+                    state=row[0],
+                    similarity=float(row[2]),
+                    matched_via="state_name",
+                )
+
+            cur.execute(country_sql, {"token": token, "thr": threshold})
+            row = cur.fetchone()
+            if row and (best is None or best.matched_via != "state_name"):
+                best = ForeignMatch(
+                    country=row[0],
+                    state=None,
+                    similarity=float(row[1]),
+                    matched_via="country_name",
+                )
+
+    if best is None:
+        return None
+    return (best.country, best.state, best.similarity, best.matched_via)
 
 
 def match_foreign_country(
@@ -215,61 +354,42 @@ def match_foreign_country(
     if not candidates:
         return None
 
-    pool = PostgreSQLConnectionPool()
     best: Optional[ForeignMatch] = None
 
     # ------------------------------------------------------------------
     # Step A: match against state_name → derive country
     # ------------------------------------------------------------------
-    state_sql = """
-        SELECT
-            state_name,
-            country_name,
-            similarity(state_name, %(token)s) AS sim
-        FROM geo_countries
-        WHERE state_name %% %(token)s
-          AND similarity(state_name, %(token)s) >= %(thr)s
-        ORDER BY sim DESC
-        LIMIT 1
-    """
-
-    # ------------------------------------------------------------------
-    # Step B: match against country_name directly
-    # ------------------------------------------------------------------
-    country_sql = """
-        SELECT
-            country_name,
-            similarity(country_name, %(token)s) AS sim
-        FROM geo_countries
-        WHERE country_name %% %(token)s
-          AND similarity(country_name, %(token)s) >= %(thr)s
-        ORDER BY sim DESC
-        LIMIT 1
-    """
-
     try:
-        with pool.get_connection_context() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SET pg_trgm.similarity_threshold = {SIM_FOREIGN};")
+        for token in candidates:
+            threshold = foreign_threshold_for(token)
+            threshold_key = f"{threshold:.2f}"
+            row = _lookup_foreign_token(token, threshold_key)
+            if not row:
+                continue
 
-                for token in candidates:
-                    # --- Step A: state_name ---
-                    cur.execute(state_sql, {"token": token, "thr": SIM_FOREIGN})
-                    row = cur.fetchone()
-                    if row:
-                        sim = float(row[2])
-                        if best is None or sim > best.similarity:
-                            best = ForeignMatch(
-                                country=row[1],
-                                state=row[0],
-                                similarity=sim,
-                                matched_via="state_name",
-                            )
-                            logger.info(
+            candidate = ForeignMatch(
+                country=row[0],
+                state=row[1],
+                similarity=float(row[2]),
+                matched_via=row[3],
+            )
+            if candidate.matched_via == "state_name":
+                if best is None or best.matched_via != "state_name" or candidate.similarity > best.similarity:
+                    best = candidate
+            elif best is None or (best.matched_via != "state_name" and candidate.similarity > best.similarity):
+                best = candidate
+
+            logger.info(
+                "  [%s] foreign %s: token='%s' â†’ country=%s sim=%.3f thr=%.2f",
+                record_id,
+                candidate.matched_via,
+                token,
+                candidate.country,
+                candidate.similarity,
+                threshold,
+            )
+            """
                                 "  [%s] foreign Phase2/A: token='%s' → state=%s "
-                                "country=%s sim=%.3f",
-                                record_id, token, row[0], row[1], sim,
-                            )
 
                     # --- Step B: country_name (only if no state match beat it) ---
                     cur.execute(country_sql, {"token": token, "thr": SIM_FOREIGN})
@@ -295,6 +415,7 @@ def match_foreign_country(
                                     record_id, token, row[0], sim,
                                 )
 
+            """
     except Exception as exc:
         logger.error("  [%s] foreign geo_countries lookup failed: %s",
                      record_id, exc, exc_info=True)
@@ -306,8 +427,8 @@ def match_foreign_country(
             record_id, best.country, best.matched_via, best.similarity,
         )
     else:
-        logger.warning("  [%s] foreign Phase 2: no match above threshold %.2f",
-                       record_id, SIM_FOREIGN)
+        logger.warning("  [%s] foreign Phase 2: no match across %d token(s)",
+                       record_id, len(candidates))
 
     return best
 
@@ -328,7 +449,7 @@ def apply_foreign_country(
         return True
 
     sql = f"UPDATE {table} SET permanent_country = COALESCE(NULLIF(TRIM(permanent_country), ''), %s) WHERE {id_col} = %s"
-    pool = PostgreSQLConnectionPool()
+    pool = get_db_pool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (country, person_id))
@@ -495,7 +616,7 @@ def match_geo(
     if not probes:
         return None
 
-    pool = PostgreSQLConnectionPool()
+    pool = get_db_pool()
 
     for ps, pd, pm, label in probes:
         sql, params = _build_match_query(ps, pd, pm)
@@ -508,7 +629,7 @@ def match_geo(
                     # matches liberally; our HAVING clause enforces field-level
                     # thresholds precisely.
                     min_thr = min(SIM_STATE, SIM_DISTRICT, SIM_MANDAL)
-                    cur.execute(f"SET pg_trgm.similarity_threshold = {min_thr};")
+                    set_trgm_threshold(cur, min_thr)
                     cur.execute(sql, params)
                     row = cur.fetchone()
                     if row:
@@ -544,12 +665,12 @@ def match_geo(
 def fetch_batch(
     table: str,
     id_col: str,
-    offset: int,
+    last_seen_id: Optional[str],
     limit: int,
 ) -> List[PersonRecord]:
     """
     Fetch one batch of persons that need standardization on permanent
-    and/or present address fields.
+    and/or present address fields, using keyset pagination on the ID column.
 
     A record is included when:
       • Any of permanent_state_ut / permanent_district / permanent_area_mandal
@@ -623,13 +744,14 @@ def fetch_batch(
                 )
             )
         )
+        AND (%s IS NULL OR {id_col}::text > %s)
         ORDER BY {id_col}
-        OFFSET %s LIMIT %s
+        LIMIT %s
     """
-    pool = PostgreSQLConnectionPool()
+    pool = get_db_pool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (offset, limit))
+            cur.execute(sql, (last_seen_id, last_seen_id, limit))
             rows = cur.fetchall()
 
     return [
@@ -702,7 +824,7 @@ def count_pending(table: str, id_col: str) -> int:
             )
         )
     """
-    pool = PostgreSQLConnectionPool()
+    pool = get_db_pool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql)
@@ -765,7 +887,7 @@ def apply_updates(
     params.append(person_id)
     sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {id_col} = %s"
 
-    pool = PostgreSQLConnectionPool()
+    pool = get_db_pool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
@@ -875,8 +997,6 @@ def process_record(
                     stats["foreign_unresolved"] += 1
         else:
             logger.debug("  [%s] Phase 2: no candidate tokens", rec.person_id)
-            with lock:
-                stats["skipped"] += 1
 
     # ------------------------------------------------------------------
     # Nothing resolved at all
@@ -929,7 +1049,7 @@ def run(
                 table, id_col, limit or "ALL", dry_run)
 
     # Ensure the pool is initialised before spawning threads
-    pool = PostgreSQLConnectionPool(minconn=5, maxconn=MAX_WORKERS + 5)
+    get_db_pool()
 
     total_pending = count_pending(table, id_col)
     effective_total = min(total_pending, limit) if limit else total_pending
@@ -954,17 +1074,17 @@ def run(
     }
 
     processed = 0
-    offset    = 0
+    last_seen_id: Optional[str] = None
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         while processed < effective_total:
             batch_size = min(BATCH_SIZE, effective_total - processed)
-            batch = fetch_batch(table, id_col, offset, batch_size)
+            batch = fetch_batch(table, id_col, last_seen_id, batch_size)
             if not batch:
                 break
 
             logger.info("-" * 60)
-            logger.info("Batch offset=%d  size=%d", offset, len(batch))
+            logger.info("Batch after_id=%s  size=%d", last_seen_id or "<start>", len(batch))
 
             futures = {
                 executor.submit(
@@ -984,7 +1104,7 @@ def run(
                         stats["failed"] += 1
 
             processed += len(batch)
-            offset    += len(batch)
+            last_seen_id = batch[-1].person_id
 
     # ------------------------------------------------------------------
     # Summary

@@ -23,7 +23,7 @@ TEST_QUESTIONS = {
     'Q43': "Find accused with hair color information",
     'Q44': "List accused with mole or leucoderma marks",
     'Q38': "Show persons from state 'Telangana' (show both present_state_ut and permanent_state_ut - show both if available, show one if only one available, show no data if neither available)",
-    'Q68': "List drugs by brand name (use drug_name from brief_facts_drugs or nature from properties as brand name alternatives)",
+    'Q68': "List drugs by brand name (use primary_drug_name from brief_facts_ai_drug_flat or nature from properties as brand name alternatives)",
     'Q1': "Show me all crimes with FIR number, date, and police station code",  # Test LIMIT injection
 }
 

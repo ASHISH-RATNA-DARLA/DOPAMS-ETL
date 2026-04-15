@@ -68,6 +68,46 @@ CREATE TABLE IF NOT EXISTS public.etl_crime_processing_log (
 
 CREATE INDEX IF NOT EXISTS idx_etl_log_crime_status ON public.etl_crime_processing_log (crime_id, status);
 
+-- 2a. Recreate brief_facts_ai_drug_flat view to expose new JSONB fields
+CREATE OR REPLACE VIEW public.brief_facts_ai_drug_flat AS
+SELECT
+    public.uuid_generate_v5('00000000-0000-0000-0000-000000000000'::uuid,
+        bfa.bf_accused_id::text || ':' || x.ord::text) AS id,
+    bfa.crime_id,
+    bfa.bf_accused_id,
+    (x.d->>'raw_drug_name')            AS raw_drug_name,
+    (x.d->>'primary_drug_name')        AS primary_drug_name,
+    (x.d->>'drug_form')                AS drug_form,
+    (x.d->>'drug_category')            AS drug_category,
+    (x.d->>'supplier_name')            AS supplier_name,
+    (x.d->>'source_location')          AS source_location,
+    (x.d->>'destination')              AS destination,
+    NULLIF(x.d->>'raw_quantity','')::numeric(18,6)          AS raw_quantity,
+    (x.d->>'raw_unit')                 AS raw_unit,
+    NULLIF(x.d->>'weight_g','')::numeric(18,6)              AS weight_g,
+    NULLIF(x.d->>'weight_kg','')::numeric(18,6)             AS weight_kg,
+    NULLIF(x.d->>'volume_ml','')::numeric(18,6)             AS volume_ml,
+    NULLIF(x.d->>'volume_l','')::numeric(18,6)              AS volume_l,
+    NULLIF(x.d->>'count_total','')::numeric(18,6)           AS count_total,
+    NULLIF(x.d->>'confidence_score','')::numeric(3,2)       AS confidence_score,
+    COALESCE((x.d->>'is_commercial')::boolean, false)       AS is_commercial,
+    NULLIF(x.d->>'seizure_worth','')::numeric               AS seizure_worth,
+    NULLIF(x.d->>'purchase_price_per_unit','')::numeric     AS purchase_price_per_unit,
+    (x.d->>'drug_attribution_source')  AS drug_attribution_source,
+    COALESCE(x.d->'extraction_metadata', '{}'::jsonb)       AS extraction_metadata,
+    bfa.date_created::timestamptz                           AS created_at,
+    bfa.date_modified::timestamptz                          AS updated_at
+FROM public.brief_facts_ai bfa
+CROSS JOIN LATERAL jsonb_array_elements(COALESCE(bfa.drugs, '[]'::jsonb)) WITH ORDINALITY x(d, ord);
+
+-- 2b. Cleanup legacy tables
+DROP TABLE IF EXISTS public.brief_facts_accused CASCADE;
+DROP TABLE IF EXISTS public.brief_facts_drugs CASCADE;
+
+-- 2c. Add branch column to processing log
+ALTER TABLE public.etl_crime_processing_log
+    ADD COLUMN IF NOT EXISTS branch CHAR(1);
+
 -- 3. Drop existing materialized views
 DROP MATERIALIZED VIEW IF EXISTS public.firs_mv CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS public.accuseds_mv CASCADE;

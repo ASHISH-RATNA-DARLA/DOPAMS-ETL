@@ -18,6 +18,12 @@ import json
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
+try:
+    from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
+except ImportError:  # pragma: no cover
+    push_fk_failure = None
+    _drain_fk_queue = None
+
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
@@ -1059,6 +1065,23 @@ class FSLCasePropertyETL:
             self.stats['total_records_failed_crime_id'] += 1
             self.log_failed_record(case_property, reason, error_details)
             self.log_invalid_crime_id(case_property, original_crime_id or 'NULL', chunk_date_range)
+            # Park in FK retry queue — recovers when crime record arrives.
+            if push_fk_failure is not None and original_crime_id:
+                try:
+                    push_fk_failure(
+                        conn, 'fsl_case_property',
+                        record_id=original_crime_id,
+                        record_json=json.dumps(
+                            {k: str(v) if v is not None else None
+                             for k, v in case_property.items()},
+                        ),
+                        missing_fk_column='crime_id',
+                        missing_fk_value=original_crime_id,
+                    )
+                    conn.commit()
+                except Exception as _qe:
+                    logger.warning("FK queue push failed for fsl_case_property %s: %s",
+                                   original_crime_id, _qe)
             return False, reason
 
         # Validate MO relationship logically (crime_id + mo_id) when mo_id is provided.
@@ -1521,6 +1544,26 @@ class FSLCasePropertyETL:
         self.duplicates_log.write(f"If the same key appears multiple times, each occurrence is processed\n")
         self.duplicates_log.write(f"The smart update logic will determine if actual updates are needed\n")
     
+    def _retry_fsl_case_property_record(self, conn, record):
+        """Retry insertion of a queued fsl_case_property record once its crime_id is present.
+
+        Called by drain_fk_queue. Returns True on success, False if still unresolvable.
+        """
+        original_crime_id = record.get('_original_crime_id') or record.get('crime_id')
+        if not original_crime_id:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s",
+                (original_crime_id,)
+            )
+            if not cur.fetchone():
+                return False  # Still missing
+            record['crime_id'] = original_crime_id
+            record['_original_crime_id'] = original_crime_id
+            success, _ = self.insert_case_property(record, conn, cur, 'FK_RETRY')
+            return success
+
     def run(self):
         """Main ETL execution"""
         logger.info("=" * 80)
@@ -1540,6 +1583,16 @@ class FSLCasePropertyETL:
         if not self.connect_db():
             logger.error("Failed to connect to database. Exiting.")
             return False
+
+        # Retry any FSL case property records queued from previous runs due to FK misses.
+        if _drain_fk_queue is not None:
+            try:
+                with self.db_pool.get_connection_context() as _drain_conn:
+                    _drain_fk_queue(_drain_conn, 'fsl_case_property',
+                                    self._retry_fsl_case_property_record)
+                    _drain_conn.commit()
+            except Exception as _de:
+                logger.warning("FK queue drain failed at startup: %s (non-fatal)", _de)
         
         try:
             # Get effective start date (check if table has data)

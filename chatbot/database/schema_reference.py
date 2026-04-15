@@ -60,17 +60,19 @@ POSTGRESQL_SCHEMA = {
         ]
     ),
     
-    'brief_facts_accused': TableSchema(
-        name='brief_facts_accused',
+    'brief_facts_ai': TableSchema(
+        name='brief_facts_ai',
         primary_key='bf_accused_id',
-        description='Brief facts about accused persons',
+        description='Unified accused + drug extraction (one row per accused per crime)',
         columns=[
             ColumnInfo('bf_accused_id', 'uuid', None, False),
             ColumnInfo('crime_id', 'character varying', 50, False),
             ColumnInfo('accused_id', 'character varying', 50, True),
             ColumnInfo('person_id', 'character varying', 50, True),
+            ColumnInfo('canonical_person_id', 'character varying', 50, True),
             ColumnInfo('person_code', 'character varying', 50, True),
             ColumnInfo('seq_num', 'character varying', 50, True),
+            ColumnInfo('existing_accused', 'boolean', None, False),
             ColumnInfo('full_name', 'character varying', 500, True),
             ColumnInfo('alias_name', 'character varying', 255, True),
             ColumnInfo('age', 'integer', None, True),
@@ -81,13 +83,46 @@ POSTGRESQL_SCHEMA = {
             ColumnInfo('role_in_crime', 'text', None, True),
             ColumnInfo('key_details', 'text', None, True),
             ColumnInfo('accused_type', 'character varying', 40, True),
-            ColumnInfo('status', 'character varying', 40, True),
+            ColumnInfo('status', 'text', None, True),
             ColumnInfo('is_ccl', 'boolean', None, True),
-            ColumnInfo('source_person_fields', 'jsonb', None, True),
-            ColumnInfo('source_accused_fields', 'jsonb', None, True),
-            ColumnInfo('source_summary_fields', 'jsonb', None, True),
+            ColumnInfo('drugs', 'jsonb', None, True),
+            ColumnInfo('dedup_match_tier', 'smallint', None, True),
+            ColumnInfo('dedup_confidence', 'numeric', None, True),
             ColumnInfo('date_created', 'timestamp without time zone', None, True),
             ColumnInfo('date_modified', 'timestamp without time zone', None, True),
+        ]
+    ),
+    
+    'brief_facts_ai_drug_flat': TableSchema(
+        name='brief_facts_ai_drug_flat',
+        primary_key='id',
+        description='Flat view of drugs JSONB from brief_facts_ai — one row per drug per accused per crime',
+        columns=[
+            ColumnInfo('id', 'uuid', None, False),
+            ColumnInfo('crime_id', 'character varying', 50, False),
+            ColumnInfo('bf_accused_id', 'uuid', None, False),
+            ColumnInfo('raw_drug_name', 'text', None, True),
+            ColumnInfo('primary_drug_name', 'text', None, True),
+            ColumnInfo('drug_form', 'text', None, True),
+            ColumnInfo('drug_category', 'text', None, True),
+            ColumnInfo('supplier_name', 'text', None, True),
+            ColumnInfo('source_location', 'text', None, True),
+            ColumnInfo('destination', 'text', None, True),
+            ColumnInfo('raw_quantity', 'numeric', None, True),
+            ColumnInfo('raw_unit', 'text', None, True),
+            ColumnInfo('weight_g', 'numeric', None, True),
+            ColumnInfo('weight_kg', 'numeric', None, True),
+            ColumnInfo('volume_ml', 'numeric', None, True),
+            ColumnInfo('volume_l', 'numeric', None, True),
+            ColumnInfo('count_total', 'numeric', None, True),
+            ColumnInfo('confidence_score', 'numeric', None, True),
+            ColumnInfo('is_commercial', 'boolean', None, True),
+            ColumnInfo('seizure_worth', 'numeric', None, True),
+            ColumnInfo('purchase_price_per_unit', 'numeric', None, True),
+            ColumnInfo('drug_attribution_source', 'text', None, True),
+            ColumnInfo('extraction_metadata', 'jsonb', None, True),
+            ColumnInfo('created_at', 'timestamp with time zone', None, True),
+            ColumnInfo('updated_at', 'timestamp with time zone', None, True),
         ]
     ),
     
@@ -104,43 +139,6 @@ POSTGRESQL_SCHEMA = {
             ColumnInfo('model_name', 'character varying', None, True),
             ColumnInfo('date_created', 'timestamp without time zone', None, True),
             ColumnInfo('date_modified', 'timestamp without time zone', None, True),
-        ]
-    ),
-    
-    'brief_facts_drugs': TableSchema(
-        name='brief_facts_drugs',
-        primary_key='id',
-        description='Drug-related crime details',
-        columns=[
-            ColumnInfo('id', 'integer', None, False),
-            ColumnInfo('crime_id', 'character varying', None, False),
-            ColumnInfo('drug_name', 'character varying', None, False),
-            ColumnInfo('scientific_name', 'character varying', None, True),
-            ColumnInfo('brand_name', 'character varying', None, True),
-            ColumnInfo('drug_category', 'character varying', None, True),
-            ColumnInfo('drug_schedule', 'character varying', None, True),
-            ColumnInfo('total_quantity', 'character varying', None, True),
-            ColumnInfo('quantity_numeric', 'numeric', None, True),
-            ColumnInfo('quantity_unit', 'character varying', None, True),
-            ColumnInfo('number_of_packets', 'character varying', None, True),
-            ColumnInfo('weight_breakdown', 'text', None, True),
-            ColumnInfo('packaging_details', 'character varying', None, True),
-            ColumnInfo('source_location', 'character varying', None, True),
-            ColumnInfo('destination', 'character varying', None, True),
-            ColumnInfo('transport_method', 'character varying', None, True),
-            ColumnInfo('supply_chain', 'text', None, True),
-            ColumnInfo('seizure_location', 'character varying', None, True),
-            ColumnInfo('seizure_time', 'character varying', None, True),
-            ColumnInfo('seizure_method', 'character varying', None, True),
-            ColumnInfo('seizure_officer', 'character varying', None, True),
-            ColumnInfo('commercial_quantity', 'character varying', None, True),
-            ColumnInfo('is_commercial', 'boolean', None, True),
-            ColumnInfo('street_value', 'character varying', None, True),
-            ColumnInfo('street_value_numeric', 'numeric', None, True),
-            ColumnInfo('purity', 'character varying', None, True),
-            ColumnInfo('date_created', 'timestamp without time zone', None, True),
-            ColumnInfo('date_modified', 'timestamp without time zone', None, True),
-            ColumnInfo('seizure_worth', 'integer', None, True),
         ]
     ),
     
@@ -260,112 +258,7 @@ POSTGRESQL_SCHEMA = {
             ColumnInfo('domicile_classification', 'character varying', 50, True),
         ]
     ),
-    
-    'brief_facts_crime_summaries': TableSchema(
-        name='brief_facts_crime_summaries',
-        primary_key='crime_id',
-        description='AI-generated crime summaries',
-        columns=[
-            ColumnInfo('crime_id', 'character varying', None, False),
-            ColumnInfo('summary_text', 'text', None, False),
-            ColumnInfo('summary_json', 'jsonb', None, True),
-            ColumnInfo('word_count', 'integer', None, True),
-            ColumnInfo('processing_time_seconds', 'numeric', None, True),
-            ColumnInfo('model_name', 'character varying', None, True),
-            ColumnInfo('date_created', 'timestamp without time zone', None, True),
-            ColumnInfo('date_modified', 'timestamp without time zone', None, True),
-        ]
-    ),
-    
-    'brief_facts_drugs': TableSchema(
-        name='brief_facts_drugs',
-        primary_key='id',
-        description='Drug seizure details',
-        columns=[
-            ColumnInfo('id', 'integer', None, False),
-            ColumnInfo('crime_id', 'character varying', None, False),
-            ColumnInfo('drug_name', 'character varying', None, False),
-            ColumnInfo('scientific_name', 'character varying', None, True),
-            ColumnInfo('brand_name', 'character varying', None, True),
-            ColumnInfo('drug_category', 'character varying', None, True),
-            ColumnInfo('drug_schedule', 'character varying', None, True),
-            ColumnInfo('total_quantity', 'character varying', None, True),
-            ColumnInfo('quantity_numeric', 'numeric', None, True),
-            ColumnInfo('quantity_unit', 'character varying', None, True),
-            ColumnInfo('number_of_packets', 'character varying', None, True),
-            ColumnInfo('weight_breakdown', 'text', None, True),
-            ColumnInfo('packaging_details', 'character varying', None, True),
-            ColumnInfo('source_location', 'character varying', None, True),
-            ColumnInfo('destination', 'character varying', None, True),
-            ColumnInfo('transport_method', 'character varying', None, True),
-            ColumnInfo('supply_chain', 'text', None, True),
-            ColumnInfo('seizure_location', 'character varying', None, True),
-            ColumnInfo('seizure_time', 'character varying', None, True),
-            ColumnInfo('seizure_method', 'character varying', None, True),
-            ColumnInfo('seizure_officer', 'character varying', None, True),
-            ColumnInfo('commercial_quantity', 'character varying', None, True),
-            ColumnInfo('is_commercial', 'boolean', None, True),
-            ColumnInfo('street_value', 'character varying', None, True),
-            ColumnInfo('street_value_numeric', 'numeric', None, True),
-            ColumnInfo('purity', 'character varying', None, True),
-            ColumnInfo('date_created', 'timestamp without time zone', None, True),
-            ColumnInfo('date_modified', 'timestamp without time zone', None, True),
-            ColumnInfo('seizure_worth', 'integer', None, True),
-        ]
-    ),
-    
-    'crimes': TableSchema(
-        name='crimes',
-        primary_key='crime_id',
-        description='Main crime/FIR records',
-        columns=[
-            ColumnInfo('crime_id', 'character varying', 50, False),
-            ColumnInfo('ps_code', 'character varying', 20, False),
-            ColumnInfo('fir_num', 'character varying', 50, False),
-            ColumnInfo('fir_reg_num', 'character varying', 50, False),
-            ColumnInfo('fir_type', 'character varying', 50, True),
-            ColumnInfo('acts_sections', 'text', None, True),
-            ColumnInfo('fir_date', 'timestamp without time zone', None, True),
-            ColumnInfo('case_status', 'character varying', 100, True),
-            ColumnInfo('major_head', 'character varying', 100, True),
-            ColumnInfo('minor_head', 'character varying', 255, True),
-            ColumnInfo('crime_type', 'character varying', 100, True),
-            ColumnInfo('io_name', 'character varying', 255, True),
-            ColumnInfo('io_rank', 'character varying', 100, True),
-            ColumnInfo('brief_facts', 'text', None, True),
-            ColumnInfo('brief_facts_embedding', 'vector', None, True),
-            ColumnInfo('crime_pattern_embedding', 'vector', None, True),
-            ColumnInfo('date_created', 'timestamp without time zone', None, True),
-            ColumnInfo('date_modified', 'timestamp without time zone', None, True),
-            ColumnInfo('class_classification', 'character varying', 50, True),
-        ]
-    ),
-    
-    'hierarchy': TableSchema(
-        name='hierarchy',
-        primary_key='ps_code',
-        description='Police station hierarchy',
-        columns=[
-            ColumnInfo('ps_code', 'character varying', 20, False),
-            ColumnInfo('ps_name', 'character varying', 255, False),
-            ColumnInfo('circle_code', 'character varying', 20, True),
-            ColumnInfo('circle_name', 'character varying', 255, True),
-            ColumnInfo('sdpo_code', 'character varying', 20, True),
-            ColumnInfo('sdpo_name', 'character varying', 255, True),
-            ColumnInfo('sub_zone_code', 'character varying', 20, True),
-            ColumnInfo('sub_zone_name', 'character varying', 255, True),
-            ColumnInfo('dist_code', 'character varying', 20, True),
-            ColumnInfo('dist_name', 'character varying', 255, True),
-            ColumnInfo('range_code', 'character varying', 20, True),
-            ColumnInfo('range_name', 'character varying', 255, True),
-            ColumnInfo('zone_code', 'character varying', 20, True),
-            ColumnInfo('zone_name', 'character varying', 255, True),
-            ColumnInfo('adg_code', 'character varying', 20, True),
-            ColumnInfo('adg_name', 'character varying', 255, True),
-            ColumnInfo('created_at', 'timestamp without time zone', None, True),
-            ColumnInfo('updated_at', 'timestamp without time zone', None, True),
-        ]
-    ),
+
     
     'properties': TableSchema(
         name='properties',
@@ -402,33 +295,33 @@ POSTGRESQL_SCHEMA = {
 COLUMN_MAPPINGS = {
     'phone_number': {
         'persons': ['phone_number'],
-        'brief_facts_accused': ['phone_numbers'],
+        'brief_facts_ai': ['phone_numbers'],
     },
     'email': {
         'persons': ['email_id'],
     },
     'name': {
         'persons': ['name', 'surname', 'full_name', 'alias'],
-        'brief_facts_accused': ['full_name', 'alias_name'],
+        'brief_facts_ai': ['full_name', 'alias_name'],
         'crimes': ['io_name'],
         'hierarchy': ['ps_name', 'circle_name', 'dist_name', 'zone_name'],
     },
     'crime_id': {
         'crimes': ['crime_id'],
         'accused': ['crime_id'],
-        'brief_facts_accused': ['crime_id'],
+        'brief_facts_ai': ['crime_id'],
         'brief_facts_crime_summaries': ['crime_id'],
-        'brief_facts_drugs': ['crime_id'],
+        'brief_facts_ai_drug_flat': ['crime_id'],
         'properties': ['crime_id'],
     },
     'person_id': {
         'persons': ['person_id'],
         'accused': ['person_id'],
-        'brief_facts_accused': ['person_id'],
+        'brief_facts_ai': ['person_id'],
     },
     'status': {
         'crimes': ['case_status'],
-        'brief_facts_accused': ['status'],
+        'brief_facts_ai': ['status'],
         'properties': ['property_status'],
     },
     'address': {
@@ -437,7 +330,7 @@ COLUMN_MAPPINGS = {
             'present_locality_village', 'present_district', 'present_state_ut',
             'permanent_house_no', 'permanent_district', 'permanent_state_ut'
         ],
-        'brief_facts_accused': ['address'],
+        'brief_facts_ai': ['address'],
     },
     'district': {
         'persons': ['present_district', 'permanent_district'],
@@ -447,7 +340,7 @@ COLUMN_MAPPINGS = {
         'crimes': ['fir_date', 'date_created'],
         'persons': ['date_of_birth', 'date_created'],
         'properties': ['date_of_seizure', 'date_created'],
-        'brief_facts_drugs': ['date_created'],
+        'brief_facts_ai_drug_flat': ['created_at'],
     },
 }
 
@@ -456,9 +349,9 @@ COLUMN_MAPPINGS = {
 # ============================================================================
 
 QUERY_TABLE_HINTS = {
-    'person_search': ['persons', 'brief_facts_accused'],
+    'person_search': ['persons', 'brief_facts_ai'],
     'crime_search': ['crimes', 'brief_facts_crime_summaries'],
-    'drug_search': ['brief_facts_drugs'],
+    'drug_search': ['brief_facts_ai_drug_flat'],
     'property_search': ['properties'],
     'location_search': ['hierarchy', 'persons', 'crimes'],
     'count_crimes': ['crimes'],
@@ -657,7 +550,7 @@ EXAMPLE_QUERIES = {
     'find_person_by_phone': "SELECT person_id, full_name, phone_number, email_id FROM persons WHERE phone_number = '9876543210'",
     'find_person_by_name': "SELECT person_id, full_name, phone_number, present_district FROM persons WHERE full_name ILIKE '%John%'",
     'crimes_by_status': "SELECT case_status, COUNT(*) FROM crimes GROUP BY case_status",
-    'drugs_by_type': "SELECT drug_category, COUNT(*), SUM(seizure_worth) FROM brief_facts_drugs GROUP BY drug_category",
+    'drugs_by_type': "SELECT drug_category, COUNT(*), SUM(seizure_worth) FROM brief_facts_ai_drug_flat GROUP BY drug_category",
     
     # MongoDB (ACTUAL field names - UPPERCASE!)
     'mongo_count': '{"collection": "fir_records", "query": {}}',

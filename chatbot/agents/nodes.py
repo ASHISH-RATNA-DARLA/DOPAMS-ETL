@@ -1304,7 +1304,7 @@ SELECT DISTINCT
     h.dist_name
 FROM persons p
 LEFT JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id OR bfa.crime_id = c.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE p.full_name ILIKE '%{person_name}%'
@@ -1338,7 +1338,7 @@ SELECT DISTINCT
     STRING_AGG(DISTINCT c.fir_num, ', ') as fir_numbers
 FROM persons p
 LEFT JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id OR bfa.crime_id = c.crime_id
 GROUP BY p.person_id, p.full_name, p.name, p.surname, p.alias, 
          p.age, p.gender, p.occupation, p.phone_number, p.email_id
@@ -1423,7 +1423,7 @@ LIMIT 100
                             logger.info(f"Generated fallback PostgreSQL query for state query: {fallback_sql}")
                         # Check for brand name queries (Q69)
                         elif 'brand name' in message_lower or ('by brand' in message_lower):
-                            fallback_sql = "SELECT d.drug_name as brand_name, pr.nature as property_brand, COUNT(*) as count FROM brief_facts_drugs d LEFT JOIN properties pr ON d.crime_id = pr.crime_id GROUP BY d.drug_name, pr.nature ORDER BY count DESC LIMIT 100"
+                            fallback_sql = "SELECT d.primary_drug_name as brand_name, pr.nature as property_brand, COUNT(*) as count FROM brief_facts_ai_drug_flat d LEFT JOIN properties pr ON d.crime_id = pr.crime_id GROUP BY d.primary_drug_name, pr.nature ORDER BY count DESC LIMIT 100"
                             queries['postgresql'] = fallback_sql
                             logger.info(f"Generated fallback PostgreSQL query for brand name query: {fallback_sql}")
                 
@@ -1492,9 +1492,9 @@ LIMIT 100
                 ])
                 
                 # ⭐ NEW: If user says "accused id", search by accused_id directly!
-                # Rule 3: Accused-related → use accused_id, check brief_facts_accused if not found
+                # Rule 3: Accused-related → use accused_id, check brief_facts_ai if not found
                 if is_accused_id:
-                    # Build SELECT with accused physical data + person personal data + brief_facts_accused fallback
+                    # Build SELECT with accused physical data + person personal data + brief_facts_ai fallback
                     select_fields = [
                         # Accused physical data
                         "a.accused_id", "a.crime_id", "a.person_id", "a.type as accused_type", "a.is_ccl",
@@ -1518,7 +1518,7 @@ SELECT DISTINCT
     {', '.join(select_fields)}
 FROM accused a
 LEFT JOIN persons p ON a.person_id = p.person_id
-LEFT JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+LEFT JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE a.accused_id = '{entity_value}'
@@ -1566,7 +1566,7 @@ SELECT DISTINCT
     {', '.join(select_fields)}
 FROM persons p
 LEFT JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE {where_clause}
@@ -1595,7 +1595,7 @@ ORDER BY c.fir_date DESC
                 if wants_persons:
                     # Rule 1: Crime-related → use crime_id
                     # Rule 2: Person-related → use person_id (via accused.person_id)
-                    # Rule 3: Accused-related → check brief_facts_accused as fallback
+                    # Rule 3: Accused-related → check brief_facts_ai as fallback
                     # Rule 5: Hierarchy → use ps_code
                     # Query for PERSONS involved in crime
                     sql = f"""
@@ -1612,16 +1612,16 @@ SELECT p.person_id, p.full_name, p.alias, p.age, p.gender, p.occupation,
        c.crime_id, c.fir_num, c.crime_type, c.case_status, h.ps_name, h.dist_name
 FROM accused a
 JOIN persons p ON a.person_id = p.person_id
-LEFT JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+LEFT JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE c.crime_id = '{entity_value}'
 ORDER BY bfa.seq_num
                     """.strip()
-                    logger.info(f"Generated PERSONS query for crime ID: {entity_value} (Rule 1: crime_id, Rule 2: person_id, Rule 3: brief_facts_accused fallback)")
+                    logger.info(f"Generated PERSONS query for crime ID: {entity_value} (Rule 1: crime_id, Rule 2: person_id, Rule 3: brief_facts_ai fallback)")
                 
                 elif wants_drugs:
-                    # Rule 4: Drug-related queries → use crime_id in BOTH properties and brief_facts_drugs
+                    # Rule 4: Drug-related queries → use crime_id in BOTH properties and brief_facts_ai_drug_flat
                     # Query for DRUGS seized in crime - AUTO-DETECT COLUMNS from user question!
                     # ⭐ NEW: Use column mapper to KNOW which columns user is asking about!
                     message_lower = user_message.lower()
@@ -1632,7 +1632,7 @@ ORDER BY bfa.seq_num
                     if self.column_mapper:
                         column_matches = self.column_mapper.find_columns(user_message)
                         # Filter for drug-related columns
-                        drug_columns = [m for m in column_matches if m.table == 'brief_facts_drugs']
+                        drug_columns = [m for m in column_matches if m.table == 'brief_facts_ai_drug_flat']
                         property_columns = [m for m in column_matches if m.table == 'properties']
                         
                         if drug_columns:
@@ -1661,8 +1661,8 @@ ORDER BY bfa.seq_num
                     
                     # Then add all common drug columns (if not already added)
                     common_drug_cols = [
-                        "d.drug_name", "d.scientific_name", "d.brand_name", "d.drug_category", "d.drug_schedule",
-                        "d.total_quantity", "d.quantity_unit", "d.quantity_numeric", "d.number_of_packets",
+                        "d.primary_drug_name", "d.scientific_name", "d.brand_name", "d.drug_category", "d.drug_schedule",
+                        "d.raw_quantity", "d.quantity_unit", "d.raw_quantity", "d.number_of_packets",
                         "d.weight_breakdown", "d.packaging_details",
                         "d.source_location", "d.destination", "d.transport_method", "d.supply_chain",
                         "d.seizure_location", "d.seizure_time", "d.seizure_method", "d.seizure_officer",
@@ -1696,19 +1696,19 @@ ORDER BY bfa.seq_num
                             select_parts.append(col)
                     
                     # Build final SQL
-                    # Rule 4: MUST JOIN BOTH brief_facts_drugs AND properties using crime_id
+                    # Rule 4: MUST JOIN BOTH brief_facts_ai_drug_flat AND properties using crime_id
                     # Rule 5: Hierarchy → use ps_code
                     sql = f"""
 SELECT DISTINCT 
     {', '.join(select_parts)}
 FROM crimes c
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
-LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
 LEFT JOIN properties pr ON c.crime_id = pr.crime_id
 WHERE c.crime_id = '{entity_value}'
 ORDER BY d.id, pr.property_id
                     """.strip()
-                    logger.info(f"Generated DRUGS query for crime ID: {entity_value} (Rule 4: BOTH brief_facts_drugs + properties via crime_id, ⭐ AUTO-INCLUDED {len(drug_columns) if self.column_mapper and drug_columns else 0} columns from user question)")
+                    logger.info(f"Generated DRUGS query for crime ID: {entity_value} (Rule 4: BOTH brief_facts_ai_drug_flat + properties via crime_id, ⭐ AUTO-INCLUDED {len(drug_columns) if self.column_mapper and drug_columns else 0} columns from user question)")
                 
                 elif wants_properties:
                     # Rule 1: Crime-related → use crime_id
@@ -1801,7 +1801,7 @@ SELECT DISTINCT p.person_id, p.full_name, p.name, p.surname, p.alias,
        a.crime_id, c.fir_num, c.crime_type, c.case_status, h.ps_name
 FROM accused a
 JOIN persons p ON a.person_id = p.person_id
-LEFT JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+LEFT JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE p.phone_number ILIKE '%{entity_value}%'
@@ -1816,19 +1816,19 @@ SELECT DISTINCT p.person_id, p.full_name, p.name, p.surname, p.alias,
        p.present_district, p.present_state_ut, p.permanent_district,
        bfa.phone_numbers as accused_phone_numbers
 FROM persons p
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 WHERE p.phone_number ILIKE '%{entity_value}%'
    OR bfa.phone_numbers ILIKE '%{entity_value}%'
 LIMIT 20
                             """.strip()
-                        elif table_name == 'brief_facts_accused':
-                            # brief_facts_accused has phone_numbers (plural)
+                        elif table_name == 'brief_facts_ai':
+                            # brief_facts_ai has phone_numbers (plural)
                             sql = f"""
 SELECT DISTINCT bfa.bf_accused_id, bfa.full_name, bfa.alias_name,
        bfa.phone_numbers, bfa.age, bfa.gender, bfa.occupation, bfa.address,
        p.phone_number as person_phone_number,
        a.crime_id, c.fir_num, c.crime_type, c.case_status
-FROM brief_facts_accused bfa
+FROM brief_facts_ai bfa
 LEFT JOIN persons p ON bfa.person_id = p.person_id
 LEFT JOIN accused a ON bfa.person_id = a.person_id AND bfa.crime_id = a.crime_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id
@@ -1871,14 +1871,14 @@ FROM persons p
 WHERE p.email_id ILIKE '%{entity_value}%'
 LIMIT 20
                             """.strip()
-                        elif table_name == 'brief_facts_accused':
-                            # brief_facts_accused doesn't have email, must JOIN with persons
+                        elif table_name == 'brief_facts_ai':
+                            # brief_facts_ai doesn't have email, must JOIN with persons
                             sql = f"""
 SELECT DISTINCT bfa.bf_accused_id, bfa.full_name, bfa.alias_name,
        bfa.age, bfa.gender, bfa.occupation, bfa.address,
        p.email_id, p.phone_number,
        a.crime_id, c.fir_num, c.crime_type, c.case_status
-FROM brief_facts_accused bfa
+FROM brief_facts_ai bfa
 LEFT JOIN persons p ON bfa.person_id = p.person_id
 LEFT JOIN accused a ON bfa.person_id = a.person_id AND bfa.crime_id = a.crime_id
 LEFT JOIN crimes c ON a.crime_id = c.crime_id
@@ -2771,7 +2771,7 @@ class ResultFormatter:
                 result.append(f"**📊 Record {i}:**")
             
             # Group fields by table/section for better organization
-            # For drug queries, prioritize brief_facts_drugs fields
+            # For drug queries, prioritize brief_facts_ai_drug_flat fields
             drug_fields = {}
             property_fields = {}
             crime_fields = {}

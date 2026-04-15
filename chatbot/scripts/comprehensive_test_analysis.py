@@ -175,7 +175,7 @@ class TestAnalyzer:
         # 9. Check for accused_type vs type confusion
         if sql and any(kw in q_lower for kw in ['accused type', 'accused role', 'peddler', 'supplier', 'consumer']):
             if 'bfa.type' in sql or 'a.type' in sql or 'accused.type' in sql:
-                if 'bfa.accused_type' not in sql and 'brief_facts_accused.accused_type' not in sql:
+                if 'bfa.accused_type' not in sql and 'brief_facts_ai.accused_type' not in sql:
                     self.issues['wrong_accused_type_column'].append({
                         'id': qid,
                         'question': question,

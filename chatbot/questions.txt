@@ -80,7 +80,7 @@
 49. Show persons with their domicile classification
 
 # ============================================================================
-# 3. DRUG SEIZURE QUERIES (PostgreSQL - brief_facts_drugs table)
+# 3. DRUG SEIZURE QUERIES (PostgreSQL - brief_facts_ai_drug_flat table)
 # ============================================================================
 
 ## Basic Drug Queries
@@ -107,7 +107,7 @@
 64. List drugs by drug category
 65. Find drugs by drug schedule
 66. Show drugs by scientific name
-67. List drugs by brand name (use drug_name from brief_facts_drugs or nature from properties as brand name alternatives)
+67. List drugs by brand name (use primary_drug_name from brief_facts_ai_drug_flat or nature from properties as brand name alternatives)
 68. Find drugs by drug schedule classification
 
 # ============================================================================

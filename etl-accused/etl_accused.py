@@ -1668,6 +1668,8 @@ class AccusedETL:
         failed_ids = []
         failed_reasons = {}
         duplicates_in_chunk = []
+        # crime_ids of newly inserted accused rows — used to invalidate Branch C logs
+        inserted_crime_ids = set()
         
         # Track accused_ids seen in this chunk to detect duplicates (for reporting only, not skipping)
         seen_accused_ids = {}
@@ -1742,6 +1744,9 @@ class AccusedETL:
                         if operation == 'inserted':
                             if accused_id not in inserted_ids:
                                 inserted_ids.append(accused_id)
+                            cid = res.get('crime_id')
+                            if cid:
+                                inserted_crime_ids.add(cid)
                         elif operation == 'updated':
                             updated_ids.append(accused_id)
                         elif operation == 'no_change':
@@ -1767,6 +1772,21 @@ class AccusedETL:
         
         logger.info(f"✅ Completed: {chunk_range} - Inserted: {len(inserted_ids)}, Updated: {len(updated_ids)}, No Change: {len(no_change_ids)}, Failed: {len(failed_ids)}, Duplicates: {len(duplicates_in_chunk)}")
         logger.trace(f"Chunk processing complete for {chunk_range}")
+
+        # Invalidate Branch C processing-log entries for crimes that now have real
+        # accused records.  Brief_facts_ai will re-run those crimes on its next batch,
+        # promoting the LLM-only rows to proper Branch A/B rows with relational identity.
+        if inserted_crime_ids:
+            try:
+                from brief_facts_accused.db import invalidate_branch_c_log_for_crimes
+                with self.db_pool.get_connection_context() as _inv_conn:
+                    invalidate_branch_c_log_for_crimes(_inv_conn, list(inserted_crime_ids))
+                    _inv_conn.commit()
+            except Exception as _inv_err:
+                logger.warning(
+                    f"Branch C invalidation skipped for chunk {chunk_range}: {_inv_err} "
+                    "(non-fatal — brief_facts_ai will re-detect via date_modified)"
+                )
 
     def write_log_summaries(self):
         """Write summary sections to log files"""

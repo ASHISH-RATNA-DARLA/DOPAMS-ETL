@@ -315,6 +315,10 @@ class DrugExtraction(BaseModel):
         default="individual",
         description="Scope of seizure_worth: 'individual' (per accused-drug), 'drug_total' (total for this drug type), 'overall_total' (total for all drugs)"
     )
+    supplier_name: Optional[str] = None
+    source_location: Optional[str] = None
+    destination: Optional[str] = None
+    purchase_price_per_unit: Optional[float] = None
     extraction_metadata: dict = Field(default_factory=dict)
 
     # Calculated measurement fields
@@ -429,12 +433,16 @@ R22:brand-names|extract brands as generic names: Spasmo Proxyvon/Spasmo-Proxylon
 R23:cannabis-edibles|chocolates/cookies/brownies/laddoos or any food described as cannabis/ganja/bhang-infused are valid NDPS seizures|extract with an appropriate edible form name (e.g. "Ganja Chocolates")|drug_form=count if pieces, solid if bulk weight|NEVER skip edibles
 R24:precursors|acetic anhydride, ephedrine, pseudoephedrine, phenylacetic acid, and other NDPS Table I/II precursors are extractable|primary_drug_name must be the chemical name exactly|do NOT confuse with cutting agents (sugar, starch)
 R25:source-sentence|extraction_metadata.source_sentence MUST be the verbatim sentence/clause that contains the drug mention|never summarize|if quantity spans two sentences, include both verbatim
+R26:supplier-name|if text says accused "purchased from X" or "brought from X"→set supplier_name=X|extract only the SUPPLIER (person they bought from), NOT the accused themselves|if no supplier mentioned→null
+R27:source-location|if text explicitly names a city/state/country as origin of drugs (e.g. "brought from Goa"→"Goa", "from Delhi supplier"→"Delhi")→set source_location|only when PLACE is explicitly named|if not present→null
+R28:destination|if text states intended delivery city/location (e.g. "to be sold in Hyderabad")→set destination|only when EXPLICIT→null if not mentioned
+R29:purchase-price|if text states "purchased for Rs.X per packet/kg" or "bought at Rs.X"→set purchase_price_per_unit=X (float rupees per unit)|this is NOT seizure_worth|if not mentioned→null
 
 ## Drug Name Instruction
 Use your training knowledge to identify the drug. Set primary_drug_name to the correct pharmacological or NDPS standard name (e.g. "Ganja", "Heroin", "Alprazolam", "Tramadol", "Charas", "Methamphetamine", "Cocaine", "Opium"). Do NOT write vague terms like "tablet", "powder", "contraband", "narcotic" as the primary_drug_name — use the actual drug name. If the drug is genuinely unidentifiable, use the capitalized raw text from the FIR. Post-processing will standardise names against the verified drug database — your job is to extract every drug present.
 
 ## Output Schema
-{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
+{{{{ "drugs": [ {{{{ "raw_drug_name":str, "raw_quantity":float, "raw_unit":str, "primary_drug_name":str, "drug_form":"solid|liquid|count", "seizure_worth":float, "worth_scope":"individual|drug_total|overall_total", "is_commercial":bool, "confidence_score":int, "supplier_name":str, "source_location":str, "destination":str, "purchase_price_per_unit":float, "extraction_metadata":{{{{ "source_sentence":str }}}} }}}} ] }}}}
 
 ## Examples
 ### Example 1 — per-accused with individual worth, commercial mentioned in text

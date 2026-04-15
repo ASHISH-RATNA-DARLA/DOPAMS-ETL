@@ -266,17 +266,17 @@ CRIME_DOMAIN_PATTERNS = {
 CRIME_DOMAIN_FIELD_MAPPINGS = {
     # ========== PERSON ATTRIBUTES ==========
     CrimeDomainEntityType.AGE: {
-        'v2': ['age'],  # persons, brief_facts_accused
+        'v2': ['age'],  # persons, brief_facts_ai
         'v1': ['AGE'],  # fir_records
     },
     
     CrimeDomainEntityType.GENDER: {
-        'v2': ['gender'],  # persons, brief_facts_accused
+        'v2': ['gender'],  # persons, brief_facts_ai
         'v1': ['GENDER'],  # fir_records
     },
     
     CrimeDomainEntityType.OCCUPATION: {
-        'v2': ['occupation'],  # persons, brief_facts_accused
+        'v2': ['occupation'],  # persons, brief_facts_ai
         'v1': ['ACCUSED_OCCUPATION', 'INT_FATHER_OCCUPATION', 'INT_MOTHER_OCCUPATION'],
     },
     
@@ -348,32 +348,32 @@ CRIME_DOMAIN_FIELD_MAPPINGS = {
     
     # ========== DRUG ATTRIBUTES ==========
     CrimeDomainEntityType.DRUG_NAME: {
-        'v2': ['drug_name', 'scientific_name', 'brand_name'],  # brief_facts_drugs
+        'v2': ['drug_name', 'scientific_name', 'brand_name'],  # brief_facts_ai_drug_flat
         'v1': ['DRUG_DESC', 'DRUG_TYPE'],  # fir_records
     },
     
     CrimeDomainEntityType.DRUG_CATEGORY: {
-        'v2': ['drug_category'],  # brief_facts_drugs
+        'v2': ['drug_category'],  # brief_facts_ai_drug_flat
         'v1': ['DRUG_TYPE'],  # fir_records
     },
     
     CrimeDomainEntityType.DRUG_SCHEDULE: {
-        'v2': ['drug_schedule'],  # brief_facts_drugs
+        'v2': ['drug_schedule'],  # brief_facts_ai_drug_flat
         'v1': [],  # Not in V1
     },
     
     CrimeDomainEntityType.DRUG_QUANTITY: {
-        'v2': ['total_quantity', 'quantity_numeric', 'quantity_unit'],  # brief_facts_drugs
+        'v2': ['total_quantity', 'quantity_numeric', 'quantity_unit'],  # brief_facts_ai_drug_flat
         'v1': ['WEIGHT_GM', 'WEIGHT_KG'],  # fir_records
     },
     
     CrimeDomainEntityType.SEIZURE_WORTH: {
-        'v2': ['seizure_worth', 'street_value', 'street_value_numeric'],  # brief_facts_drugs
+        'v2': ['seizure_worth', 'street_value', 'street_value_numeric'],  # brief_facts_ai_drug_flat
         'v1': ['ESTIMATED_VALUE'],  # fir_records
     },
     
     CrimeDomainEntityType.COMMERCIAL_QUANTITY: {
-        'v2': ['is_commercial', 'commercial_quantity'],  # brief_facts_drugs
+        'v2': ['is_commercial', 'commercial_quantity'],  # brief_facts_ai_drug_flat
         'v1': [],  # Not explicitly in V1
     },
     
@@ -523,22 +523,22 @@ CRIME_DOMAIN_FIELD_MAPPINGS = {
     
     # ========== ACCUSED TYPE ==========
     CrimeDomainEntityType.ACCUSED_TYPE: {
-        'v2': ['accused_type'],  # brief_facts_accused (peddler, consumer, supplier, etc.)
+        'v2': ['accused_type'],  # brief_facts_ai (peddler, consumer, supplier, etc.)
         'v1': [],
     },
     
     CrimeDomainEntityType.ACCUSED_STATUS: {
-        'v2': ['status'],  # brief_facts_accused
+        'v2': ['status'],  # brief_facts_ai
         'v1': [],
     },
     
     CrimeDomainEntityType.IS_CCL: {
-        'v2': ['is_ccl'],  # accused, brief_facts_accused
+        'v2': ['is_ccl'],  # accused, brief_facts_ai
         'v1': [],
     },
     
     CrimeDomainEntityType.ROLE_IN_CRIME: {
-        'v2': ['role_in_crime'],  # brief_facts_accused
+        'v2': ['role_in_crime'],  # brief_facts_ai
         'v1': [],
     },
 }

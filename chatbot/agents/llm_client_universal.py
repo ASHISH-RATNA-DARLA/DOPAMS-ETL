@@ -296,8 +296,8 @@ class UniversalLLMClient:
         
         # ⚠️ CRITICAL: Detect commercial quantity queries
         if any(kw in message_lower for kw in ['commercial quantity', 'commercial drug', 'commercial case', 'is commercial']):
-            hints.append("⚠️ CRITICAL: User asked for commercial quantity drug cases! Use brief_facts_drugs.is_commercial = true (BOOLEAN field)!")
-            hints.append("Example: WHERE d.is_commercial = true (NOT WHERE d.total_quantity LIKE '%commercial%' - that's wrong!)")
+            hints.append("⚠️ CRITICAL: User asked for commercial quantity drug cases! Use brief_facts_ai_drug_flat.is_commercial = true (BOOLEAN field)!")
+            hints.append("Example: WHERE d.is_commercial = true (NOT WHERE d.raw_quantity LIKE '%commercial%' - that's wrong!)")
         
         # ⚠️ CRITICAL: Handle queries asking for "information about" fields (don't filter by NOT NULL)
         info_about_keywords = [
@@ -355,11 +355,11 @@ class UniversalLLMClient:
             # Add hints for each table
             for table, cols in columns_by_table.items():
                 table_alias = {
-                    'brief_facts_drugs': 'd',
+                    'brief_facts_ai_drug_flat': 'd',
                     'properties': 'pr',
                     'persons': 'p',
                     'crimes': 'c',
-                    'brief_facts_accused': 'bfa',
+                    'brief_facts_ai': 'bfa',
                     'accused': 'a',
                     'hierarchy': 'h'
                 }.get(table, table[:1])
@@ -370,8 +370,8 @@ class UniversalLLMClient:
         
         # ⚠️ CRITICAL: Detect drug supply chain/seizure queries - must use BOTH tables!
         if any(kw in message_lower for kw in ['drug supply chain', 'supply chain', 'drug seizure', 'drug information', 'drug details']):
-            hints.append("⚠️ CRITICAL: User asked about drugs! MUST JOIN BOTH brief_facts_drugs AND properties tables!")
-            hints.append("Include: d.supply_chain, d.source_location, d.destination, d.transport_method from brief_facts_drugs")
+            hints.append("⚠️ CRITICAL: User asked about drugs! MUST JOIN BOTH brief_facts_ai_drug_flat AND properties tables!")
+            hints.append("Include: d.supply_chain, d.source_location, d.destination, d.transport_method from brief_facts_ai_drug_flat")
             hints.append("Include: pr.nature, pr.category, pr.particular_of_property, pr.property_status, pr.estimate_value from properties")
             hints.append("Use correct column names: pr.nature (NOT pr.property_type!), pr.particular_of_property (NOT pr.property_description!)")
         
@@ -390,10 +390,10 @@ class UniversalLLMClient:
         # ⚠️ CRITICAL: Brand name queries - use drug_name or properties.nature as alternatives
         if any(kw in message_lower for kw in ['brand name', 'by brand', 'brand']):
             hints.append("⚠️ CRITICAL: User asked about brand name!")
-            hints.append("⚠️ NOTE: brand_name column in brief_facts_drugs is mostly empty (0% populated)")
-            hints.append("✅ USE ALTERNATIVES: Use drug_name from brief_facts_drugs OR nature from properties table as brand name alternatives")
-            hints.append("✅ CORRECT: SELECT d.drug_name as brand_name, pr.nature as property_brand FROM brief_facts_drugs d LEFT JOIN properties pr ON d.crime_id = pr.crime_id")
-            hints.append("✅ GROUP BY: Use GROUP BY d.drug_name or GROUP BY pr.nature to list drugs by brand/name")
+            hints.append("⚠️ NOTE: brand_name column in brief_facts_ai_drug_flat is mostly empty (0% populated)")
+            hints.append("✅ USE ALTERNATIVES: Use primary_drug_name from brief_facts_ai_drug_flat OR nature from properties table as brand name alternatives")
+            hints.append("✅ CORRECT: SELECT d.primary_drug_name as brand_name, pr.nature as property_brand FROM brief_facts_ai_drug_flat d LEFT JOIN properties pr ON d.crime_id = pr.crime_id")
+            hints.append("✅ GROUP BY: Use GROUP BY d.primary_drug_name or GROUP BY pr.nature to list drugs by brand/name")
         
         # ⚠️ CRITICAL: Detect "pending cases" queries - map to actual case_status values
         if any(kw in message_lower for kw in ['pending cases', 'pending', 'list pending', 'show pending']):
@@ -547,8 +547,8 @@ class UniversalLLMClient:
         
         # Detect accused role/type queries
         if any(kw in message_lower for kw in ['accused role', 'accused type', 'by accused role', 'by accused type', 'accused involvement', 'involvement patterns']):
-            hints.append("⚠️ CRITICAL: User asked about accused role/type/involvement! Use brief_facts_accused.accused_type column (NOT type, NOT role_in_crime)!")
-            hints.append("⚠️ CRITICAL JOIN ORDER: JOIN accused a FIRST, THEN JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id")
+            hints.append("⚠️ CRITICAL: User asked about accused role/type/involvement! Use brief_facts_ai.accused_type column (NOT type, NOT role_in_crime)!")
+            hints.append("⚠️ CRITICAL JOIN ORDER: JOIN accused a FIRST, THEN JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id")
             hints.append("⚠️ CRITICAL: Column name is accused_type (NOT type!)")
             hints.append("⚠️ CRITICAL: When user mentions 'peddler', 'supplier', etc. in context of accused type/involvement → Use bfa.accused_type, NOT persons.alias or accused.type!")
             # Check for specific role types
@@ -560,7 +560,7 @@ class UniversalLLMClient:
                 hints.append("Example roles: peddler, consumer, organizer_kingpin, supplier, manufacturer, processor, harbourer")
                 hints.append(f"❌ WRONG: WHERE a.person_id IN (SELECT person_id FROM persons WHERE alias_name ILIKE '%{detected_role}%') - alias_name doesn't exist!")
                 hints.append(f"❌ WRONG: WHERE a.person_id IN (SELECT person_id FROM accused WHERE type = '{detected_role}') - accused has NO type column!")
-                hints.append(f"✅ CORRECT: WHERE bfa.accused_type ILIKE '%{detected_role}%' (after joining brief_facts_accused!)")
+                hints.append(f"✅ CORRECT: WHERE bfa.accused_type ILIKE '%{detected_role}%' (after joining brief_facts_ai!)")
             else:
                 # User wants GROUP BY to see all roles
                 hints.append("Use GROUP BY bfa.accused_type to show all roles with counts")
@@ -575,7 +575,7 @@ class UniversalLLMClient:
             hints.append("⭐ COMPLEXITY: Unique person/deduplication query. Consider person_deduplication_tracker table if available. Otherwise use GROUP BY with HAVING COUNT > 1.")
         
         if any(kw in message_lower for kw in ['complete', 'all details', 'everything', 'full profile', 'comprehensive']):
-            hints.append("⭐ COMPLEXITY: Multi-table comprehensive query. Join ALL related tables: crimes + accused + persons + properties + brief_facts_drugs + hierarchy + brief_facts_crime_summaries.")
+            hints.append("⭐ COMPLEXITY: Multi-table comprehensive query. Join ALL related tables: crimes + accused + persons + properties + brief_facts_ai_drug_flat + hierarchy + brief_facts_crime_summaries.")
         
         if any(kw in message_lower for kw in ['statistics', 'trend', 'analysis', 'compare', 'distribution']):
             hints.append("⭐ COMPLEXITY: Statistical/analytical query. Use aggregations (COUNT, SUM, AVG) with GROUP BY. Consider temporal grouping (DATE_TRUNC) for trends.")
@@ -643,14 +643,14 @@ class UniversalLLMClient:
 - firs, advanced_search_firs, fir (TABLES DON'T EXIST! Use 'crimes' table for FIR/crime records!)
 - f.crimeRegDate (use c.fir_date from crimes table!)
 - p.alias_name (persons has 'alias' NOT 'alias_name'! Use p.alias or bfa.alias_name!)
-- p.phone_numbers (persons has 'phone_number' singular! brief_facts_accused has 'phone_numbers' plural!)
-- accused.type (accused table has NO 'type' column! For accused type → use brief_facts_accused.accused_type!)
-- persons.alias_name (persons table has 'alias' NOT 'alias_name'! For accused type queries → use brief_facts_accused.accused_type, NOT persons.alias!)
+- p.phone_numbers (persons has 'phone_number' singular! brief_facts_ai has 'phone_numbers' plural!)
+- accused.type (accused table has NO 'type' column! For accused type → use brief_facts_ai.accused_type!)
+- persons.alias_name (persons table has 'alias' NOT 'alias_name'! For accused type queries → use brief_facts_ai.accused_type, NOT persons.alias!)
 - pr.property_type (properties table has NO property_type! Use pr.nature instead!)
 - pr.property_description (properties table has NO property_description! Use pr.particular_of_property instead!)
-- d.quantity (brief_facts_drugs has NO quantity! Use d.total_quantity or d.quantity_numeric instead!)
-- d.total_quantity LIKE '%commercial%' (WRONG! For commercial quantity → use d.is_commercial = true, NOT text search!)
-- bfa.type (brief_facts_accused has NO 'type' column! Use bfa.accused_type instead!)
+- d.quantity (brief_facts_ai_drug_flat has NO quantity! Use d.raw_quantity or d.raw_quantity instead!)
+- d.raw_quantity LIKE '%commercial%' (WRONG! For commercial quantity → use d.is_commercial = true, NOT text search!)
+- bfa.type (brief_facts_ai has NO 'type' column! Use bfa.accused_type instead!)
 - bfa.role_in_crime (for accused role/type queries - this is DIFFERENT! Use bfa.accused_type for role/type!)
 
 ❌ WRONG COLUMNS FOR ACTS/SECTIONS:
@@ -678,18 +678,18 @@ class UniversalLLMClient:
    - For accused information, use accused.accused_id
    - accused table has: physical data (height, build, color, hair, eyes, face, nose, beard, mustache, mole, is_ccl)
    - persons table has: personal data (name, age, gender, phone, email, address)
-   - ⚠️ IMPORTANT: If data not found in accused or persons tables, check brief_facts_accused table!
-   - brief_facts_accused has: role_in_crime, accused_type, status, key_details, address, phone_numbers
+   - ⚠️ IMPORTANT: If data not found in accused or persons tables, check brief_facts_ai table!
+   - brief_facts_ai has: role_in_crime, accused_type, status, key_details, address, phone_numbers
    - Example: WHERE a.accused_id = '...' or JOIN accused a ON ...
-   - Fallback: LEFT JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+   - Fallback: LEFT JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 
 4. DRUG-RELATED QUERIES → Use column: crime_id (in BOTH tables!)
    - For drug information, MUST use crime_id in BOTH:
      * properties table (join by crime_id)
-     * brief_facts_drugs table (join by crime_id)
+     * brief_facts_ai_drug_flat table (join by crime_id)
    - ⚠️ CRITICAL: Always JOIN BOTH tables for complete drug information!
    - Example: 
-     LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+     LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
      LEFT JOIN properties pr ON c.crime_id = pr.crime_id
 
 5. HIERARCHY/POLICE STATION QUERIES → Use column: ps_code
@@ -707,8 +707,8 @@ class UniversalLLMClient:
 ✅ TABLE RELATIONSHIPS SUMMARY:
 - Crime details: crimes table (primary) + brief_facts_crime_summaries (join by crime_id for summary_text)
 - Person details: persons table (primary) via person_id
-- Accused info: accused table (accused_id) + persons (person_id) + brief_facts_accused (fallback)
-- Drugs: brief_facts_drugs (join by crime_id) + properties (join by crime_id) - BOTH required!
+- Accused info: accused table (accused_id) + persons (person_id) + brief_facts_ai (fallback)
+- Drugs: brief_facts_ai_drug_flat (join by crime_id) + properties (join by crime_id) - BOTH required!
 - Properties: properties table (join by crime_id) - has nature, category, particular_of_property, property_status, estimate_value
 - Hierarchy: hierarchy table (join via ps_code from crimes) - has ps_name, dist_name, circle_name, zone_name
 
@@ -719,7 +719,7 @@ class UniversalLLMClient:
 - crimes.fir_date (for date filtering - NOT crimeRegDate!)
 - crimes.crime_id (primary key - use for exact match)
 - persons.phone_number (singular!)
-- brief_facts_accused.phone_numbers (plural!)
+- brief_facts_ai.phone_numbers (plural!)
 - crimes.ps_code (NOT police_station!)
 - crimes.major_head (NOT crime_head!)
 - crimes.minor_head (NOT crime_group!)
@@ -732,14 +732,14 @@ class UniversalLLMClient:
 - properties.particular_of_property (property description - NOT property_description!)
 - properties.property_status (status: Seized, Recovered, etc.)
 - properties.estimate_value (estimated value)
-- brief_facts_drugs.total_quantity (drug quantity - NOT quantity!)
-- brief_facts_drugs.quantity_numeric (numeric quantity)
+- brief_facts_ai_drug_flat.total_quantity (drug quantity - NOT quantity!)
+- brief_facts_ai_drug_flat.quantity_numeric (numeric quantity)
 
 ✅ SEARCH ALL RELEVANT COLUMNS FOR EACH TYPE (CRITICAL!):
 
 NAME SEARCH → Check ALL name columns:
 - persons.full_name, persons.name, persons.surname, persons.alias
-- brief_facts_accused.full_name, brief_facts_accused.alias_name
+- brief_facts_ai.full_name, brief_facts_ai.alias_name
 
 LOCATION SEARCH → Check ALL location columns:
 - hierarchy.ps_name, hierarchy.dist_name, hierarchy.circle_name, hierarchy.zone_name
@@ -749,12 +749,12 @@ LOCATION SEARCH → Check ALL location columns:
 
 PHONE SEARCH → Check ALL phone columns:
 - persons.phone_number (singular!)
-- brief_facts_accused.phone_numbers (plural!)
+- brief_facts_ai.phone_numbers (plural!)
 
 ADDRESS SEARCH → Check ALL address columns:
 - persons.present_house_no, present_street_road_no, present_ward_colony
 - persons.permanent_house_no, permanent_street_road_no, permanent_ward_colony
-- brief_facts_accused.address
+- brief_facts_ai.address
 
 STATUS SEARCH → Check ALL status columns:
 - crimes.case_status (Pending, Closed, etc.)
@@ -766,11 +766,11 @@ DATE SEARCH → Check ALL date columns:
 - properties.date_of_seizure
 
 DRUG SEARCH → Check ALL drug columns:
-- brief_facts_drugs.drug_name, scientific_name, brand_name
-- brief_facts_drugs.drug_category, drug_schedule
-- brief_facts_drugs.is_commercial (BOOLEAN - true for commercial quantity cases!)
-- brief_facts_drugs.commercial_quantity (text field with commercial quantity value)
-- brief_facts_drugs.total_quantity, quantity_numeric (actual quantity values)
+- brief_facts_ai_drug_flat.drug_name, scientific_name, brand_name
+- brief_facts_ai_drug_flat.drug_category, drug_schedule
+- brief_facts_ai_drug_flat.is_commercial (BOOLEAN - true for commercial quantity cases!)
+- brief_facts_ai_drug_flat.commercial_quantity (text field with commercial quantity value)
+- brief_facts_ai_drug_flat.total_quantity, quantity_numeric (actual quantity values)
 
 CRITICAL PRINCIPLE: Whatever user searches → check ALL related columns with OR!
 
@@ -853,21 +853,21 @@ GROUP BY pr.property_status
 ORDER BY total_crimes DESC
 LIMIT 100
 
-0e. "Find crimes by accused role peddler" (using accused_type from brief_facts_accused):
+0e. "Find crimes by accused role peddler" (using accused_type from brief_facts_ai):
 SELECT c.crime_id, c.fir_num, c.crime_type, c.case_status, h.ps_name, bfa.accused_type
 FROM crimes c
 JOIN accused a ON c.crime_id = a.crime_id
-JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE bfa.accused_type ILIKE '%peddler%'
 ORDER BY c.fir_date DESC
 LIMIT 100
 
-0e2. "Find crimes by accused role supplier" (using accused_type from brief_facts_accused):
+0e2. "Find crimes by accused role supplier" (using accused_type from brief_facts_ai):
 SELECT c.crime_id, c.fir_num, c.crime_type, c.case_status, h.ps_name, bfa.accused_type
 FROM crimes c
 JOIN accused a ON c.crime_id = a.crime_id
-JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE bfa.accused_type ILIKE '%supplier%'
 ORDER BY c.fir_date DESC
@@ -877,7 +877,7 @@ LIMIT 100
 SELECT bfa.accused_type, COUNT(*) as total_crimes
 FROM crimes c
 JOIN accused a ON c.crime_id = a.crime_id
-JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 GROUP BY bfa.accused_type
 ORDER BY total_crimes DESC
 LIMIT 100
@@ -885,7 +885,7 @@ LIMIT 100
 0g. "Get accused type distributions" (count based on accused_type):
 SELECT bfa.accused_type, COUNT(*) as count
 FROM accused a
-JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 GROUP BY bfa.accused_type
 ORDER BY count DESC
 LIMIT 100
@@ -895,7 +895,7 @@ SELECT c.crime_id, c.fir_num, c.crime_type, c.case_status, c.fir_date, h.ps_name
        bfa.accused_type, bfa.role_in_crime, bfa.status, bfa.key_details
 FROM crimes c
 JOIN accused a ON c.crime_id = a.crime_id
-JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE bfa.accused_type ILIKE '%peddler%'
 ORDER BY c.fir_date DESC
@@ -908,31 +908,31 @@ SELECT DATE_TRUNC('month', c.fir_date) AS month,
        bfa.accused_type
 FROM crimes c
 JOIN accused a ON c.crime_id = a.crime_id
-JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
 WHERE bfa.accused_type ILIKE '%peddler%'
 GROUP BY DATE_TRUNC('month', c.fir_date), bfa.accused_type
 ORDER BY month DESC
 LIMIT 100
 
 ⚠️⚠️⚠️ CRITICAL FOR ACCUSED ROLE/TYPE QUERIES: ⚠️⚠️⚠️
-- User says "accused role" or "accused type" → Use bfa.accused_type from brief_facts_accused table!
+- User says "accused role" or "accused type" → Use bfa.accused_type from brief_facts_ai table!
 - ⚠️ CRITICAL: Column name is accused_type (NOT type, NOT role_in_crime!)
-- brief_facts_accused.accused_type contains values like: peddler, consumer, organizer_kingpin, supplier, manufacturer, processor, harbourer
-- brief_facts_accused.role_in_crime is a DIFFERENT field (role in the crime, NOT accused type)
+- brief_facts_ai.accused_type contains values like: peddler, consumer, organizer_kingpin, supplier, manufacturer, processor, harbourer
+- brief_facts_ai.role_in_crime is a DIFFERENT field (role in the crime, NOT accused type)
 - For "Find crimes by accused role X" (where X = peddler, supplier, etc.) → WHERE bfa.accused_type ILIKE '%X%'
 - For "Get crimes by accused role" (no specific role) → GROUP BY bfa.accused_type
-- ⚠️ CRITICAL JOIN ORDER: JOIN accused FIRST, THEN JOIN brief_facts_accused!
+- ⚠️ CRITICAL JOIN ORDER: JOIN accused FIRST, THEN JOIN brief_facts_ai!
   ✅ CORRECT ORDER:
     1. FROM crimes c
     2. JOIN accused a ON c.crime_id = a.crime_id
-    3. JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
+    3. JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id AND a.crime_id = bfa.crime_id
   ❌ WRONG: Don't reference bfa before it's joined!
 - ⚠️ CRITICAL: Use bfa.accused_type (NOT bfa.type - that column doesn't exist!)
 - ⚠️ CRITICAL: When user mentions "peddler", "supplier", "consumer", etc. in context of "accused involvement patterns" or "accused type" → Filter by bfa.accused_type!
 - ❌ WRONG: WHERE a.person_id IN (SELECT person_id FROM persons WHERE alias_name ILIKE '%peddler%') (alias_name doesn't exist! Use alias, not alias_name!)
 - ❌ WRONG: WHERE a.person_id IN (SELECT person_id FROM accused WHERE type = 'peddler') (accused table has NO type column!)
-- ✅ CORRECT: WHERE bfa.accused_type ILIKE '%peddler%' (after joining brief_facts_accused!)
-- ⚠️ CRITICAL: "accused involvement patterns" means patterns in brief_facts_accused table (role_in_crime, accused_type, status, key_details)!
+- ✅ CORRECT: WHERE bfa.accused_type ILIKE '%peddler%' (after joining brief_facts_ai!)
+- ⚠️ CRITICAL: "accused involvement patterns" means patterns in brief_facts_ai table (role_in_crime, accused_type, status, key_details)!
 
 CRITICAL: If user doesn't specify WHICH police station, show ALL with counts!
 NEVER use placeholder values like 'PS1', 'PS2'!
@@ -946,7 +946,7 @@ CRITICAL: "by accused role" = GROUP BY bfa.accused_type (NOT WHERE filter, unles
 SELECT DISTINCT p.full_name, p.phone_number, bfa.age, bfa.address
 FROM accused a
 JOIN persons p ON a.person_id = p.person_id
-LEFT JOIN brief_facts_accused bfa ON a.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON a.person_id = bfa.person_id
 WHERE a.crime_id = '62d566cec779cf34511b6c01'
 
 2. Get COMPLETE crime details (ALL fields, summary, people):
@@ -970,7 +970,7 @@ LIMIT 1
 SELECT DISTINCT p.full_name, p.name, p.surname, p.alias, bfa.alias_name, p.phone_number
 FROM persons p
 LEFT JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 WHERE p.full_name ILIKE '%devakumari%' 
    OR p.name ILIKE '%devakumari%'
    OR p.surname ILIKE '%devakumari%'
@@ -983,7 +983,7 @@ LIMIT 100
 SELECT DISTINCT p.full_name, p.alias, bfa.alias_name, p.phone_number
 FROM persons p
 LEFT JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 WHERE p.full_name ILIKE '%rajendra prasad%' 
    OR p.name ILIKE '%rajendra%'
    OR p.surname ILIKE '%prasad%'
@@ -1012,9 +1012,9 @@ WHERE p.full_name ILIKE '%devakumari%'
 6. Get drug/property details for crime (COMPREHENSIVE - BOTH tables!):
 SELECT c.crime_id, c.fir_num, c.crime_type, c.case_status, c.fir_date,
        h.ps_name, h.dist_name,
-       -- ALL drug columns from brief_facts_drugs
-       d.drug_name, d.scientific_name, d.brand_name, d.drug_category, d.drug_schedule,
-       d.total_quantity, d.quantity_unit, d.quantity_numeric, d.number_of_packets,
+       -- ALL drug columns from brief_facts_ai_drug_flat
+       d.primary_drug_name, d.scientific_name, d.brand_name, d.drug_category, d.drug_schedule,
+       d.raw_quantity, d.quantity_unit, d.raw_quantity, d.number_of_packets,
        d.weight_breakdown, d.packaging_details,
        d.source_location, d.destination, d.transport_method, d.supply_chain,
        d.seizure_location, d.seizure_time, d.seizure_method, d.seizure_officer,
@@ -1025,18 +1025,18 @@ SELECT c.crime_id, c.fir_num, c.crime_type, c.case_status, c.fir_date,
        pr.recovered_from, pr.place_of_recovery, pr.date_of_seizure, pr.belongs
 FROM crimes c
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
-LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
 LEFT JOIN properties pr ON c.crime_id = pr.crime_id
 WHERE c.crime_id = '62ee3e7427b4412144d7cf48'
 
 ⚠️⚠️⚠️ CRITICAL FOR DRUG QUERIES: ⚠️⚠️⚠️
-- When user asks about drugs, supply chain, seizures → ALWAYS JOIN BOTH brief_facts_drugs AND properties!
-- brief_facts_drugs has: drug_name, supply_chain, source_location, destination, transport_method, etc.
+- When user asks about drugs, supply chain, seizures → ALWAYS JOIN BOTH brief_facts_ai_drug_flat AND properties!
+- brief_facts_ai_drug_flat has: drug_name, supply_chain, source_location, destination, transport_method, etc.
 - properties has: nature, category, particular_of_property, property_status, estimate_value, etc.
 - Both tables link via crime_id - use LEFT JOIN for both!
-- ⚠️ CRITICAL JOIN CONDITION: brief_facts_drugs links to crimes via crime_id, NOT drug_id!
-- ✅ CORRECT: LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
-- ❌ WRONG: LEFT JOIN brief_facts_drugs d ON c.crime_id = d.drug_id (drug_id does NOT exist!)
+- ⚠️ CRITICAL JOIN CONDITION: brief_facts_ai_drug_flat links to crimes via crime_id, NOT drug_id!
+- ✅ CORRECT: LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
+- ❌ WRONG: LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.drug_id (drug_id does NOT exist!)
 - User says "drug supply chain" → Include d.supply_chain, d.source_location, d.destination, d.transport_method
 - User says "drug seizures" → Include BOTH drug details (d.*) AND property details (pr.*)
 - NEVER use wrong column names: pr.property_type (use pr.nature!), pr.property_description (use pr.particular_of_property!)
@@ -1046,18 +1046,18 @@ SELECT DISTINCT c.crime_id, c.fir_num, c.crime_type, c.case_status, c.fir_date,
        h.ps_name, h.dist_name,
        pr.property_id, pr.property_status, pr.nature, pr.category, 
        pr.particular_of_property, pr.estimate_value, pr.date_of_seizure,
-       d.drug_name, d.drug_category, d.total_quantity, d.street_value, 
+       d.primary_drug_name, d.drug_category, d.raw_quantity, d.street_value, 
        d.seizure_worth, d.is_commercial
 FROM crimes c
 JOIN properties pr ON c.crime_id = pr.crime_id
-LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 ORDER BY c.fir_date DESC
 LIMIT 100
 
 CRITICAL: For property seizures:
 - Use JOIN properties (not LEFT JOIN) to show ONLY crimes WITH properties
-- Include brief_facts_drugs for drug-related property seizures
+- Include brief_facts_ai_drug_flat for drug-related property seizures
 - Show property details: property_status, nature, category, particular_of_property, estimate_value
 - Show drug details: drug_name, drug_category, total_quantity, street_value, seizure_worth
 - Link via crime_id in both tables
@@ -1068,11 +1068,11 @@ SELECT DISTINCT c.crime_id, c.fir_num, c.crime_type, c.case_status, c.fir_date,
        h.ps_name, h.dist_name,
        pr.property_id, pr.property_status, pr.nature, pr.category, 
        pr.particular_of_property, pr.estimate_value, pr.date_of_seizure,
-       d.drug_name, d.drug_category, d.total_quantity, d.street_value, 
+       d.primary_drug_name, d.drug_category, d.raw_quantity, d.street_value, 
        d.seizure_worth, d.is_commercial
 FROM crimes c
 JOIN properties pr ON c.crime_id = pr.crime_id
-LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE pr.property_status ILIKE '%seized%'
 ORDER BY c.fir_date DESC
@@ -1109,7 +1109,7 @@ LIMIT 100
 SELECT DISTINCT p.full_name, p.phone_number, bfa.phone_numbers, p.email_id
 FROM persons p
 LEFT JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 WHERE p.phone_number ILIKE '%9876543210%'
    OR bfa.phone_numbers ILIKE '%9876543210%'
 LIMIT 100
@@ -1128,11 +1128,11 @@ LIMIT 100
 ✅ CORRECT: WHERE c.case_status IN ('UI', 'PT') OR c.case_status IS NULL
 
 11. Search DRUGS (Check ALL drug-related columns!):
-SELECT DISTINCT c.crime_id, c.fir_num, d.drug_name, d.scientific_name, d.brand_name, 
+SELECT DISTINCT c.crime_id, c.fir_num, d.primary_drug_name, d.scientific_name, d.brand_name, 
                 d.drug_category, d.drug_schedule, d.seizure_worth
 FROM crimes c
-JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
-WHERE d.drug_name ILIKE '%ganja%'
+JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
+WHERE d.primary_drug_name ILIKE '%ganja%'
    OR d.scientific_name ILIKE '%ganja%'
    OR d.brand_name ILIKE '%ganja%'
    OR d.drug_category ILIKE '%ganja%'
@@ -1141,10 +1141,10 @@ LIMIT 100
 11b. Get COMMERCIAL QUANTITY drug cases (CRITICAL - use is_commercial boolean!):
 SELECT DISTINCT c.crime_id, c.fir_num, c.crime_type, c.case_status, c.fir_date,
        h.ps_name, h.dist_name,
-       d.drug_name, d.drug_category, d.total_quantity, d.quantity_numeric,
+       d.primary_drug_name, d.drug_category, d.raw_quantity, d.raw_quantity,
        d.commercial_quantity, d.is_commercial, d.seizure_worth, d.street_value
 FROM crimes c
-JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 WHERE d.is_commercial = true
 ORDER BY c.fir_date DESC
@@ -1153,11 +1153,11 @@ LIMIT 100
 ⚠️⚠️⚠️ CRITICAL FOR COMMERCIAL QUANTITY QUERIES: ⚠️⚠️⚠️
 - User says "commercial quantity", "commercial drug cases" → Use d.is_commercial = true
 - User says "non-commercial", "small quantity" → Use d.is_commercial = false
-- NEVER search for "commercial" text in d.total_quantity (that's wrong!)
+- NEVER search for "commercial" text in d.raw_quantity (that's wrong!)
 - d.is_commercial is a BOOLEAN field (true/false), NOT text!
 - d.commercial_quantity is a text field with the actual commercial quantity value
 - For commercial quantity cases → WHERE d.is_commercial = true ✅
-- WRONG: WHERE d.total_quantity LIKE '%commercial%' ❌
+- WRONG: WHERE d.raw_quantity LIKE '%commercial%' ❌
 
 12. Group/Count BY a field (when user says "by Status", "by District", etc.):
 SELECT c.case_status, COUNT(*) as total_crimes
@@ -1274,7 +1274,7 @@ LIMIT 20
 SELECT DISTINCT p.full_name, p.age, p.occupation, bfa.role_in_crime
 FROM persons p
 JOIN accused a ON p.person_id = a.person_id
-LEFT JOIN brief_facts_accused bfa ON p.person_id = bfa.person_id
+LEFT JOIN brief_facts_ai bfa ON p.person_id = bfa.person_id
 WHERE p.age BETWEEN 25 AND 35
 LIMIT 100
 
@@ -1291,7 +1291,7 @@ SELECT d.drug_category,
        COUNT(*) as total_cases,
        SUM(d.seizure_worth) as total_value,
        AVG(d.seizure_worth) as avg_value_per_case
-FROM brief_facts_drugs d
+FROM brief_facts_ai_drug_flat d
 GROUP BY d.drug_category
 ORDER BY total_value DESC
 LIMIT 50
@@ -1301,14 +1301,14 @@ SELECT c.crime_id, c.fir_num, c.crime_type, c.case_status,
        h.ps_name, h.dist_name,
        s.summary_text,
        COUNT(DISTINCT a.person_id) as accused_count,
-       COUNT(DISTINCT d.drug_name) as drug_types,
+       COUNT(DISTINCT d.primary_drug_name) as drug_types,
        COUNT(DISTINCT pr.property_id) as properties_seized,
        SUM(d.seizure_worth) as total_drug_value
 FROM crimes c
 LEFT JOIN hierarchy h ON c.ps_code = h.ps_code
 LEFT JOIN brief_facts_crime_summaries s ON c.crime_id = s.crime_id
 LEFT JOIN accused a ON c.crime_id = a.crime_id
-LEFT JOIN brief_facts_drugs d ON c.crime_id = d.crime_id
+LEFT JOIN brief_facts_ai_drug_flat d ON c.crime_id = d.crime_id
 LEFT JOIN properties pr ON c.crime_id = pr.crime_id
 WHERE c.crime_id = '62ee3e7427b4412144d7cf48'
 GROUP BY c.crime_id, c.fir_num, c.crime_type, c.case_status,

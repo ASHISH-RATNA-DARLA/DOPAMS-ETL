@@ -27,6 +27,12 @@ if PROJECT_ROOT not in sys.path:
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
+try:
+    from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
+except ImportError:  # pragma: no cover
+    push_fk_failure = None
+    _drain_fk_queue = None
+
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
@@ -979,6 +985,24 @@ class ArrestsETL:
                     self.stats['total_arrests_failed_person_id'] += 1
             self.log_failed_record(arrests, reason, error_details)
             self.log_invalid_ids(arrests, invalid_ids, chunk_date_range)
+            # Park in FK retry queue — recovers when crime record arrives.
+            if push_fk_failure is not None:
+                try:
+                    missing_cid = arrests.get('_original_crime_id') or ''
+                    push_fk_failure(
+                        conn, 'arrests',
+                        record_id=f"{missing_cid}|{arrests.get('accused_seq_no') or ''}",
+                        record_json=json.dumps(
+                            {k: str(v) if v is not None else None
+                             for k, v in arrests.items()},
+                        ),
+                        missing_fk_column='crime_id',
+                        missing_fk_value=missing_cid,
+                    )
+                    conn.commit()
+                except Exception as _qe:
+                    logger.warning("FK queue push failed for arrests %s: %s",
+                                   arrests.get('_original_crime_id'), _qe)
             return False, reason
         
         if not accused_seq_no:
@@ -1529,6 +1553,27 @@ class ArrestsETL:
         self.duplicates_log.write(f"If the same key appears multiple times, each occurrence is processed\n")
         self.duplicates_log.write(f"The smart update logic will determine if actual updates are needed\n")
     
+    def _retry_arrests_record(self, conn, record):
+        """Retry insertion of a queued arrests record once its crime_id is present.
+
+        Called by drain_fk_queue. Returns True on success, False if still unresolvable.
+        """
+        original_crime_id = record.get('_original_crime_id') or record.get('crime_id')
+        if not original_crime_id:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s",
+                (original_crime_id,)
+            )
+            if not cur.fetchone():
+                return False  # Still missing
+            # Crime now exists — re-inject validated crime_id.
+            record['crime_id'] = original_crime_id
+            record['_original_crime_id'] = original_crime_id
+            success, _ = self.insert_arrests(record, conn, cur, 'FK_RETRY')
+            return success
+
     def run(self):
         """Main ETL execution"""
         logger.info("=" * 80)
@@ -1548,6 +1593,15 @@ class ArrestsETL:
         if not self.connect_db():
             logger.error("Failed to connect to database. Exiting.")
             return False
+
+        # Retry any arrests records queued from previous runs due to FK misses.
+        if _drain_fk_queue is not None:
+            try:
+                with self.db_pool.get_connection_context() as _drain_conn:
+                    _drain_fk_queue(_drain_conn, 'arrests', self._retry_arrests_record)
+                    _drain_conn.commit()
+            except Exception as _de:
+                logger.warning("FK queue drain failed at startup: %s (non-fatal)", _de)
         
         try:
             # Get effective start date (check if table has data)

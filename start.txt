@@ -1,0 +1,108 @@
+Viewed preflight_check.py:1-289
+
+To execute the full master ETL pipeline with the new standardized logging and IST timezone enforcement, use the following commands.
+
+### Prerequisites
+Ensure you are in the `etl_master` directory and your virtual environment is activated to resolve dependencies and environment variables.
+
+### 1. Foreground Execution (Direct)
+Use this for manual runs where you want to see the master log initialization directly in your terminal.
+
+```bash
+cd /data-drive/etl-process-dev/etl_master
+source ../venv/bin/activate
+python3 master_etl.py --config input.txt --env prod
+```
+
+### 2. Background Execution (Recommended for Production)
+This runs the pipeline in the background, allowing you to disconnect without interrupting the process. Full orchestrator output is saved to `master_etl_full.log`.
+
+```bash
+cd /data-drive/etl-process-dev/etl_master
+source ../venv/bin/activate
+nohup python3 master_etl.py --config input.txt --env prod > master_etl_full.log 2>&1 &
+```
+
+### 3. Background Run with Real-time Log Streaming
+Execute this "one-liner" to start the pipeline in the background and immediately start streaming the new structured logs.
+
+```bash
+cd /data-drive/etl-process-dev/etl_master
+source ../venv/bin/activate
+
+# Start in background
+nohup python3 master_etl.py --config input.txt --env prod > master_etl_full.log 2>&1 &
+
+# Wait 2 seconds for directory creation, then stream the master log
+sleep 2 && tail -f $(ls -td /logs/202* | head -n 1)/master.log
+```
+
+---
+
+### Key Execution Highlights
+*   **Timezone**: You do **not** need to manually export `TZ="Asia/Kolkata"`; the script now enforces this internally for all logs and folder timestamps.
+*   **Structured Logs**: All execution traces are saved to `/logs/<IST_timestamp>/master.log`.
+*   **Sub-ETL Traceability**: If a specific step fails, its detailed output will be in `/logs/<IST_timestamp>/<step_name>/execution.log`.
+*   **Log Retention**: The script automatically deletes logs older than 30 days upon startup to maintain disk space.
+*   **Concurrency Protection**: The script uses `/tmp/master_etl.lock` to prevent multiple simultaneous runs.
+
+### Environment Setup Note
+The script automatically loads environment variables from a `.env` file in the root or `etl_master` directory via `python-dotenv`. Ensure your `DB_HOST`, `DB_PORT`, etc., are defined there.
+
+
+
+
+
+Edited start.txt
+
+With the new structured logging system, logs are organized by run timestamp and then by sub-ETL process. Here is how to navigate and check them efficiently.
+
+### 1. Find the Latest Run
+All logs are stored in `/logs` (or `./logs` in your project folder if `/logs` is not accessible). To see the latest run folders:
+
+```bash
+ls -td /logs/202* | head -n 5
+```
+Each folder name represents the start time in **IST** (format: `YYYYMMDD_HHMMSS`).
+
+### 2. Check the Master Orchestration Log
+This log tracks the high-level progress, showing which sub-ETLs started, succeeded, or failed. To view the master log of the **most recent run**:
+
+```bash
+# View the full log
+cat $(ls -td /logs/202* | head -n 1)/master.log
+
+# Or follow it in real-time
+tail -f $(ls -td /logs/202* | head -n 1)/master.log
+```
+
+### 3. Check Detailed Sub-ETL Logs
+If the master log indicates a failure in a specific step (e.g., `brief_facts_ai`), you can find the detailed script output (stdout/stderr) in its dedicated sub-folder.
+
+To see all sub-folders for the latest run:
+```bash
+ls -F $(ls -td /logs/202* | head -n 1)
+```
+
+To view the execution log for a specific component (e.g., `brief_facts_ai`):
+```bash
+cat $(ls -td /logs/202* | head -n 1)/brief_facts_ai/execution.log
+```
+
+### 4. Quick Error Search
+To quickly find where an error occurred across **all** files in the latest run:
+
+```bash
+grep -ri "error" $(ls -td /logs/202* | head -n 1)
+```
+
+### Summary of Structure
+```text
+/logs/20240415_194500/           <-- IST Run Timestamp
+├── master.log                   <-- Orchestrator trace (High level)
+├── brief_facts_ai/              <-- Sub-ETL Folder
+│   └── execution.log            <-- Detailed script output
+├── firs_loader/
+│   └── execution.log
+└── ...
+```

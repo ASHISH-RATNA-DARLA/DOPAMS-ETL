@@ -158,9 +158,9 @@ python3 views_refresh_sql.py
 
 [Order 23]
 brief_facts_ai
-cd /data-drive/etl-process-dev/brief_facts_accused
+cd /data-drive/etl-process-dev/brief_facts_ai
 source /data-drive/etl-process-dev/venv/bin/activate
-python3 accused_type.py
+python3 main.py
 
 [Order 24]
 refresh_views

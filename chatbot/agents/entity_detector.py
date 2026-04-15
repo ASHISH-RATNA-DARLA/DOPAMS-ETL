@@ -276,7 +276,7 @@ class FieldMapper:
         EntityType.MOBILE_NUMBER: [
             # PostgreSQL V2 Data (ACTUAL!)
             'phone_number',  # persons table ⭐
-            'phone_numbers',  # brief_facts_accused table ⭐
+            'phone_numbers',  # brief_facts_ai table ⭐
             'country_code',  # persons table
             # MongoDB V1 Data (ACTUAL! - UPPERCASE!)
             'MOBILE_1',  # fir_records ⭐⭐

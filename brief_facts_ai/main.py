@@ -1,6 +1,7 @@
 import sys
 import re
 import logging
+import threading
 import uuid
 import os
 import unicodedata
@@ -16,7 +17,7 @@ from db import (
     get_db_connection,
     return_db_connection,
     fetch_crimes_by_ids,
-    insert_accused_facts,
+    
     fetch_unprocessed_crimes,
     fetch_existing_accused_for_crime,
     start_crime_processing_run,
@@ -30,9 +31,9 @@ from db import (
     fetch_crime_profile,
     fetch_crime_associate_person_codes,
     delete_brief_facts_for_crime,
-    update_sentinel_role,
+    update_sentinel_role, bulk_upsert_brief_facts_ai, write_drugs_by_accused_in_memory,
 )
-from extractor import (
+from extractor_accused import (
     extract_accused_info,
     extract_roles_for_known_accused,
     detect_gender,
@@ -447,13 +448,7 @@ def _resolve_status(db_status_raw, text, name_hint):
     return None
 
 
-_DRUG_EXTRACTION_CACHE = {
-    'loaded': False,
-    'drug_categories': None,
-    'ignore_set': None,
-    'kb_lookup': None,
-    'dynamic_keywords': None,
-}
+
 
 
 def _fetch_current_bfai_rows(conn, crime_id):
@@ -487,75 +482,10 @@ def _inject_accused_roster(facts_text, rows):
     return roster_block + (facts_text or '')
 
 
-def _load_drug_context(conn):
-    if _DRUG_EXTRACTION_CACHE['loaded']:
-        return
-    from brief_facts_drugs.db import fetch_drug_categories, fetch_drug_ignore_list
-    from brief_facts_drugs.extractor import build_drug_keywords
-
-    drug_categories = fetch_drug_categories(conn)
-    ignore_dict = fetch_drug_ignore_list(conn)
-    _DRUG_EXTRACTION_CACHE['drug_categories'] = drug_categories
-    _DRUG_EXTRACTION_CACHE['ignore_set'] = set(ignore_dict.keys())
-    _DRUG_EXTRACTION_CACHE['kb_lookup'] = {
-        row['raw_name'].lower().strip(): row['standard_name']
-        for row in drug_categories
-    }
-    _DRUG_EXTRACTION_CACHE['dynamic_keywords'] = build_drug_keywords(drug_categories)
-    _DRUG_EXTRACTION_CACHE['loaded'] = True
 
 
-def _run_unified_drug_enrichment(conn, crime_id, facts_text):
-    """
-    Unified per-crime sequential drug extraction called after accused rows are written.
-    """
-    from brief_facts_drugs.db import batch_insert_drug_facts
-    from brief_facts_drugs.extractor import extract_drug_info
 
-    _load_drug_context(conn)
 
-    current_rows = _fetch_current_bfai_rows(conn, crime_id)
-    real_accused_rows = [r for r in current_rows if r[1] is not None]
-    augmented_text = _inject_accused_roster(facts_text, real_accused_rows)
-
-    extractions = extract_drug_info(
-        augmented_text,
-        _DRUG_EXTRACTION_CACHE['drug_categories'],
-        ignore_set=_DRUG_EXTRACTION_CACHE['ignore_set'],
-        kb_lookup=_DRUG_EXTRACTION_CACHE['kb_lookup'],
-        dynamic_drug_keywords=_DRUG_EXTRACTION_CACHE['dynamic_keywords'],
-        conn=conn,
-    )
-
-    inserts = []
-    if not extractions:
-        if real_accused_rows:
-            placeholder = {
-                "raw_drug_name": "NO_DRUGS_DETECTED",
-                "raw_quantity": 0,
-                "raw_unit": "None",
-                "primary_drug_name": "NO_DRUGS_DETECTED",
-                "drug_form": "None",
-                "weight_g": 0,
-                "weight_kg": 0,
-                "volume_ml": 0,
-                "volume_l": 0,
-                "count_total": 0,
-                "confidence_score": 1.00,
-                "is_commercial": False,
-                "seizure_worth": 0.0,
-                "worth_scope": "individual",
-                "extraction_metadata": {"source_sentence": "No drugs physically seized"},
-            }
-            inserts.append((crime_id, placeholder))
-    else:
-        inserts.extend((crime_id, d.model_dump()) for d in extractions)
-        if not real_accused_rows:
-            update_sentinel_role(conn, crime_id, 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY')
-            update_sentinel_role(conn, crime_id, 'LLM_EXTRACTION_FAILED', 'NO_ACCUSED_DRUGS_ONLY')
-
-    if inserts:
-        batch_insert_drug_facts(conn, inserts)
 
 
 # ---------------------------------------------------------------------------
@@ -637,27 +567,61 @@ def process_crimes_parallel(crimes):
             rows_written = 0
             unified_mode = (config.ACCUSED_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME
             try:
-                if unified_mode:
-                    run_id = start_crime_processing_run(conn, crime_id)
-                    delete_brief_facts_for_crime(conn, crime_id)
                 db_accused = fetch_existing_accused_for_crime(conn, crime_id)
                 branch = _classify_db_accused(db_accused)
-                
-                if branch == 'A':
-                    rows_written = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id)
-                elif branch == 'B':
-                    rows_written = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id)
-                else:
-                    rows_written = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id)
 
                 if unified_mode:
-                    _run_unified_drug_enrichment(conn, crime_id, facts_text)
+                    # Record branch in the log so Branch C entries can be
+                    # invalidated later when accused records arrive.
+                    run_id = start_crime_processing_run(conn, crime_id, branch=branch)
+                    delete_brief_facts_for_crime(conn, crime_id)
+
+                
+                if branch == 'A':
+                    rows_written, branch_records = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id)
+                elif branch == 'B':
+                    rows_written, branch_records = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id)
+                else:
+                    rows_written, branch_records = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id)
+
+                if unified_mode:
+                    # _run_unified_drug_enrichment(conn, crime_id, facts_text) -> replaced
+                    from extractor_drugs import extract_drug_info
+                    import db as db_module
+                    
+                    db_module._load_drug_context = lambda c: None # mock to prevent error, we can just load directly
+                    
+                    drug_categories = db_module.fetch_drug_categories(conn)
+                    ignore_dict = db_module.fetch_drug_ignore_list(conn)
+                    ignore_set = set(ignore_dict.keys())
+                    kb_lookup = {row['raw_name'].lower().strip(): row['standard_name'] for row in drug_categories}
+                    from extractor_drugs import build_drug_keywords
+                    dynamic_keywords = build_drug_keywords(drug_categories)
+                    
+                    augmented_text = _inject_accused_roster(facts_text, [tuple([None, None, r.get('person_code'), r.get('full_name')]) for r in branch_records if r.get('person_code')])
+                    
+                    extractions = extract_drug_info(augmented_text, drug_categories, ignore_set=ignore_set, kb_lookup=kb_lookup, dynamic_drug_keywords=dynamic_keywords, conn=conn)
+                    
+                    if extractions:
+                        pass
+                    else:
+                        if branch_records:
+                            placeholder = {'raw_drug_name': 'NO_DRUGS_DETECTED'}
+                            extractions = [placeholder]
+                        else:
+                            update_sentinel_role(conn, crime_id, 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY')
+                            update_sentinel_role(conn, crime_id, 'LLM_EXTRACTION_FAILED', 'NO_ACCUSED_DRUGS_ONLY')
+                            extractions = []
+                    
+                    enriched_rows = db_module.write_drugs_by_accused_in_memory(branch_records, extractions)
+                    db_module.bulk_upsert_brief_facts_ai(conn, enriched_rows)
 
                 if unified_mode and run_id:
                     complete_crime_processing_run(conn, run_id, rows_written)
 
+
                 conn.commit()
-                return True, crime_id
+                return True, crime_id, branch
             except Exception as e:
                 try:
                     if unified_mode and run_id:
@@ -667,17 +631,17 @@ def process_crimes_parallel(crimes):
                     conn.rollback()
                 conn.rollback()
                 logging.error(f"Failed processing Crime {crime_id}: {e}")
-                return False, crime_id
+                return False, crime_id, None
             # Connection automatically returned to pool via context manager
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_crime = {executor.submit(worker, crime): crime['crime_id'] for crime in crimes}
         for future in as_completed(future_to_crime):
-            success, cid = future.result()
+            success, cid, branch = future.result()
             if success:
-                logging.info(f"✅ Crime {cid} processed successfully.")
+                logging.info(f"✅ Crime {cid} processed successfully (branch={branch}).")
             else:
-                logging.error(f"❌ Crime {cid} processing failed.")
+                logging.error(f"❌ Crime {cid} processing failed (branch={branch}).")
 
 
 # ---------------------------------------------------------------------------
@@ -697,7 +661,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     valid_accused = list(db_accused)
     if not valid_accused:
         logging.info(f"Branch A: No accused rows found for Crime {crime_id}")
-        return 0
+        return 0, []
 
     # ---- Pre-scan: determine person_code strategy and missing fields per accused ----
     DIRECT_CODE_TYPES = {'Accused', 'CCL'}
@@ -742,6 +706,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     if len(valid_accused) == 1 and len(roles_by_code) == 1:
         single_role = list(roles_by_code.values())[0]
 
+    branch_records = []
     count = 0
     for i, row in enumerate(valid_accused, start=1):
         accused_id    = row.get('accused_id')
@@ -885,7 +850,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
         count += 1
 
     logging.info(f"Branch A processed Crime {crime_id}. row_count={count}")
-    return count
+    return count, branch_records
 
 
 # ---------------------------------------------------------------------------
@@ -915,6 +880,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
         })
         return 1
 
+    branch_records = []
     count = 0
 
     if not extractions:
@@ -990,7 +956,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             count += 1
 
     logging.info(f"Branch B processed Crime {crime_id}. row_count={count}")
-    return count
+    return count, branch_records
 
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +981,7 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
         })
         return 1
 
+    branch_records = []
     count = 0
 
     if not extractions:
@@ -1069,7 +1036,7 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
             count += 1
 
     logging.info(f"Branch C processed Crime {crime_id}. row_count={count}")
-    return count
+    return count, branch_records
 
 
 if __name__ == "__main__":

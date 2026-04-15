@@ -1,10 +1,16 @@
 import argparse
+import fcntl
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
 from datetime import datetime
+
+os.environ["TZ"] = "Asia/Kolkata"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 from preflight_check import (
     PreflightError,
@@ -13,19 +19,49 @@ from preflight_check import (
 )
 
 
-def build_logger() -> logging.Logger:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    preferred_log_dir = "/logs"
-    fallback_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+MASTER_LOG_DIR = None
 
-    log_dir = preferred_log_dir
+def cleanup_old_logs(log_base_dir: str, days=30):
     try:
-        os.makedirs(preferred_log_dir, exist_ok=True)
-    except OSError:
-        log_dir = fallback_log_dir
-        os.makedirs(log_dir, exist_ok=True)
+        now = time.time()
+        cutoff = now - (days * 86400)
+        for entry in os.listdir(log_base_dir):
+            entry_path = os.path.join(log_base_dir, entry)
+            if not os.path.isdir(entry_path):
+                continue
+            
+            try:
+                # Basic check to see if dir name is matching timestamp pattern
+                datetime.strptime(entry[:15], "%Y%m%d_%H%M%S")
+            except ValueError:
+                continue
 
-    log_file = os.path.join(log_dir, f"etl_run_{timestamp}.log")
+            stat = os.stat(entry_path)
+            if stat.st_mtime < cutoff:
+                shutil.rmtree(entry_path, ignore_errors=True)
+    except Exception:
+        pass
+
+
+def build_logger() -> logging.Logger:
+    global MASTER_LOG_DIR
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    preferred_log_base = "/logs"
+    fallback_log_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+
+    log_base = preferred_log_base
+    try:
+        os.makedirs(preferred_log_base, exist_ok=True)
+    except OSError:
+        log_base = fallback_log_base
+        os.makedirs(log_base, exist_ok=True)
+
+    cleanup_old_logs(log_base, days=30)
+
+    MASTER_LOG_DIR = os.path.join(log_base, timestamp)
+    os.makedirs(MASTER_LOG_DIR, exist_ok=True)
+
+    log_file = os.path.join(MASTER_LOG_DIR, "master.log")
 
     logger = logging.getLogger("master_etl")
     logger.setLevel(logging.INFO)
@@ -43,7 +79,7 @@ def build_logger() -> logging.Logger:
     logger.addHandler(stream_handler)
     logger.propagate = False
 
-    logger.info("Structured run log: %s", log_file)
+    logger.info("Structured run log directory: %s", MASTER_LOG_DIR)
     return logger
 
 
@@ -55,6 +91,33 @@ class StepExecutionError(Exception):
         super().__init__(f"command='{command}' error='{str(original_error)}'")
         self.command = command
         self.original_error = original_error
+
+
+def acquire_run_lock():
+    """Acquire a process-level advisory lock to prevent concurrent pipeline runs.
+
+    Uses fcntl.LOCK_EX|LOCK_NB so a second invocation fails immediately with a
+    clear error instead of silently racing on incremental watermarks.
+
+    Returns the open file handle (caller must keep it alive for the process lifetime).
+    Exits with code 1 if the lock cannot be acquired.
+    """
+    lock_path = os.environ.get("MASTER_ETL_LOCK_FILE", "/tmp/master_etl.lock")
+    try:
+        fh = open(lock_path, "w")
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fh.write(str(os.getpid()))
+        fh.flush()
+        logger.info("Run lock acquired: %s (pid=%s)", lock_path, os.getpid())
+        return fh
+    except OSError:
+        logger.error(
+            "Another master_etl process is already running (lock held: %s). "
+            "Aborting to prevent watermark race. "
+            "If no other process is running, delete the lock file manually.",
+            lock_path,
+        )
+        sys.exit(1)
 
 
 def validate_mo_seizures_wiring(processes, config_path):
@@ -195,20 +258,31 @@ def extract_execution_context(process):
     return working_dir, runtime_env, executable_commands
 
 
-def run_command(command, cwd, env):
+def run_command(command, cwd, env, execution_log_path):
     # Linux-targeted orchestration: execute in bash without shell chaining.
-    subprocess.run(
-        ["/bin/bash", "-lc", command],
-        cwd=cwd,
-        env=env,
-        check=True,
-        text=True,
-    )
+    with open(execution_log_path, "a") as log_file:
+        log_file.write(f"\\n--- Executing Command: {command} ---\\n")
+        log_file.flush()
+        subprocess.run(
+            ["/bin/bash", "-lc", command],
+            cwd=cwd,
+            env=env,
+            check=True,
+            text=True,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
 
 
 def run_process_once(process):
     order = process["order"]
     name = process.get("name") or "Unnamed Process"
+    clean_name = name.lower().replace(" ", "_").replace("/", "_")
+    
+    step_log_dir = os.path.join(MASTER_LOG_DIR, clean_name)
+    os.makedirs(step_log_dir, exist_ok=True)
+    execution_log_path = os.path.join(step_log_dir, "execution.log")
+
     cwd, env, commands = extract_execution_context(process)
 
     if not commands:
@@ -218,10 +292,10 @@ def run_process_once(process):
     for idx, command in enumerate(commands, start=1):
         logger.info("[Order %s: %s] command %d start: %s", order, name, idx, command)
         try:
-            run_command(command, cwd, env)
+            run_command(command, cwd, env, execution_log_path)
         except Exception as exc:
             raise StepExecutionError(command, exc) from exc
-        logger.info("[Order %s: %s] command %d success", order, name, idx)
+        logger.info("[Order %s: %s] command %d success -> execution_log=%s", order, name, idx, execution_log_path)
 
 
 def run_process_with_retry(process, process_index, max_retries=2):
@@ -337,6 +411,8 @@ def main():
         logger.error("This orchestrator is Linux-only and is intended for Ubuntu execution.")
         sys.exit(1)
 
+    _lock_fh = acquire_run_lock()
+
     logger.info("Starting Master ETL Orchestrator")
     logger.info(
         "Using config=%s env=%s start_order=%s end_order=%s",
@@ -369,13 +445,16 @@ def main():
         sys.exit(1)
 
     logger.info("Found %d processes to execute.", len(processes))
+    
+    pipeline_start_time = time.time()
 
     for process_index, process in enumerate(processes, start=1):
         if not run_process_with_retry(process, process_index=process_index, max_retries=2):
             logger.error("Master ETL execution stopped due to step failure.")
             sys.exit(1)
 
-    logger.info("All ETL processes finished successfully.")
+    total_time = time.time() - pipeline_start_time
+    logger.info("All ETL processes finished successfully. Total execution time: %.2fs", total_time)
 
 
 if __name__ == "__main__":

@@ -49,79 +49,79 @@ class IntelligentColumnMapper:
         mappings = {}
         
         # ====================================================================
-        # DRUG-RELATED COLUMNS (brief_facts_drugs table)
+        # DRUG-RELATED COLUMNS (brief_facts_ai_drug_flat table)
         # ====================================================================
         drug_mappings = {
             # Transport & Logistics
-            'transport': [ColumnMatch('brief_facts_drugs', 'transport_method', 'transport_method', 1.0, ['transport'])],
-            'transport method': [ColumnMatch('brief_facts_drugs', 'transport_method', 'transport_method', 1.0, ['transport', 'method'])],
-            'method of transport': [ColumnMatch('brief_facts_drugs', 'transport_method', 'transport_method', 1.0, ['method', 'transport'])],
-            'how transported': [ColumnMatch('brief_facts_drugs', 'transport_method', 'transport_method', 1.0, ['transported'])],
+            'transport': [ColumnMatch('brief_facts_ai_drug_flat', 'transport_method', 'transport_method', 1.0, ['transport'])],
+            'transport method': [ColumnMatch('brief_facts_ai_drug_flat', 'transport_method', 'transport_method', 1.0, ['transport', 'method'])],
+            'method of transport': [ColumnMatch('brief_facts_ai_drug_flat', 'transport_method', 'transport_method', 1.0, ['method', 'transport'])],
+            'how transported': [ColumnMatch('brief_facts_ai_drug_flat', 'transport_method', 'transport_method', 1.0, ['transported'])],
             
             # Packaging
-            'packaging': [ColumnMatch('brief_facts_drugs', 'packaging_details', 'packaging_details', 1.0, ['packaging'])],
-            'packaging details': [ColumnMatch('brief_facts_drugs', 'packaging_details', 'packaging_details', 1.0, ['packaging', 'details'])],
-            'package': [ColumnMatch('brief_facts_drugs', 'packaging_details', 'packaging_details', 0.9, ['package'])],
-            'packed': [ColumnMatch('brief_facts_drugs', 'packaging_details', 'packaging_details', 0.8, ['packed'])],
-            'number of packets': [ColumnMatch('brief_facts_drugs', 'number_of_packets', 'number_of_packets', 1.0, ['packets'])],
-            'packets': [ColumnMatch('brief_facts_drugs', 'number_of_packets', 'number_of_packets', 0.9, ['packets'])],
+            'packaging': [ColumnMatch('brief_facts_ai_drug_flat', 'packaging_details', 'packaging_details', 1.0, ['packaging'])],
+            'packaging details': [ColumnMatch('brief_facts_ai_drug_flat', 'packaging_details', 'packaging_details', 1.0, ['packaging', 'details'])],
+            'package': [ColumnMatch('brief_facts_ai_drug_flat', 'packaging_details', 'packaging_details', 0.9, ['package'])],
+            'packed': [ColumnMatch('brief_facts_ai_drug_flat', 'packaging_details', 'packaging_details', 0.8, ['packed'])],
+            'number of packets': [ColumnMatch('brief_facts_ai_drug_flat', 'number_of_packets', 'number_of_packets', 1.0, ['packets'])],
+            'packets': [ColumnMatch('brief_facts_ai_drug_flat', 'number_of_packets', 'number_of_packets', 0.9, ['packets'])],
             
             # Supply Chain
-            'supply chain': [ColumnMatch('brief_facts_drugs', 'supply_chain', 'supply_chain', 1.0, ['supply', 'chain'])],
-            'supply': [ColumnMatch('brief_facts_drugs', 'supply_chain', 'supply_chain', 0.8, ['supply'])],
-            'source location': [ColumnMatch('brief_facts_drugs', 'source_location', 'source_location', 1.0, ['source'])],
-            'source': [ColumnMatch('brief_facts_drugs', 'source_location', 'source_location', 0.9, ['source'])],
-            'destination': [ColumnMatch('brief_facts_drugs', 'destination', 'destination', 1.0, ['destination'])],
-            'where from': [ColumnMatch('brief_facts_drugs', 'source_location', 'source_location', 0.8, ['from'])],
-            'where to': [ColumnMatch('brief_facts_drugs', 'destination', 'destination', 0.8, ['to'])],
+            'supply chain': [ColumnMatch('brief_facts_ai_drug_flat', 'supply_chain', 'supply_chain', 1.0, ['supply', 'chain'])],
+            'supply': [ColumnMatch('brief_facts_ai_drug_flat', 'supply_chain', 'supply_chain', 0.8, ['supply'])],
+            'source location': [ColumnMatch('brief_facts_ai_drug_flat', 'source_location', 'source_location', 1.0, ['source'])],
+            'source': [ColumnMatch('brief_facts_ai_drug_flat', 'source_location', 'source_location', 0.9, ['source'])],
+            'destination': [ColumnMatch('brief_facts_ai_drug_flat', 'destination', 'destination', 1.0, ['destination'])],
+            'where from': [ColumnMatch('brief_facts_ai_drug_flat', 'source_location', 'source_location', 0.8, ['from'])],
+            'where to': [ColumnMatch('brief_facts_ai_drug_flat', 'destination', 'destination', 0.8, ['to'])],
             
             # Weight & Quantity
-            'weight': [ColumnMatch('brief_facts_drugs', 'weight_breakdown', 'weight_breakdown', 0.9, ['weight']),
-                      ColumnMatch('brief_facts_drugs', 'total_quantity', 'total_quantity', 0.8, ['weight'])],
-            'weight breakdown': [ColumnMatch('brief_facts_drugs', 'weight_breakdown', 'weight_breakdown', 1.0, ['weight', 'breakdown'])],
-            'quantity': [ColumnMatch('brief_facts_drugs', 'total_quantity', 'total_quantity', 0.9, ['quantity']),
-                        ColumnMatch('brief_facts_drugs', 'quantity_numeric', 'quantity_numeric', 0.8, ['quantity'])],
-            'total quantity': [ColumnMatch('brief_facts_drugs', 'total_quantity', 'total_quantity', 1.0, ['total', 'quantity'])],
-            'quantity unit': [ColumnMatch('brief_facts_drugs', 'quantity_unit', 'quantity_unit', 1.0, ['unit'])],
+            'weight': [ColumnMatch('brief_facts_ai_drug_flat', 'weight_breakdown', 'weight_breakdown', 0.9, ['weight']),
+                      ColumnMatch('brief_facts_ai_drug_flat', 'total_quantity', 'total_quantity', 0.8, ['weight'])],
+            'weight breakdown': [ColumnMatch('brief_facts_ai_drug_flat', 'weight_breakdown', 'weight_breakdown', 1.0, ['weight', 'breakdown'])],
+            'quantity': [ColumnMatch('brief_facts_ai_drug_flat', 'total_quantity', 'total_quantity', 0.9, ['quantity']),
+                        ColumnMatch('brief_facts_ai_drug_flat', 'quantity_numeric', 'quantity_numeric', 0.8, ['quantity'])],
+            'total quantity': [ColumnMatch('brief_facts_ai_drug_flat', 'total_quantity', 'total_quantity', 1.0, ['total', 'quantity'])],
+            'quantity unit': [ColumnMatch('brief_facts_ai_drug_flat', 'quantity_unit', 'quantity_unit', 1.0, ['unit'])],
             
             # Seizure
-            'seizure location': [ColumnMatch('brief_facts_drugs', 'seizure_location', 'seizure_location', 1.0, ['seizure', 'location'])],
-            'seizure time': [ColumnMatch('brief_facts_drugs', 'seizure_time', 'seizure_time', 1.0, ['seizure', 'time'])],
-            'seizure method': [ColumnMatch('brief_facts_drugs', 'seizure_method', 'seizure_method', 1.0, ['seizure', 'method'])],
-            'seizure officer': [ColumnMatch('brief_facts_drugs', 'seizure_officer', 'seizure_officer', 1.0, ['seizure', 'officer'])],
-            'seizure worth': [ColumnMatch('brief_facts_drugs', 'seizure_worth', 'seizure_worth', 1.0, ['seizure', 'worth'])],
-            'seizure value': [ColumnMatch('brief_facts_drugs', 'seizure_worth', 'seizure_worth', 1.0, ['seizure', 'value'])],
-            'drugs with seizure worth': [ColumnMatch('brief_facts_drugs', 'seizure_worth', 'seizure_worth', 1.0, ['seizure', 'worth'])],
+            'seizure location': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_location', 'seizure_location', 1.0, ['seizure', 'location'])],
+            'seizure time': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_time', 'seizure_time', 1.0, ['seizure', 'time'])],
+            'seizure method': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_method', 'seizure_method', 1.0, ['seizure', 'method'])],
+            'seizure officer': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_officer', 'seizure_officer', 1.0, ['seizure', 'officer'])],
+            'seizure worth': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_worth', 'seizure_worth', 1.0, ['seizure', 'worth'])],
+            'seizure value': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_worth', 'seizure_worth', 1.0, ['seizure', 'value'])],
+            'drugs with seizure worth': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_worth', 'seizure_worth', 1.0, ['seizure', 'worth'])],
             # Note: 'seized' is now in property_mappings with higher priority when "property" is mentioned
             # Only match drug seizure if "drug" or "narcotic" is also mentioned
-            'drug seized': [ColumnMatch('brief_facts_drugs', 'seizure_location', 'seizure_location', 1.0, ['drug', 'seized'])],
-            'seized drug': [ColumnMatch('brief_facts_drugs', 'seizure_location', 'seizure_location', 1.0, ['seized', 'drug'])],
+            'drug seized': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_location', 'seizure_location', 1.0, ['drug', 'seized'])],
+            'seized drug': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_location', 'seizure_location', 1.0, ['seized', 'drug'])],
             # Source location (for "seized from" queries)
-            'seized from': [ColumnMatch('brief_facts_drugs', 'source_location', 'source_location', 1.0, ['seized', 'from'])],
-            'seized at': [ColumnMatch('brief_facts_drugs', 'seizure_location', 'seizure_location', 1.0, ['seized', 'at'])],
+            'seized from': [ColumnMatch('brief_facts_ai_drug_flat', 'source_location', 'source_location', 1.0, ['seized', 'from'])],
+            'seized at': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_location', 'seizure_location', 1.0, ['seized', 'at'])],
             
             # Commercial Quantity
-            'commercial quantity': [ColumnMatch('brief_facts_drugs', 'is_commercial', 'is_commercial', 1.0, ['commercial', 'quantity']),
-                                   ColumnMatch('brief_facts_drugs', 'commercial_quantity', 'commercial_quantity', 0.9, ['commercial', 'quantity'])],
-            'commercial': [ColumnMatch('brief_facts_drugs', 'is_commercial', 'is_commercial', 0.9, ['commercial'])],
-            'is commercial': [ColumnMatch('brief_facts_drugs', 'is_commercial', 'is_commercial', 1.0, ['commercial'])],
+            'commercial quantity': [ColumnMatch('brief_facts_ai_drug_flat', 'is_commercial', 'is_commercial', 1.0, ['commercial', 'quantity']),
+                                   ColumnMatch('brief_facts_ai_drug_flat', 'commercial_quantity', 'commercial_quantity', 0.9, ['commercial', 'quantity'])],
+            'commercial': [ColumnMatch('brief_facts_ai_drug_flat', 'is_commercial', 'is_commercial', 0.9, ['commercial'])],
+            'is commercial': [ColumnMatch('brief_facts_ai_drug_flat', 'is_commercial', 'is_commercial', 1.0, ['commercial'])],
             
             # Value
-            'street value': [ColumnMatch('brief_facts_drugs', 'street_value', 'street_value', 1.0, ['street', 'value']),
-                            ColumnMatch('brief_facts_drugs', 'street_value_numeric', 'street_value_numeric', 0.9, ['street', 'value'])],
-            'value': [ColumnMatch('brief_facts_drugs', 'street_value', 'street_value', 0.7, ['value']),
-                     ColumnMatch('brief_facts_drugs', 'seizure_worth', 'seizure_worth', 0.7, ['value'])],
-            'worth': [ColumnMatch('brief_facts_drugs', 'seizure_worth', 'seizure_worth', 0.9, ['worth'])],
+            'street value': [ColumnMatch('brief_facts_ai_drug_flat', 'street_value', 'street_value', 1.0, ['street', 'value']),
+                            ColumnMatch('brief_facts_ai_drug_flat', 'street_value_numeric', 'street_value_numeric', 0.9, ['street', 'value'])],
+            'value': [ColumnMatch('brief_facts_ai_drug_flat', 'street_value', 'street_value', 0.7, ['value']),
+                     ColumnMatch('brief_facts_ai_drug_flat', 'seizure_worth', 'seizure_worth', 0.7, ['value'])],
+            'worth': [ColumnMatch('brief_facts_ai_drug_flat', 'seizure_worth', 'seizure_worth', 0.9, ['worth'])],
             
             # Purity
-            'purity': [ColumnMatch('brief_facts_drugs', 'purity', 'purity', 1.0, ['purity'])],
+            'purity': [ColumnMatch('brief_facts_ai_drug_flat', 'purity', 'purity', 1.0, ['purity'])],
             
             # Drug Info
-            'drug name': [ColumnMatch('brief_facts_drugs', 'drug_name', 'drug_name', 1.0, ['drug', 'name'])],
-            'scientific name': [ColumnMatch('brief_facts_drugs', 'scientific_name', 'scientific_name', 1.0, ['scientific'])],
-            'brand name': [ColumnMatch('brief_facts_drugs', 'brand_name', 'brand_name', 1.0, ['brand'])],
-            'drug category': [ColumnMatch('brief_facts_drugs', 'drug_category', 'drug_category', 1.0, ['category'])],
-            'drug schedule': [ColumnMatch('brief_facts_drugs', 'drug_schedule', 'drug_schedule', 1.0, ['schedule'])],
+            'drug name': [ColumnMatch('brief_facts_ai_drug_flat', 'drug_name', 'drug_name', 1.0, ['drug', 'name'])],
+            'scientific name': [ColumnMatch('brief_facts_ai_drug_flat', 'scientific_name', 'scientific_name', 1.0, ['scientific'])],
+            'brand name': [ColumnMatch('brief_facts_ai_drug_flat', 'brand_name', 'brand_name', 1.0, ['brand'])],
+            'drug category': [ColumnMatch('brief_facts_ai_drug_flat', 'drug_category', 'drug_category', 1.0, ['category'])],
+            'drug schedule': [ColumnMatch('brief_facts_ai_drug_flat', 'drug_schedule', 'drug_schedule', 1.0, ['schedule'])],
         }
         
         # ====================================================================
@@ -130,13 +130,13 @@ class IntelligentColumnMapper:
         person_mappings = {
             # Phone
             'phone': [ColumnMatch('persons', 'phone_number', 'phone_number', 1.0, ['phone']),
-                     ColumnMatch('brief_facts_accused', 'phone_numbers', 'phone_numbers', 0.9, ['phone'])],
+                     ColumnMatch('brief_facts_ai', 'phone_numbers', 'phone_numbers', 0.9, ['phone'])],
             'phone number': [ColumnMatch('persons', 'phone_number', 'phone_number', 1.0, ['phone', 'number']),
-                            ColumnMatch('brief_facts_accused', 'phone_numbers', 'phone_numbers', 0.9, ['phone', 'number'])],
+                            ColumnMatch('brief_facts_ai', 'phone_numbers', 'phone_numbers', 0.9, ['phone', 'number'])],
             'mobile': [ColumnMatch('persons', 'phone_number', 'phone_number', 1.0, ['mobile']),
-                      ColumnMatch('brief_facts_accused', 'phone_numbers', 'phone_numbers', 0.9, ['mobile'])],
+                      ColumnMatch('brief_facts_ai', 'phone_numbers', 'phone_numbers', 0.9, ['mobile'])],
             'mobile number': [ColumnMatch('persons', 'phone_number', 'phone_number', 1.0, ['mobile', 'number']),
-                             ColumnMatch('brief_facts_accused', 'phone_numbers', 'phone_numbers', 0.9, ['mobile', 'number'])],
+                             ColumnMatch('brief_facts_ai', 'phone_numbers', 'phone_numbers', 0.9, ['mobile', 'number'])],
             'contact': [ColumnMatch('persons', 'phone_number', 'phone_number', 0.8, ['contact'])],
             
             # Email
@@ -277,9 +277,9 @@ class IntelligentColumnMapper:
                     adjusted_confidence = col_match.confidence
                     if is_property_query and col_match.table == 'properties':
                         adjusted_confidence += 0.2  # Boost property matches
-                    elif is_drug_query and col_match.table == 'brief_facts_drugs':
+                    elif is_drug_query and col_match.table == 'brief_facts_ai_drug_flat':
                         adjusted_confidence += 0.2  # Boost drug matches
-                    elif is_property_query and col_match.table == 'brief_facts_drugs' and 'seized' in keyword:
+                    elif is_property_query and col_match.table == 'brief_facts_ai_drug_flat' and 'seized' in keyword:
                         adjusted_confidence -= 0.3  # Reduce drug seizure_location when property query
                     
                     # Avoid duplicates
@@ -342,7 +342,7 @@ class IntelligentColumnMapper:
         
         Args:
             user_question: User's question/query
-            table_prefix: Optional prefix (e.g., 'd.' for brief_facts_drugs)
+            table_prefix: Optional prefix (e.g., 'd.' for brief_facts_ai_drug_flat)
             
         Returns:
             List of column names with prefixes (e.g., ['d.transport_method', 'd.packaging_details'])
