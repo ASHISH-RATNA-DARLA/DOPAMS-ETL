@@ -150,9 +150,6 @@ def _partial_db_sources() -> Dict[str, list[str]]:
 def resolve_db_config() -> Dict[str, Union[str, int]]:
     """Resolve a single PostgreSQL connection config and trace the selected source."""
     partials = _partial_db_sources()
-    if partials:
-        details = ", ".join(f"{source} missing {', '.join(missing)}" for source, missing in partials.items())
-        raise ValueError(f"Partial database configuration detected: {details}")
 
     source = None
     config: Dict[str, Union[str, int]] = {}
@@ -186,6 +183,9 @@ def resolve_db_config() -> Dict[str, Union[str, int]]:
             complete_candidates.append(("DATABASE_URL", url_config))
 
     if not complete_candidates:
+        if partials:
+            details = ", ".join(f"{source} missing {', '.join(missing)}" for source, missing in partials.items())
+            raise ValueError(f"Partial database configuration detected: {details}")
         raise ValueError(
             "No valid database configuration found. Provide one complete source set: POSTGRES_*, DB_*, RDS_* or DATABASE_URL."
         )
@@ -207,6 +207,10 @@ def resolve_db_config() -> Dict[str, Union[str, int]]:
         "port": int(canonical_values["port"]),
         "source": source,
     }
+
+    if partials:
+        details = ", ".join(f"{name} missing {', '.join(missing)}" for name, missing in partials.items())
+        print(f"[CONFIG] Ignoring partial DB alias sources because a complete source was found: {details}")
 
     print(f"[CONFIG] Using DB config source: {config['source']}")
     print(
