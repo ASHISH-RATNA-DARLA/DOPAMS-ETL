@@ -99,6 +99,7 @@ def get_yesterday_end_ist() -> str:
 class AccusedETL:
     def __init__(self):
         self.db_pool = None
+        self.run_state_enabled = True
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
         self.stats = {
@@ -287,21 +288,27 @@ class AccusedETL:
             # Optimized parallelism for 64GB RAM server
             # We increase chunk workers and row workers to leverage more cores and memory
             # Default: 6 chunks × 8 workers = 48 concurrent threads
-            chunk_workers = get_int_env('ACCUSED_CHUNK_WORKERS', 6)
-            row_workers = get_int_env('MAX_WORKERS', 8)
+            chunk_workers = max(1, get_int_env('ACCUSED_CHUNK_WORKERS', 6))
+            row_workers = max(1, get_int_env('MAX_WORKERS', 8))
             total_workers = chunk_workers * row_workers
             
             # Connection pool sizing: workers + headroom
             # For 64GB RAM, we can easily handle 100+ connections if PostgreSQL is configured for it
-            max_connections = get_int_env('DB_MAX_CONNECTIONS', max(50, total_workers + 20))
+            requested_max_connections = get_int_env('DB_MAX_CONNECTIONS', max(50, total_workers + 20))
+            # Guard against too-low values that can break semaphore initialization.
+            max_connections = max(10, requested_max_connections)
                 
-            self.db_pool = PostgreSQLConnectionPool(minconn=5, maxconn=max_connections, **DB_CONFIG)
+            self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_connections, **DB_CONFIG)
             
             # Resource protection: Gate DB-intensive workers using a semaphore
             from db_pooling import ConnectionLimiter
-            self.db_limiter = ConnectionLimiter(self.db_pool, max_concurrent_db_ops=max_connections - 10)
+            limiter_capacity = max(1, max_connections - 10)
+            self.db_limiter = ConnectionLimiter(self.db_pool, max_concurrent_db_ops=limiter_capacity)
             
-            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']} (maxconn={max_connections})")
+            logger.info(
+                f"✅ Initialized database connection pool for: {DB_CONFIG['database']} "
+                f"(maxconn={max_connections}, limiter={limiter_capacity})"
+            )
             logger.info(f"🚀 Concurrency scaled for 64GB server: {chunk_workers} chunks, {row_workers} workers/chunk")
             return True
         except Exception as e:
@@ -315,41 +322,70 @@ class AccusedETL:
 
     def ensure_run_state_table(self):
         """Ensure ETL run-state table exists."""
-        with self.db_pool.get_connection_context() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS etl_run_state (
-                    module_name TEXT PRIMARY KEY,
-                    last_successful_end TIMESTAMPTZ NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS etl_run_state (
+                        module_name TEXT PRIMARY KEY,
+                        last_successful_end TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+            self.run_state_enabled = True
+        except Exception as e:
+            self.run_state_enabled = False
+            logger.warning(
+                "⚠️  Could not initialize etl_run_state (continuing without checkpoint persistence): %s",
+                e,
+            )
 
     def get_run_checkpoint(self, module_name: str) -> Optional[datetime]:
         """Get last successful run checkpoint for a module."""
-        with self.db_pool.get_connection_context() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
-                (module_name,)
+        if not self.run_state_enabled:
+            return None
+
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                    (module_name,)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            self.run_state_enabled = False
+            logger.warning(
+                "⚠️  Could not read etl_run_state checkpoint (continuing without checkpoint read): %s",
+                e,
             )
-            row = cursor.fetchone()
-            return row[0] if row else None
+            return None
 
     def update_run_checkpoint(self, module_name: str, end_date_iso: str):
         """Persist successful run boundary."""
+        if not self.run_state_enabled:
+            return
+
         end_dt = parse_iso_date(end_date_iso)
-        with self.db_pool.get_connection_context() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
-                VALUES (%s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (module_name) DO UPDATE SET
-                    last_successful_end = EXCLUDED.last_successful_end,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (module_name, end_dt))
-            conn.commit()
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (module_name) DO UPDATE SET
+                        last_successful_end = EXCLUDED.last_successful_end,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (module_name, end_dt))
+                conn.commit()
+        except Exception as e:
+            self.run_state_enabled = False
+            logger.warning(
+                "⚠️  Could not persist etl_run_state checkpoint (continuing): %s",
+                e,
+            )
     
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
