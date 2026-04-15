@@ -83,9 +83,12 @@ BRIEF_FACTS_ACCUSED_TABLE = TABLE_CONFIG.get('brief_facts_accused', 'brief_facts
 
 def parse_iso_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string (with optional time component) to datetime."""
-    if 'T' in date_str:
-        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-    return datetime.strptime(date_str, '%Y-%m-%d')
+    clean_date = date_str.replace('Z', '+00:00')
+    try:
+        return datetime.fromisoformat(clean_date)
+    except ValueError:
+        date_only = clean_date.split('T')[0].split(' ')[0]
+        return datetime.strptime(date_only, '%Y-%m-%d')
 
 
 def get_yesterday_end_ist() -> str:
