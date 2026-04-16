@@ -85,8 +85,13 @@ def parse_iso_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string (with optional time component) to datetime."""
     clean_date = date_str.replace('Z', '+00:00')
     try:
-        return datetime.fromisoformat(clean_date)
+        # Handle both T-separated and space-separated datetime formats
+        if 'T' in clean_date or ' ' in clean_date:
+            return datetime.fromisoformat(clean_date)
+        else:
+            return datetime.strptime(clean_date, '%Y-%m-%d')
     except ValueError:
+        # Fall back to date-only parsing
         date_only = clean_date.split('T')[0].split(' ')[0]
         return datetime.strptime(date_only, '%Y-%m-%d')
 

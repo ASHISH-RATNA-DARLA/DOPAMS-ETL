@@ -152,7 +152,6 @@ def resolve_db_env(env_name: str) -> Dict[str, str]:
         "DB_NAME": str(resolved["dbname"]),
         "DB_USER": str(resolved["user"]),
         "DB_PASSWORD": str(resolved["password"]),
-        "DB_SOURCE": str(resolved["source"]),
     }
 
 

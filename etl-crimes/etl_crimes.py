@@ -76,7 +76,7 @@ IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
 def parse_iso_date(iso_date_str: str) -> datetime:
     """Parse ISO 8601 date string to datetime object"""
     try:
-        if 'T' in iso_date_str:
+        if 'T' in iso_date_str or ' ' in iso_date_str:
             return datetime.fromisoformat(iso_date_str.replace('Z', '+00:00'))
         else:
             dt = datetime.strptime(iso_date_str, '%Y-%m-%d')

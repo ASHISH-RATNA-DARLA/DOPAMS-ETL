@@ -46,16 +46,17 @@ def parse_iso_date(iso_date_str: str) -> datetime:
     Parse ISO 8601 date string to datetime object
     Supports formats:
     - YYYY-MM-DDTHH:MM:SS+TZ:TZ (e.g., '2022-10-01T00:00:00+05:30')
+    - YYYY-MM-DD HH:MM:SS+TZ:TZ (e.g., '2022-10-01 00:00:00+05:30') - space-separated
     - YYYY-MM-DD (e.g., '2022-10-01') - defaults to 00:00:00 IST
     """
     try:
-        if 'T' in iso_date_str:
+        if 'T' in iso_date_str or ' ' in iso_date_str:
             return datetime.fromisoformat(iso_date_str.replace('Z', '+00:00'))
         else:
             dt = datetime.strptime(iso_date_str, '%Y-%m-%d')
             return dt.replace(tzinfo=IST_OFFSET)
     except ValueError:
-        dt = datetime.strptime(iso_date_str.split('T')[0], '%Y-%m-%d')
+        dt = datetime.strptime(iso_date_str.split('T')[0].split(' ')[0], '%Y-%m-%d')
         return dt.replace(tzinfo=IST_OFFSET)
 
 def iso_to_date_only(iso_date_str: str) -> str:

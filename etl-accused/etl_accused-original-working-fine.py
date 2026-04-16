@@ -63,7 +63,7 @@ PERSONS_TABLE = TABLE_CONFIG.get('persons', 'persons')
 
 def parse_iso_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string (with optional time component) to datetime."""
-    if 'T' in date_str:
+    if 'T' in date_str or ' ' in date_str:
         return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
     return datetime.strptime(date_str, '%Y-%m-%d')
 
