@@ -502,3 +502,8 @@ def bulk_upsert_brief_facts_ai(conn, items):
                 json.dumps(item_data.get('drugs')) if item_data.get('drugs') is not None else None,
                 item_data.get('etl_run_id'),
             ))
+
+
+def insert_accused_facts(conn, item_data):
+    """Wrapper to insert a single accused fact record. Uses bulk_upsert_brief_facts_ai internally."""
+    bulk_upsert_brief_facts_ai(conn, [item_data])

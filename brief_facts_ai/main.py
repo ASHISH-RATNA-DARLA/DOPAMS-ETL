@@ -31,7 +31,7 @@ from db import (
     fetch_crime_profile,
     fetch_crime_associate_person_codes,
     delete_brief_facts_for_crime,
-    update_sentinel_role, bulk_upsert_brief_facts_ai, write_drugs_by_accused_in_memory,
+    update_sentinel_role, bulk_upsert_brief_facts_ai, write_drugs_by_accused_in_memory, insert_accused_facts,
 )
 from extractor_accused import (
     extract_accused_info,
