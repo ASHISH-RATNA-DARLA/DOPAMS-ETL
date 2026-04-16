@@ -406,16 +406,16 @@ def resolve_db_config() -> Dict[str, Union[str, int]]:
             )
             print(f"[CONFIG] Ignoring partial DB alias sources because a complete source was found: {details}")
 
+    print(f"[CONFIG] Using DB config source: {source}")
+
     config = {
         "host": canonical_values["host"],
         "dbname": canonical_values["dbname"],
         "user": canonical_values["user"],
         "password": canonical_values["password"],
         "port": int(canonical_values["port"]),
-        "source": source,
     }
 
-    print(f"[CONFIG] Using DB config source: {config['source']}")
     print(
         f"[CONFIG] DB target: host={config['host']} dbname={config['dbname']} user={config['user']} port={config['port']}"
     )
