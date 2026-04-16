@@ -1101,7 +1101,7 @@ class UpdatedChargesheetETL:
                             %s, %s, %s, %s, %s, %s, %s, %s, %s{', %s' if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified') else ''}
                     )
                 """
-                    insert_values = (
+                insert_values = (
                     update_charge_sheet_id,
                     crime_id,
                     chargesheet.get('charge_sheet_no'),
@@ -1112,9 +1112,9 @@ class UpdatedChargesheetETL:
                     chargesheet.get('taken_on_file_court_case_no'),
                     chargesheet.get('date_created')
                 )
-                    if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified'):
-                        insert_values = insert_values + (chargesheet.get('date_modified'),)
-                    self._cursor.execute(insert_query, insert_values)
+                if self.has_table_column(UPDATE_CHARGESHEET_TABLE, 'date_modified'):
+                    insert_values = insert_values + (chargesheet.get('date_modified'),)
+                self._cursor.execute(insert_query, insert_values)
                 with self.stats_lock:
                     self.stats['total_chargesheets_inserted'] += 1
                 logger.debug(f"Inserted chargesheet: update_charge_sheet_id={update_charge_sheet_id}, crime_id={crime_id}")
