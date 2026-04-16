@@ -1,5 +1,6 @@
 """Configuration file for DOPAMAS ETL Pipeline"""
 
+from datetime import datetime, timedelta, timezone
 from env_utils import (
     get_bool_env,
     get_int_env,
@@ -10,6 +11,11 @@ from env_utils import (
 )
 
 load_repo_environment()
+
+# Calculate yesterday's end time in IST (UTC+05:30)
+IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
+now_ist = datetime.now(IST_OFFSET)
+yesterday_end = (now_ist - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=0)
 
 DB_CONFIG = resolve_db_config()
 
@@ -27,7 +33,7 @@ API_CONFIG = {
 
 ETL_CONFIG = {
     'start_date': '2022-06-01T00:00:00+05:30',
-    'end_date': '2026-04-16T23:59:59+05:30',
+    'end_date': yesterday_end.isoformat(),  # Dynamically set to yesterday's end (23:59:59)
     'chunk_days': 5,
     'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),
     'batch_size': 100,
