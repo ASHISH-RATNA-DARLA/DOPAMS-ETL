@@ -26,8 +26,8 @@ API_CONFIG = {
 }
 
 ETL_CONFIG = {
-    'start_date': '2022-01-01T00:00:00+05:30',
-    'end_date': '2025-12-31T23:59:59+05:30',
+    'start_date': '2022-06-01T00:00:00+05:30',
+    'end_date': '2026-04-16T23:59:59+05:30',
     'chunk_days': 5,
     'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),
     'batch_size': 100,

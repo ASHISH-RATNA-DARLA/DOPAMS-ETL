@@ -1396,7 +1396,7 @@ class PersonsETL:
             if checkpoint_date and (resume_boundary is None or checkpoint_date > resume_boundary):
                 resume_boundary = checkpoint_date
 
-            effective_start_date = resume_boundary.isoformat() if resume_boundary else '2022-01-01T00:00:00+05:30'
+            effective_start_date = resume_boundary if resume_boundary else '2022-01-01T00:00:00+05:30'
             calculated_end_date = get_yesterday_end_ist()
 
             chunk_days = int(os.environ.get('CHUNK_DAYS', '5'))
