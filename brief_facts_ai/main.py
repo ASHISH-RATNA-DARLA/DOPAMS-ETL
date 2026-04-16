@@ -6,6 +6,9 @@ import uuid
 import os
 import unicodedata
 from difflib import SequenceMatcher
+# Allow imports from sibling ETL modules (e.g., env_utils from parent)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import config
 
 try:
@@ -51,9 +54,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 UNIFIED_TABLE_NAME = "brief_facts_ai"
-
-# Allow imports from sibling ETL modules (e.g., brief_facts_drugs)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 def _synthetic_accused_id(crime_id, full_name, seq_num):

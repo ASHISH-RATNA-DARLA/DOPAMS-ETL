@@ -549,18 +549,32 @@ class ETLMigration:
             
             now = datetime.now()
             
+            # Construct metadata JSON
+            metadata = {
+                'drug_category': drug_category,
+                'total_quantity': total_quantity,
+                'supply_chain': supply_chain,
+                'source_location': source_location,
+                'number_of_packets': packet_count,
+                'packaging_details': packaging_details
+            }
+            
+            # Parse seizure worth
+            try:
+                worth = float(street_value) if street_value else 0.0
+            except Exception:
+                worth = 0.0
+
             cursor.execute("""
-                INSERT INTO brief_facts_drugs (
-                    id, crime_id, drug_name, drug_category, total_quantity,
-                    quantity_numeric, quantity_unit, supply_chain, source_location,
-                    street_value, number_of_packets, packaging_details,
-                    date_created, date_modified
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO brief_facts_drug (
+                    id, crime_id, raw_drug_name, primary_drug_name, raw_quantity,
+                    raw_unit, weight_kg, seizure_worth, extraction_metadata,
+                    created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
-                drug_id, crime_id, drug_name, drug_category, total_quantity,
-                quantity_numeric, quantity_unit, supply_chain, source_location,
-                street_value, packet_count, packaging_details, now, now
+                drug_id, crime_id, drug_name or 'Unknown', drug_name or 'Unknown', quantity_numeric,
+                quantity_unit, quantity_numeric, worth, json.dumps(metadata), now, now
             ))
             
             result = cursor.fetchone()
@@ -720,7 +734,7 @@ class ETLMigration:
             # Check if drug records already exist (check before early return)
             cursor = conn.cursor()
             try:
-                cursor.execute("SELECT COUNT(*) FROM brief_facts_drugs WHERE crime_id = %s", (crime_id,))
+                cursor.execute("SELECT COUNT(*) FROM brief_facts_drug WHERE crime_id = %s", (crime_id,))
                 drug_count = cursor.fetchone()[0]
             except Exception as e:
                 logger.error(f"Error checking drug records: {e}")
