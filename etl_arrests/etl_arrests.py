@@ -97,7 +97,7 @@ def parse_iso_date(iso_date_str: str) -> datetime:
     """
     try:
         # Try parsing as ISO format with timezone
-        if 'T' in iso_date_str:
+        if 'T' in iso_date_str or ' ' in iso_date_str:
             # ISO format with time: 2022-10-01T00:00:00+05:30
             return datetime.fromisoformat(iso_date_str.replace('Z', '+00:00'))
         else:
@@ -120,7 +120,7 @@ def iso_to_date_only(iso_date_str: str) -> str:
     Returns:
         Date string in YYYY-MM-DD format
     """
-    if 'T' in iso_date_str:
+    if 'T' in iso_date_str or ' ' in iso_date_str:
         return iso_date_str.split('T')[0]
     return iso_date_str
 
