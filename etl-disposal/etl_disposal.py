@@ -1506,7 +1506,7 @@ class DisposalETL:
             effective_start_date = self.get_effective_start_date()
             checkpoint_date = self.get_run_checkpoint('disposal')
             if checkpoint_date:
-                checkpoint_iso = checkpoint_date.isoformat()
+                checkpoint_iso = checkpoint_date if isinstance(checkpoint_date, str) else checkpoint_date.isoformat()
                 if parse_iso_date(checkpoint_iso) > parse_iso_date(effective_start_date):
                     effective_start_date = checkpoint_iso
 

@@ -1393,8 +1393,10 @@ class PersonsETL:
             last_date = self.get_last_processed_date()
             checkpoint_date = self.get_run_checkpoint('persons')
             resume_boundary = last_date
-            if checkpoint_date and (resume_boundary is None or checkpoint_date > resume_boundary):
-                resume_boundary = checkpoint_date
+            if checkpoint_date:
+                checkpoint_dt = parse_iso_date(checkpoint_date) if isinstance(checkpoint_date, str) else checkpoint_date
+                if resume_boundary is None or checkpoint_dt > resume_boundary:
+                    resume_boundary = checkpoint_dt
 
             effective_start_date = resume_boundary.isoformat() if resume_boundary else '2022-01-01T00:00:00+05:30'
             calculated_end_date = get_yesterday_end_ist()
