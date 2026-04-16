@@ -203,7 +203,7 @@ def run_preflight(config_path: str, env_name: str) -> None:
     load_repo_environment()
 
     resolved = resolve_db_config()
-    print(f"[CONFIG] Preflight DB target: host={resolved['host']} dbname={resolved['dbname']} user={resolved['user']} source={resolved['source']}")
+    print(f"[CONFIG] Preflight DB target: host={resolved['host']} dbname={resolved['dbname']} user={resolved['user']} port={resolved['port']}")
 
 
     processes = parse_input_file(config_path)
