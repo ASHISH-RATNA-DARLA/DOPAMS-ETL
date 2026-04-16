@@ -254,7 +254,7 @@ class FilesETL:
                 logger.info(f"✅ Database pool created: {ProductionConfig.DB_POOL_SIZE} connections")
             else:
                 self.db_conn = psycopg2.connect(**DB_CONFIG)
-                logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+                logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']}")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")

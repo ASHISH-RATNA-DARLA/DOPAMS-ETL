@@ -323,7 +323,7 @@ class DisposalETL:
             self.db_conn = self.db_pool.get_connection()
             self.db_cursor = self.db_conn.cursor()
             
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']} using connection pool")
+            logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']} using connection pool")
             logger.info(f"   Pool: min={optimal_pool_size // 2}, max={max_pool_size} (workers={max_workers})")
             return self.db_pool is not None
         except Exception as e:

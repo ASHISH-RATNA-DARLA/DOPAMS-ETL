@@ -298,7 +298,7 @@ class ArrestsETL:
                     maxconn=self.max_workers + 5,
                     **DB_CONFIG
                 )
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']}")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")

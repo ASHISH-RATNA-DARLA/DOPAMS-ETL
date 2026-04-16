@@ -277,7 +277,7 @@ class UpdatedChargesheetETL:
         """Connect to PostgreSQL database"""
         try:
             _ = self._conn
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']} (autocommit enabled)")
+            logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']} (autocommit enabled)")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")

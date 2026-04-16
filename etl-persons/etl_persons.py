@@ -290,7 +290,7 @@ class PersonsETL:
                 max_conn=max_workers + 5, 
                 **DB_CONFIG
             )
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']} (Pool max: {self.db_pool.max_conn})")
+            logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']} (Pool max: {self.db_pool.max_conn})")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")

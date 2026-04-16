@@ -309,7 +309,7 @@ class AccusedETL:
             self.db_limiter = ConnectionLimiter(self.db_pool, max_concurrent_db_ops=limiter_capacity)
             
             logger.info(
-                f"✅ Initialized database connection pool for: {DB_CONFIG['database']} "
+                f"✅ Initialized database connection pool for: {DB_CONFIG['dbname']} "
                 f"(maxconn={max_connections}, limiter={limiter_capacity})"
             )
             logger.info(f"🚀 Concurrency scaled for 64GB server: {chunk_workers} chunks, {row_workers} workers/chunk")

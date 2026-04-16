@@ -99,7 +99,7 @@ def run_sync(logger=None):
     if not validate_db_config(logger):
         return False
 
-    logger.info(f"Connecting to database {DB_CONFIG['database']} at {DB_CONFIG['host']}...")
+    logger.info(f"Connecting to database {DB_CONFIG['dbname']} at {DB_CONFIG['host']}...")
     if LOADED_ENV_FILE:
         logger.info(f"Loaded environment from {LOADED_ENV_FILE}")
 

@@ -409,7 +409,6 @@ def resolve_db_config() -> Dict[str, Union[str, int]]:
     config = {
         "host": canonical_values["host"],
         "dbname": canonical_values["dbname"],
-        "database": canonical_values["dbname"],
         "user": canonical_values["user"],
         "password": canonical_values["password"],
         "port": int(canonical_values["port"]),

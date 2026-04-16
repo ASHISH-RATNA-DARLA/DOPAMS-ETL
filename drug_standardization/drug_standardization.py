@@ -118,7 +118,7 @@ def run_standardization():
         logger.info("=" * 70)
         logger.info("DRUG STANDARDIZATION ETL -- START")
         logger.info("=" * 70)
-        logger.info(f"DB           : {DB_CONFIG['host']} / {DB_CONFIG['database']}")
+        logger.info(f"DB           : {DB_CONFIG['host']} / {DB_CONFIG['dbname']}")
         logger.info(f"Fuzzy thresh : {FUZZY_THRESHOLD}")
 
         cur.execute(

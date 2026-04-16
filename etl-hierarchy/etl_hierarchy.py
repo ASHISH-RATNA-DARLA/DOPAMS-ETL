@@ -161,7 +161,7 @@ class HierarchyETL:
                 max_workers = ETL_CONFIG.get('max_workers', 5)
                 
             self.db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=max_workers + 5)
-            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['database']}")
+            logger.info(f"✅ Initialized database connection pool for: {DB_CONFIG['dbname']}")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection pool initialization failed: {e}")

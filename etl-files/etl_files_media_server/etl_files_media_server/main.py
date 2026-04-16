@@ -323,7 +323,7 @@ class FilesMediaServerETL:
         try:
             self.db_conn = psycopg2.connect(**DB_CONFIG)
             self.db_cursor = self.db_conn.cursor()
-            logger.info(f"✅ Connected to database: {DB_CONFIG['database']}")
+            logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']}")
             return True
         except Exception as exc:
             logger.error(f"❌ Database connection failed: {exc}")
