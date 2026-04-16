@@ -502,7 +502,7 @@ SET default_table_access_method = heap;
 --
 
 CREATE TABLE public.accused (
-    accused_id character varying(50) NOT NULL,
+    accused_id character varying(50) NOT NULL PRIMARY KEY,
     crime_id character varying(50) NOT NULL,
     person_id character varying(50),
     accused_code character varying(20) NOT NULL,
@@ -678,7 +678,7 @@ ALTER VIEW public.brief_facts_ai_drug_flat OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.crimes (
-    crime_id character varying(50) NOT NULL,
+    crime_id character varying(50) NOT NULL PRIMARY KEY,
     ps_code character varying(20) NOT NULL,
     fir_num character varying(50) NOT NULL,
     fir_reg_num character varying(50) NOT NULL,
@@ -726,14 +726,15 @@ COMMENT ON COLUMN public.crimes.brief_facts IS 'Detailed description of the crim
 --
 
 CREATE TABLE public.disposal (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
     crime_id character varying(50) NOT NULL,
     disposal_type text,
     disposed_at timestamp with time zone,
     disposal text,
     case_status text,
     date_created timestamp with time zone,
-    date_modified timestamp with time zone
+    date_modified timestamp with time zone,
+    UNIQUE (crime_id, disposal_type, disposed_at)
 );
 
 
@@ -783,7 +784,7 @@ COMMENT ON TABLE public.hierarchy IS 'Police organizational hierarchy from ADG t
 --
 
 CREATE TABLE public.persons (
-    person_id character varying(50) NOT NULL,
+    person_id character varying(50) NOT NULL PRIMARY KEY,
     name character varying(255),
     surname character varying(255),
     alias character varying(255),
@@ -2614,7 +2615,7 @@ ALTER SEQUENCE public.geo_reference_id_seq OWNED BY public.geo_reference.id;
 --
 
 CREATE TABLE public.interrogation_reports (
-    interrogation_report_id character varying(50) NOT NULL,
+    interrogation_report_id character varying(50) NOT NULL PRIMARY KEY,
     crime_id character varying(50) NOT NULL,
     person_id character varying(50),
     physical_beard character varying(100),
@@ -2863,7 +2864,7 @@ ALTER TABLE public.ir_financial_history OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.ir_indulgance_before_offence (
-    id integer NOT NULL,
+    id integer NOT NULL PRIMARY KEY,
     interrogation_report_id character varying(50) NOT NULL,
     indulgance text,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
@@ -2878,7 +2879,7 @@ ALTER TABLE public.ir_indulgance_before_offence OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.ir_interrogation_report_refs (
-    id integer NOT NULL,
+    id integer NOT NULL PRIMARY KEY,
     interrogation_report_id character varying(50) NOT NULL,
     report_ref_id text NOT NULL
 );
@@ -2935,7 +2936,7 @@ ALTER TABLE public.ir_local_contacts OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.ir_media (
-    id integer NOT NULL,
+    id integer NOT NULL PRIMARY KEY,
     interrogation_report_id character varying(50) NOT NULL,
     media_id text NOT NULL
 );
@@ -2989,7 +2990,7 @@ ALTER TABLE public.ir_new_gang_formation OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.ir_pending_fk (
-    id integer NOT NULL,
+    id integer NOT NULL PRIMARY KEY,
     ir_id character varying(50) NOT NULL,
     crime_id character varying(50) NOT NULL,
     raw_data jsonb NOT NULL,
@@ -3002,6 +3003,13 @@ CREATE TABLE public.ir_pending_fk (
 
 
 ALTER TABLE public.ir_pending_fk OWNER TO dev_dopamas;
+
+--
+-- Create partial unique index for ir_pending_fk on (ir_id) WHERE NOT resolved
+--
+CREATE UNIQUE INDEX idx_ir_pending_fk_ir_id_unresolved
+  ON public.ir_pending_fk (ir_id)
+  WHERE NOT resolved;
 
 --
 -- TOC entry 290 (class 1259 OID 39132931)
@@ -3080,7 +3088,7 @@ ALTER TABLE public.ir_property_disposal OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.ir_regular_habits (
-    id integer NOT NULL,
+    id integer NOT NULL PRIMARY KEY,
     interrogation_report_id character varying(50) NOT NULL,
     habit character varying(255) NOT NULL
 );
@@ -3367,7 +3375,7 @@ ALTER TABLE public.person_deduplication_tracker OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.properties (
-    property_id character varying(50) NOT NULL,
+    property_id character varying(50) NOT NULL PRIMARY KEY,
     crime_id character varying(50) NOT NULL,
     case_property_id character varying(50),
     property_status character varying(100),

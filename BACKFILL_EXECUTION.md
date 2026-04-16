@@ -5,8 +5,94 @@
 ✅ Database is truncated (except Knowledge Base)
 ✅ etl_persons.py isoformat bug is fixed
 ✅ etl-crimes/config.py updated (start: June 2022, end: Apr 16, 2026)
+✅ crimes table has PRIMARY KEY on crime_id (added for ON CONFLICT upsert)
 ⚠️ Need to: Clear etl_run_state checkpoints on remote server
 ⚠️ Need to: Confirm etl-mongo-to-postgresql is not running
+
+## Step 0: Fix PRIMARY KEY constraints on UPSERT tables
+
+Multiple tables use ON CONFLICT clauses that require PRIMARY KEY or UNIQUE constraints. Apply ALL 10 constraint fixes (6 primary tables + 4 IR subtables + 1 special case):
+
+```bash
+psql -h 192.168.103.106 -U dev_dopamas -d dev-3 << 'EOF'
+-- ========== PRIMARY TABLES (6) ==========
+-- Add PRIMARY KEY constraints for single-column upserts
+ALTER TABLE public.crimes ADD CONSTRAINT pk_crimes_id PRIMARY KEY (crime_id);
+ALTER TABLE public.accused ADD CONSTRAINT pk_accused_id PRIMARY KEY (accused_id);
+ALTER TABLE public.persons ADD CONSTRAINT pk_persons_id PRIMARY KEY (person_id);
+ALTER TABLE public.properties ADD CONSTRAINT pk_properties_id PRIMARY KEY (property_id);
+ALTER TABLE public.interrogation_reports ADD CONSTRAINT pk_ir_id PRIMARY KEY (interrogation_report_id);
+
+-- Add composite UNIQUE constraint for disposal table's ON CONFLICT
+ALTER TABLE public.disposal ADD CONSTRAINT uk_disposal_composite UNIQUE (crime_id, disposal_type, disposed_at);
+
+-- ========== INTERROGATION REPORT SUBTABLES (4) ==========
+-- Add PRIMARY KEY constraints for IR subtables using ON CONFLICT DO NOTHING
+ALTER TABLE public.ir_regular_habits ADD CONSTRAINT pk_ir_regular_habits_id PRIMARY KEY (id);
+ALTER TABLE public.ir_media ADD CONSTRAINT pk_ir_media_id PRIMARY KEY (id);
+ALTER TABLE public.ir_interrogation_report_refs ADD CONSTRAINT pk_ir_interrogation_report_refs_id PRIMARY KEY (id);
+ALTER TABLE public.ir_indulgance_before_offence ADD CONSTRAINT pk_ir_indulgance_before_offence_id PRIMARY KEY (id);
+
+-- ========== PENDING FK TABLE (1 SPECIAL CASE) ==========
+-- Add PRIMARY KEY and partial unique index for ir_pending_fk
+ALTER TABLE public.ir_pending_fk ADD CONSTRAINT pk_ir_pending_fk_id PRIMARY KEY (id);
+CREATE UNIQUE INDEX idx_ir_pending_fk_ir_id_unresolved 
+  ON public.ir_pending_fk (ir_id) 
+  WHERE NOT resolved;
+
+-- ========== VERIFICATION ==========
+-- Verify all 10 constraints were added
+SELECT table_name, constraint_name, constraint_type 
+FROM information_schema.table_constraints 
+WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') 
+  AND table_name IN ('crimes', 'accused', 'persons', 'properties', 'interrogation_reports', 'disposal',
+                      'ir_regular_habits', 'ir_media', 'ir_interrogation_report_refs', 
+                      'ir_indulgance_before_offence', 'ir_pending_fk')
+ORDER BY table_name;
+
+-- Verify partial unique index exists
+SELECT indexname, indexdef 
+FROM pg_indexes 
+WHERE tablename = 'ir_pending_fk' AND indexname = 'idx_ir_pending_fk_ir_id_unresolved';
+EOF
+```
+
+Expected output shows PRIMARY KEY and UNIQUE constraints on 11 tables:
+```
+ table_name                        | constraint_name                   | constraint_type
+-----------------------------------+-----------------------------------+-----------------
+ accused                           | pk_accused_id                     | PRIMARY KEY
+ crimes                            | pk_crimes_id                      | PRIMARY KEY
+ disposal                          | pk_disposal_pkey                  | PRIMARY KEY
+ disposal                          | uk_disposal_composite             | UNIQUE
+ interrogation_reports             | pk_ir_id                          | PRIMARY KEY
+ ir_indulgance_before_offence      | pk_ir_indulgance_before_offence_id| PRIMARY KEY
+ ir_interrogation_report_refs      | pk_ir_interrogation_report_refs_id| PRIMARY KEY
+ ir_media                          | pk_ir_media_id                    | PRIMARY KEY
+ ir_pending_fk                      | pk_ir_pending_fk_id               | PRIMARY KEY
+ ir_regular_habits                 | pk_ir_regular_habits_id           | PRIMARY KEY
+ persons                           | pk_persons_id                     | PRIMARY KEY
+ properties                        | pk_properties_id                  | PRIMARY KEY
+```
+
+**Why these fixes are needed:**
+
+**Primary Tables (6):**
+- `crimes`: ON CONFLICT (crime_id) at etl_crimes.py:673-696
+- `accused`: ON CONFLICT (accused_id) at etl_accused.py:1448-1471  
+- `persons`: PRIMARY KEY needed as target for accused.person_id foreign key
+- `properties`: ON CONFLICT (property_id) at etl_properties.py
+- `interrogation_reports`: ON CONFLICT (ir_id) at etl_ir.py
+- `disposal`: ON CONFLICT (crime_id, disposal_type, disposed_at) at etl_disposal.py
+
+**IR Subtables (4):**
+- `ir_regular_habits`: ON CONFLICT DO NOTHING at ir_etl_enhanced.py:650
+- `ir_media`: ON CONFLICT DO NOTHING at ir_etl_enhanced.py:878
+- `ir_interrogation_report_refs`: ON CONFLICT DO NOTHING at ir_etl_enhanced.py:890
+- `ir_indulgance_before_offence`: ON CONFLICT DO NOTHING at ir_etl_enhanced.py:919
+
+**Pending FK Table (1):**
+- `ir_pending_fk`: ON CONFLICT (ir_id) WHERE NOT resolved at ir_etl_enhanced.py:277
 
 ## Step 1: Verify etl-mongo-to-postgresql is NOT Running
 
