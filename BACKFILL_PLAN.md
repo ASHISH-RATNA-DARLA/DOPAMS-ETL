@@ -90,8 +90,27 @@ SELECT * FROM etl_run_state;
 -- 3. Update checkpoint on success
 ```
 
-## Current Fix Applied
+## Current Fixes Applied
 ✅ Fixed etl_persons.py line 1399: removed `.isoformat()` call on already-string `resume_boundary`
+✅ Added master checkpoint system: Only advances end_date after ALL 28 steps complete
+✅ Dynamic end_date: Uses fixed date during backfill, switches to daily after completion
+
+## Master Checkpoint System (Safety Feature)
+
+**Problem:** If pipeline fails at step 20, the next day's end_date is different, creating gaps in coverage
+
+**Solution:** Master `etl_run_state` checkpoint that only updates on complete success
+
+**How it works:**
+1. **During Backfill**: end_date = fixed '2026-04-16T23:59:59+05:30' (prevents gaps if pipeline fails)
+2. **Pipeline Success**: master_etl_backfill_complete checkpoint is set
+3. **After Backfill**: end_date = dynamic yesterday's end (24-hour rolling window)
+4. **Pipeline Failure**: Checkpoint NOT updated, next run retries from last successful step
+
+**Result:**
+- No data gaps if pipeline fails mid-backfill
+- Automatic transition to daily incremental mode after completion
+- Each failed run leaves checkpoint unchanged, allowing safe retry
 
 ## Files to Modify
 1. `/home/ashish-ratna/DOPAMS-ETL/etl-crimes/config.py` - Update date range

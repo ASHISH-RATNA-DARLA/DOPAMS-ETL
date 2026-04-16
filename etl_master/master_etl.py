@@ -27,6 +27,7 @@ from preflight_check import (
     parse_input_file,
     run_preflight,
 )
+from checkpoint_manager import mark_backfill_complete
 
 
 MASTER_LOG_DIR = None
@@ -486,6 +487,14 @@ def main():
 
     total_time = time.time() - pipeline_start_time
     logger.info("All ETL processes finished successfully. Total execution time: %.2fs", total_time)
+
+    # Mark backfill as complete ONLY if all 28 steps succeeded
+    # This allows config.py to switch from fixed date range to dynamic daily mode
+    logger.info("Updating master checkpoint to mark backfill complete...")
+    if mark_backfill_complete():
+        logger.info("✅ Backfill marked complete. Future runs will use daily incremental mode.")
+    else:
+        logger.warning("⚠️ Failed to update master checkpoint. Backfill not marked complete.")
 
 
 if __name__ == "__main__":
