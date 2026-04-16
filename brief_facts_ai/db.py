@@ -71,6 +71,64 @@ def fetch_unprocessed_crimes(conn, limit=100):
         cur.execute(query, (limit,))
         return cur.fetchall()
 
+
+def fetch_unprocessed_crimes_since(conn, since_date, limit=100):
+    """
+    Fetch unprocessed or modified crimes whose date_created/date_modified falls at or
+    after `since_date`.  Used in daily incremental mode to avoid a full crimes table scan.
+
+    A crime is returned if it was never processed (no 'complete' log entry) OR has been
+    modified after its last completion timestamp.  The `since_date` filter restricts the
+    set of candidate crimes so the planner can use an index on the date column instead of
+    scanning every row.
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        query = """
+            SELECT
+                c.crime_id,
+                c.ps_code,
+                c.brief_facts,
+                COALESCE(c.date_modified, c.date_created) AS source_changed_at,
+                last_run.last_completed_at
+            FROM crimes c
+            LEFT JOIN LATERAL (
+                SELECT MAX(l.completed_at) AS last_completed_at
+                FROM public.etl_crime_processing_log l
+                WHERE l.crime_id = c.crime_id
+                  AND l.status = 'complete'
+            ) last_run ON TRUE
+            WHERE COALESCE(c.date_modified, c.date_created) >= %s
+              AND (last_run.last_completed_at IS NULL
+                   OR COALESCE(c.date_modified, c.date_created) > last_run.last_completed_at)
+            ORDER BY COALESCE(c.date_modified, c.date_created) DESC NULLS LAST,
+                     c.date_created DESC NULLS LAST
+            LIMIT %s
+        """
+        cur.execute(query, (since_date, limit))
+        return cur.fetchall()
+
+
+def get_incremental_cutoff_date(conn):
+    """
+    Return the cutoff datetime to use as `since_date` for incremental processing.
+
+    Strategy: max(completed_at) of successfully-processed crimes minus 1 day of overlap.
+    The overlap prevents silent gaps when a crime is processed just before midnight and
+    a downstream modification arrives moments later.
+
+    Returns a datetime object, or None if no completed runs exist (fall back to full scan).
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT MAX(completed_at) - INTERVAL '1 day' AS since_date
+            FROM public.etl_crime_processing_log
+            WHERE status = 'complete'
+        """)
+        row = cur.fetchone()
+        if row and row[0]:
+            return row[0]
+    return None
+
 def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limit=200):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""

@@ -17,8 +17,9 @@ from db import (
     get_db_connection,
     return_db_connection,
     fetch_crimes_by_ids,
-    
     fetch_unprocessed_crimes,
+    fetch_unprocessed_crimes_since,
+    get_incremental_cutoff_date,
     fetch_existing_accused_for_crime,
     start_crime_processing_run,
     complete_crime_processing_run,
@@ -517,19 +518,80 @@ def main():
             crimes = fetch_crimes_by_ids(conn, crime_ids)
             process_crimes_parallel(crimes)
         else:
-            logging.info("No input IDs provided. Starting Dynamic Batch Processing...")
+            # ---------------------------------------------------------------
+            # Determine processing mode:
+            #   Backfill  — first run; no processing history exists yet.
+            #               Must scan the full crimes table.
+            #   Incremental — daily run after backfill; limit the scan to
+            #               crimes modified since the last successful run
+            #               (with 1-day overlap for safety).
+            # ---------------------------------------------------------------
+            try:
+                sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'etl_master')))
+                from checkpoint_manager import is_backfill_complete
+                backfill_done = is_backfill_complete()
+            except Exception as _cp_err:
+                logging.warning("Could not read backfill checkpoint (%s); defaulting to full scan.", _cp_err)
+                backfill_done = False
+
             # Scale batch size for parallel processing on 64GB server
             batch_size = int(os.environ.get('BATCH_SIZE', '30'))
             total_processed = 0
-            while True:
-                crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
-                if not crimes:
-                    logging.info("No more unprocessed crimes found. Exiting.")
-                    break
-                logging.info(f"Fetched batch of {len(crimes)} unprocessed crimes.")
-                process_crimes_parallel(crimes)
-                total_processed += len(crimes)
-                logging.info(f"Batch complete. Total processed so far: {total_processed}")
+
+            if backfill_done:
+                # ----------------------------------------------------------
+                # Incremental daily mode
+                # Only process crimes created/modified since last run.
+                # get_incremental_cutoff_date returns (max completed_at - 1 day)
+                # so we never miss records near midnight boundaries.
+                # ----------------------------------------------------------
+                cutoff_date = get_incremental_cutoff_date(conn)
+                if cutoff_date:
+                    logging.info(
+                        "Incremental mode: scanning crimes modified on or after %s (overlap window applied).",
+                        cutoff_date.isoformat(),
+                    )
+                    while True:
+                        crimes = fetch_unprocessed_crimes_since(conn, cutoff_date, limit=batch_size)
+                        if not crimes:
+                            logging.info("No new or modified crimes found since %s. Done.", cutoff_date.isoformat())
+                            break
+                        logging.info("Fetched batch of %d crimes (incremental).", len(crimes))
+                        process_crimes_parallel(crimes)
+                        total_processed += len(crimes)
+                        logging.info("Batch complete. Total processed so far: %d", total_processed)
+                else:
+                    # Backfill marked complete but no completed runs in log — shouldn't
+                    # normally happen, but fall back to full scan so nothing is missed.
+                    logging.warning(
+                        "Backfill is marked complete but etl_crime_processing_log has no "
+                        "completed entries. Falling back to full scan."
+                    )
+                    while True:
+                        crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
+                        if not crimes:
+                            logging.info("No more unprocessed crimes found. Exiting.")
+                            break
+                        logging.info("Fetched batch of %d unprocessed crimes (full scan fallback).", len(crimes))
+                        process_crimes_parallel(crimes)
+                        total_processed += len(crimes)
+                        logging.info("Batch complete. Total processed so far: %d", total_processed)
+            else:
+                # ----------------------------------------------------------
+                # Backfill mode — scan the full crimes table.
+                # ----------------------------------------------------------
+                logging.info("Backfill mode: scanning all unprocessed crimes.")
+                while True:
+                    crimes = fetch_unprocessed_crimes(conn, limit=batch_size)
+                    if not crimes:
+                        logging.info("No more unprocessed crimes found. Exiting.")
+                        break
+                    logging.info("Fetched batch of %d unprocessed crimes.", len(crimes))
+                    process_crimes_parallel(crimes)
+                    total_processed += len(crimes)
+                    logging.info("Batch complete. Total processed so far: %d", total_processed)
+
+            logging.info("Total crimes processed this run: %d", total_processed)
 
     except KeyboardInterrupt:
         logging.info("Process interrupted by user.")
