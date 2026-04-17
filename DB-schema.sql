@@ -1455,7 +1455,7 @@ ALTER TABLE public.case_property_media OWNER TO dev_dopamas;
 --
 
 CREATE TABLE public.charge_sheet_updates (
-    id integer NOT NULL,
+    id SERIAL PRIMARY KEY,
     update_charge_sheet_id character varying(50) NOT NULL,
     crime_id character varying(50) NOT NULL,
     charge_sheet_no character varying(100),
@@ -1465,7 +1465,8 @@ CREATE TABLE public.charge_sheet_updates (
     taken_on_file_case_type character varying(50),
     taken_on_file_court_case_no character varying(100),
     date_created timestamp with time zone,
-    date_modified timestamp with time zone
+    date_modified timestamp with time zone,
+    UNIQUE(update_charge_sheet_id)
 );
 
 
