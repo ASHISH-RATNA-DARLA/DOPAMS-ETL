@@ -881,7 +881,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             ps_code,
         )
 
-        insert_accused_facts(conn, {
+        row_data = {
             'crime_id'             : crime_id,
             'accused_id'           : accused_id,
             'person_id'            : person_id,
@@ -908,7 +908,9 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             'source_accused_fields': source_accused,
             'source_summary_fields': source_summary,
             'etl_run_id'           : run_id,
-        })
+        }
+        branch_records.append(row_data)
+        insert_accused_facts(conn, row_data)
         count += 1
 
     logging.info(f"Branch A processed Crime {crime_id}. row_count={count}")
@@ -1014,6 +1016,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             data['dedup_review_flag'] = dedup_review_flag
             data['etl_run_id'] = run_id
 
+            branch_records.append(data)
             insert_accused_facts(conn, data)
             count += 1
 
@@ -1094,6 +1097,7 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
             data['dedup_match_tier'] = dedup_match_tier
             data['dedup_review_flag'] = dedup_review_flag
 
+            branch_records.append(data)
             insert_accused_facts(conn, data)
             count += 1
 
