@@ -196,12 +196,19 @@ class PersonRecord:
     perm_district: Optional[str] = None
     perm_mandal:   Optional[str] = None
     perm_country:  Optional[str] = None
+    perm_locality: Optional[str] = None
+    perm_landmark: Optional[str] = None
 
     # present
     pres_state:    Optional[str] = None
     pres_district: Optional[str] = None
     pres_mandal:   Optional[str] = None
     pres_country:  Optional[str] = None
+    pres_locality: Optional[str] = None
+    pres_landmark: Optional[str] = None
+
+    # personal
+    nationality:   Optional[str] = None
 
     def permanent_has_any_geo(self) -> bool:
         return any([_val(self.perm_state), _val(self.perm_district), _val(self.perm_mandal)])
@@ -216,6 +223,14 @@ class PersonRecord:
     def present_is_complete(self) -> bool:
         return all([_val(self.pres_state), _val(self.pres_district),
                     _val(self.pres_mandal), _val(self.pres_country)])
+
+    def has_soft_geo_signal(self) -> bool:
+        """Any locality/landmark/nationality that could seed a village-level lookup."""
+        return any([
+            _val(self.perm_locality), _val(self.perm_landmark),
+            _val(self.pres_locality), _val(self.pres_landmark),
+            _val(self.nationality),
+        ])
 
 
 @dataclass
@@ -242,11 +257,7 @@ class ForeignMatch:
 def _collect_foreign_candidates(rec: "PersonRecord") -> List[str]:
     """
     Collect all distinct, non-empty geo token strings from both permanent
-    and present address fields of the record.
-
-    We pull from six source fields:
-        permanent_state_ut, permanent_district, permanent_area_mandal
-        present_state_ut,   present_district,   present_area_mandal
+    and present address fields of the record, plus nationality + soft geo.
 
     Each value is stripped and de-duplicated (case-insensitive).
     Only values of 3+ characters are included to avoid noise.
@@ -256,6 +267,13 @@ def _collect_foreign_candidates(rec: "PersonRecord") -> List[str]:
         raw.extend([rec.perm_state, rec.perm_district, rec.perm_mandal])
     if not rec.present_is_complete():
         raw.extend([rec.pres_state, rec.pres_district, rec.pres_mandal])
+    # Soft signals — locality/landmark often contain "Goa", "Mumbai", etc.,
+    # and nationality is a direct country signal.
+    raw.extend([
+        rec.perm_locality, rec.perm_landmark,
+        rec.pres_locality, rec.pres_landmark,
+        rec.nationality,
+    ])
     seen: set = set()
     tokens: List[str] = []
     for v in raw:
@@ -660,6 +678,96 @@ def match_geo(
 
 
 # ---------------------------------------------------------------------------
+# Phase 1C: village / locality / landmark fuzzy match (geo_reference)
+# ---------------------------------------------------------------------------
+
+SIM_VILLAGE = float(os.environ.get("GEO_SIM_VILLAGE", "0.55"))
+
+
+def _match_village(token: str, record_id: str, addr_label: str) -> Optional[GeoMatch]:
+    """Fuzzy-match a locality/landmark token against geo_reference.village_name_english.
+
+    Returns GeoMatch(state, district, mandal=None) on hit.
+    Falls back to district_name match if no village match.
+    """
+    norm = normalize_geo_token(token)
+    if not norm or len(norm) < 3:
+        return None
+
+    sql_village = """
+        SELECT state_name, district_name, sub_district_name,
+               similarity(lower(village_name_english), %(token)s) AS sim
+        FROM geo_reference
+        WHERE lower(village_name_english) %% %(token)s
+          AND similarity(lower(village_name_english), %(token)s) >= %(thr)s
+        ORDER BY sim DESC
+        LIMIT 1
+    """
+    sql_district = """
+        SELECT state_name, district_name,
+               similarity(district_name, %(token)s) AS sim
+        FROM geo_reference
+        WHERE district_name %% %(token)s
+          AND similarity(district_name, %(token)s) >= %(thr)s
+        ORDER BY sim DESC
+        LIMIT 1
+    """
+
+    pool = get_db_pool()
+    try:
+        with pool.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                set_trgm_threshold(cur, SIM_VILLAGE)
+
+                cur.execute(sql_village, {"token": norm, "thr": SIM_VILLAGE})
+                row = cur.fetchone()
+                if row:
+                    logger.info(
+                        "  [%s] %s | village-match: token='%s' → state=%s district=%s mandal=%s sim=%.3f",
+                        record_id, addr_label, token, row[0], row[1], row[2], float(row[3]),
+                    )
+                    return GeoMatch(state=row[0], district=row[1], mandal=row[2], score=float(row[3]))
+
+                cur.execute(sql_district, {"token": norm, "thr": SIM_DISTRICT})
+                row = cur.fetchone()
+                if row:
+                    logger.info(
+                        "  [%s] %s | district-match: token='%s' → state=%s district=%s sim=%.3f",
+                        record_id, addr_label, token, row[0], row[1], float(row[2]),
+                    )
+                    return GeoMatch(state=row[0], district=row[1], mandal=None, score=float(row[2]))
+    except Exception as exc:
+        logger.error("  [%s] %s | village lookup failed: %s", record_id, addr_label, exc, exc_info=True)
+
+    return None
+
+
+def _phase1c_soft_geo_fallback(rec: "PersonRecord") -> Tuple[Optional[GeoMatch], Optional[GeoMatch]]:
+    """Village/landmark fuzzy match. Returns (perm_geo, pres_geo).
+
+    Runs only when Phase 1A/1B produced nothing AND locality/landmark is present.
+    Each side tries locality first, then landmark.
+    """
+    perm_geo = None
+    if _val(rec.perm_locality) or _val(rec.perm_landmark):
+        for tok in [rec.perm_locality, rec.perm_landmark]:
+            if _val(tok):
+                perm_geo = _match_village(tok, rec.person_id, "permanent-soft")
+                if perm_geo:
+                    break
+
+    pres_geo = None
+    if _val(rec.pres_locality) or _val(rec.pres_landmark):
+        for tok in [rec.pres_locality, rec.pres_landmark]:
+            if _val(tok):
+                pres_geo = _match_village(tok, rec.person_id, "present-soft")
+                if pres_geo:
+                    break
+
+    return perm_geo, pres_geo
+
+
+# ---------------------------------------------------------------------------
 # Database I/O
 # ---------------------------------------------------------------------------
 
@@ -683,16 +791,56 @@ def fetch_batch(
     sql = f"""
         SELECT
             {id_col},
-            TRIM(COALESCE(permanent_state_ut,    '')) AS perm_state,
-            TRIM(COALESCE(permanent_district,    '')) AS perm_district,
-            TRIM(COALESCE(permanent_area_mandal, '')) AS perm_mandal,
-            TRIM(COALESCE(permanent_country,     '')) AS perm_country,
-            TRIM(COALESCE(present_state_ut,      '')) AS pres_state,
-            TRIM(COALESCE(present_district,      '')) AS pres_district,
-            TRIM(COALESCE(present_area_mandal,   '')) AS pres_mandal,
-            TRIM(COALESCE(present_country,       '')) AS pres_country
+            TRIM(COALESCE(permanent_state_ut,          '')) AS perm_state,
+            TRIM(COALESCE(permanent_district,          '')) AS perm_district,
+            TRIM(COALESCE(permanent_area_mandal,       '')) AS perm_mandal,
+            TRIM(COALESCE(permanent_country,           '')) AS perm_country,
+            TRIM(COALESCE(present_state_ut,            '')) AS pres_state,
+            TRIM(COALESCE(present_district,            '')) AS pres_district,
+            TRIM(COALESCE(present_area_mandal,         '')) AS pres_mandal,
+            TRIM(COALESCE(present_country,             '')) AS pres_country,
+            TRIM(COALESCE(permanent_locality_village,  '')) AS perm_locality,
+            TRIM(COALESCE(permanent_landmark_milestone,'')) AS perm_landmark,
+            TRIM(COALESCE(present_locality_village,    '')) AS pres_locality,
+            TRIM(COALESCE(present_landmark_milestone,  '')) AS pres_landmark,
+            TRIM(COALESCE(nationality,                 '')) AS nationality
         FROM {table}
-        WHERE (
+        WHERE {_pending_where_sql()}
+        AND (%s IS NULL OR {id_col}::text > %s)
+        ORDER BY {id_col}
+        LIMIT %s
+    """
+    pool = get_db_pool()
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (last_seen_id, last_seen_id, limit))
+            rows = cur.fetchall()
+
+    return [
+        PersonRecord(
+            person_id    = str(r[0]),
+            perm_state   = r[1] or None,
+            perm_district= r[2] or None,
+            perm_mandal  = r[3] or None,
+            perm_country = r[4] or None,
+            pres_state   = r[5] or None,
+            pres_district= r[6] or None,
+            pres_mandal  = r[7] or None,
+            pres_country = r[8] or None,
+            perm_locality= r[9] or None,
+            perm_landmark= r[10] or None,
+            pres_locality= r[11] or None,
+            pres_landmark= r[12] or None,
+            nationality  = r[13] or None,
+        )
+        for r in rows
+    ]
+
+
+def _pending_where_sql() -> str:
+    """Shared WHERE predicate for pending persons (fetch_batch + count_pending)."""
+    return """
+        (
             -- Phase 1A: permanent has at least one geo field but is incomplete
             (
                 (
@@ -726,8 +874,25 @@ def fetch_batch(
                 )
             )
             OR
+            -- Phase 1C: no state/district/mandal anywhere, but locality/landmark/nationality present
+            -- and state_ut missing → village-level or nationality-driven resolution possible
+            (
+                TRIM(COALESCE(permanent_state_ut,    '')) = ''
+                AND TRIM(COALESCE(permanent_district, '')) = ''
+                AND TRIM(COALESCE(permanent_area_mandal, '')) = ''
+                AND TRIM(COALESCE(present_state_ut,    '')) = ''
+                AND TRIM(COALESCE(present_district,    '')) = ''
+                AND TRIM(COALESCE(present_area_mandal, '')) = ''
+                AND (
+                    TRIM(COALESCE(permanent_locality_village,  '')) <> ''
+                 OR TRIM(COALESCE(permanent_landmark_milestone,'')) <> ''
+                 OR TRIM(COALESCE(present_locality_village,    '')) <> ''
+                 OR TRIM(COALESCE(present_landmark_milestone,  '')) <> ''
+                 OR TRIM(COALESCE(nationality,                 '')) <> ''
+                )
+            )
+            OR
             -- Phase 2: any unresolved geo token exists but permanent_country is still empty
-            -- (covers records where Phase 1 already ran but left country blank)
             (
                 TRIM(COALESCE(permanent_country, '')) = ''
                 AND (
@@ -745,86 +910,11 @@ def fetch_batch(
                 )
             )
         )
-        AND (%s IS NULL OR {id_col}::text > %s)
-        ORDER BY {id_col}
-        LIMIT %s
     """
-    pool = get_db_pool()
-    with pool.get_connection_context() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, (last_seen_id, last_seen_id, limit))
-            rows = cur.fetchall()
-
-    return [
-        PersonRecord(
-            person_id   = str(r[0]),
-            perm_state   = r[1] or None,
-            perm_district= r[2] or None,
-            perm_mandal  = r[3] or None,
-            perm_country = r[4] or None,
-            pres_state   = r[5] or None,
-            pres_district= r[6] or None,
-            pres_mandal  = r[7] or None,
-            pres_country = r[8] or None,
-        )
-        for r in rows
-    ]
 
 
 def count_pending(table: str, id_col: str) -> int:
-    sql = f"""
-        SELECT COUNT(*)
-        FROM {table}
-        WHERE (
-            (
-                (
-                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
-                 OR TRIM(COALESCE(permanent_district,    '')) <> ''
-                 OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
-                )
-                AND NOT (
-                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
-                    AND TRIM(COALESCE(permanent_district,    '')) <> ''
-                    AND TRIM(COALESCE(permanent_area_mandal, '')) <> ''
-                    AND TRIM(COALESCE(permanent_country,     '')) <> ''
-                )
-            )
-            OR
-            (
-                TRIM(COALESCE(permanent_state_ut,    '')) = ''
-                AND TRIM(COALESCE(permanent_district,    '')) = ''
-                AND TRIM(COALESCE(permanent_area_mandal, '')) = ''
-                AND (
-                    TRIM(COALESCE(present_state_ut,    '')) <> ''
-                 OR TRIM(COALESCE(present_district,    '')) <> ''
-                 OR TRIM(COALESCE(present_area_mandal, '')) <> ''
-                )
-                AND NOT (
-                    TRIM(COALESCE(present_state_ut,    '')) <> ''
-                    AND TRIM(COALESCE(present_district,    '')) <> ''
-                    AND TRIM(COALESCE(present_area_mandal, '')) <> ''
-                    AND TRIM(COALESCE(present_country,     '')) <> ''
-                )
-            )
-            OR
-            (
-                TRIM(COALESCE(permanent_country, '')) = ''
-                AND (
-                    TRIM(COALESCE(permanent_state_ut,    '')) <> ''
-                 OR TRIM(COALESCE(permanent_district,    '')) <> ''
-                 OR TRIM(COALESCE(permanent_area_mandal, '')) <> ''
-                 OR (
-                     TRIM(COALESCE(present_country, '')) = ''
-                     AND (
-                         TRIM(COALESCE(present_state_ut,    '')) <> ''
-                      OR TRIM(COALESCE(present_district,    '')) <> ''
-                      OR TRIM(COALESCE(present_area_mandal, '')) <> ''
-                     )
-                 )
-                )
-            )
-        )
-    """
+    sql = f"SELECT COUNT(*) FROM {table} WHERE {_pending_where_sql()}"
     pool = get_db_pool()
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
@@ -1065,15 +1155,36 @@ def process_record(
                 stats["pres_unresolved"] += 1
 
     # ------------------------------------------------------------------
+    # PHASE 1C — Soft geo fallback (locality / landmark via geo_reference)
+    # Runs when Phase 1A/1B didn't attempt or produced nothing, and
+    # locality/landmark tokens are available.
+    #
+    # Guard: skip Phase 1C (Indian geo_reference lookup) when nationality is
+    # non-empty AND not India — nationality is the authoritative country signal
+    # there, so let Phase 2 resolve it against geo_countries.
+    # ------------------------------------------------------------------
+    nat_norm = (rec.nationality or "").strip().lower()
+    nationality_overrides_india = bool(nat_norm) and nat_norm != "india"
+
+    if (perm_geo is None and pres_geo is None
+            and rec.has_soft_geo_signal()
+            and not nationality_overrides_india):
+        soft_perm, soft_pres = _phase1c_soft_geo_fallback(rec)
+        if soft_perm:
+            perm_geo = soft_perm
+            phase1_attempted = True
+            with lock:
+                stats["perm_matched"] += 1
+                stats["soft_geo_resolved"] = stats.get("soft_geo_resolved", 0) + 1
+        if soft_pres:
+            pres_geo = soft_pres
+            phase1_attempted = True
+            with lock:
+                stats["pres_matched"] += 1
+                stats["soft_geo_resolved"] = stats.get("soft_geo_resolved", 0) + 1
+
+    # ------------------------------------------------------------------
     # PHASE 2 — Foreign country fallback (geo_countries)
-    #
-    # Triggered when:
-    #   • Phase 1 was attempted but produced no match (perm_geo & pres_geo
-    #     are both None after Phase 1), OR
-    #   • permanent_country is still empty on a record that has any geo
-    #     token (i.e. Phase 1 ran in a prior execution and left country blank)
-    #
-    # Only permanent_country is written; other fields are left intact.
     # ------------------------------------------------------------------
     phase1_failed   = phase1_attempted and perm_geo is None and pres_geo is None
     country_missing = not _val(rec.perm_country)
@@ -1082,6 +1193,9 @@ def process_record(
     if rec.permanent_has_any_geo() and not rec.permanent_is_complete():
         unresolved_has_token = True
     if rec.present_has_any_geo() and not rec.present_is_complete():
+        unresolved_has_token = True
+    # Soft signals (locality/landmark/nationality) also warrant a Phase 2 sweep
+    if country_missing and rec.has_soft_geo_signal() and perm_geo is None and pres_geo is None:
         unresolved_has_token = True
 
     if (phase1_failed or (country_missing and unresolved_has_token and not phase1_attempted)):
@@ -1184,6 +1298,7 @@ def run(
         "foreign_unresolved": 0,
         "foreign_written":    0,
         "embedding_resolved": 0,
+        "soft_geo_resolved":  0,
     }
 
     processed = 0
@@ -1233,10 +1348,14 @@ def run(
     logger.info("  Perm unresolved        : %d", stats["perm_unresolved"])
     logger.info("  Pres matched           : %d", stats["pres_matched"])
     logger.info("  Pres unresolved        : %d", stats["pres_unresolved"])
+    logger.info("  --- Phase 1C (soft geo: locality/landmark) ---")
+    logger.info("  Soft geo resolved      : %d", stats["soft_geo_resolved"])
     logger.info("  --- Phase 2 (geo_countries) ---")
     logger.info("  Foreign matched        : %d", stats["foreign_matched"])
     logger.info("  Foreign unresolved     : %d", stats["foreign_unresolved"])
     logger.info("  Foreign country written: %d", stats["foreign_written"])
+    logger.info("  --- Phase 3 (embedding + LLM) ---")
+    logger.info("  Embedding resolved     : %d", stats["embedding_resolved"])
     logger.info("=" * 80)
 
 

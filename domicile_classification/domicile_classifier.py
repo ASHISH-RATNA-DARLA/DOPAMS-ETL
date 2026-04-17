@@ -174,51 +174,46 @@ def normalize_text(text: Optional[str]) -> Optional[str]:
 
 def classify_domicile(
     perm_state: Optional[str], perm_country: Optional[str],
-    pres_state: Optional[str], pres_country: Optional[str]
+    pres_state: Optional[str], pres_country: Optional[str],
+    nationality: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Classify domicile based on country and state information hierarchy.
-    
-    Logic:
-    1. Determine effective country: permanent_country first, if not available then present_country
-    2. If effective country is non-India (non-null and != 'india'): Return 'international'
-    3. If effective country is India: Check state (permanent_state_ut first, then present_state_ut)
-       - If state is 'telangana' (native state): Return 'native state'
-       - If state is any other Indian state/UT: Return 'inter state'
-       - Otherwise: Return None
-    4. If no effective country available: Return None
+    Classify domicile by country → state, with nationality as last-resort signal.
+
+    Precedence:
+      1. Effective country: permanent → present → nationality
+      2. Country != 'india' → 'international'
+      3. Country = 'india' → effective state: permanent → present
+           • 'telangana'          → 'native state'
+           • any other Indian UT  → 'inter state'
+           • unknown              → None
     """
-    # Normalize inputs
     perm_st = normalize_text(perm_state)
     perm_co = normalize_text(perm_country)
     pres_st = normalize_text(pres_state)
     pres_co = normalize_text(pres_country)
-    
-    # Step 1: Determine effective country (permanent first, then present)
+    nat     = normalize_text(nationality)
+
+    # Effective country: permanent → present → nationality fallback
     effective_country = perm_co if perm_co is not None else pres_co
-    
-    # If no country information available, cannot classify
+    if effective_country is None and nat is not None:
+        effective_country = nat
+
     if effective_country is None:
         return None
-    
-    # Step 2: Check if international (country is explicitly not India)
+
     if effective_country != "india":
         return CLASSIFICATION_INTERNATIONAL
-    
-    # Step 3: Country is India - determine effective state (permanent first, then present)
+
     effective_state = perm_st if perm_st is not None else pres_st
-    
-    # If no state information available, cannot classify as native/inter state
     if effective_state is None:
         return None
-    
-    # Step 4: Classify based on state
+
     if effective_state == NATIVE_STATE:
         return CLASSIFICATION_NATIVE
     if effective_state in INDIAN_STATES:
         return CLASSIFICATION_INTER
 
-    # Unrecognized state — deterministic rules only
     return None
 
 
@@ -239,6 +234,7 @@ def process_persons(cursor=None):
                         permanent_country,
                         present_state_ut,
                         present_country,
+                        nationality,
                         domicile_classification
                     FROM persons
                     WHERE
@@ -246,6 +242,7 @@ def process_persons(cursor=None):
                         OR NULLIF(TRIM(COALESCE(permanent_country, '')), '') IS NOT NULL
                         OR NULLIF(TRIM(COALESCE(present_state_ut, '')), '') IS NOT NULL
                         OR NULLIF(TRIM(COALESCE(present_country, '')), '') IS NOT NULL
+                        OR NULLIF(TRIM(COALESCE(nationality, '')), '') IS NOT NULL
                         OR NULLIF(TRIM(COALESCE(domicile_classification, '')), '') IS NOT NULL
                     ORDER BY person_id;
                 """)
@@ -279,10 +276,13 @@ def process_persons(cursor=None):
                 perm_country = person['permanent_country']
                 pres_state = person['present_state_ut']
                 pres_country = person['present_country']
+                nationality = person.get('nationality')
                 current_classification = normalize_text(person['domicile_classification'])
 
                 # Classify
-                classification = classify_domicile(perm_state, perm_country, pres_state, pres_country)
+                classification = classify_domicile(
+                    perm_state, perm_country, pres_state, pres_country, nationality
+                )
                 
                 # Update statistics
                 if classification is None:
