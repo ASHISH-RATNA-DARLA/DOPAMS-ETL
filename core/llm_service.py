@@ -41,12 +41,14 @@ class LLMService:
         if base_url.endswith("/api"):
             base_url = base_url.replace("/api", "")
             
+        keep_alive = os.getenv("OLLAMA_KEEP_ALIVE", "60m")
         self._langchain_model_instance = ChatOllama(
             base_url=base_url,
             model=self.model,
             temperature=self.temperature,
             num_ctx=self.context_window,
             num_predict=self.max_tokens,
+            keep_alive=keep_alive,
         )
         return self._langchain_model_instance
 
@@ -67,6 +69,7 @@ class LLMService:
             "model": self.model,
             "prompt": full_prompt,
             "stream": self.stream,
+            "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "60m"),
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,

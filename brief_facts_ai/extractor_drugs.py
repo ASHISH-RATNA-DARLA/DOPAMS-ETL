@@ -53,6 +53,7 @@ def _get_thread_safe_llm():
             temperature=llm_service.temperature,
             num_ctx=llm_service.context_window,
             num_predict=llm_service.max_tokens,
+            keep_alive=os.getenv("OLLAMA_KEEP_ALIVE", "60m"),
             client=http_client,
         )
         logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name} (HTTP timeout: {timeout_seconds}s)")
@@ -1175,9 +1176,19 @@ def extract_drug_info(
             logger.warning("LLM returned empty response (all retries failed). Returning empty.")
             return []
 
-        drugs_data = response.get("drugs", [])
+        if isinstance(response, list):
+            drugs_data = response
+        elif isinstance(response, dict):
+            drugs_data = response.get("drugs", [])
+            if not drugs_data:
+                logger.info(f"LLM returned 0 drugs from response keys: {list(response.keys())}")
+                return []
+        else:
+            logger.warning(f"LLM returned unexpected type {type(response).__name__}. Returning empty.")
+            return []
+
         if not drugs_data:
-            logger.info(f"LLM returned 0 drugs from response keys: {list(response.keys())}")
+            logger.info("LLM returned 0 drugs.")
             return []
 
         logger.info(f"LLM returned {len(drugs_data)} raw drug entries.")
