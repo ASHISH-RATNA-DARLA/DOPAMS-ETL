@@ -52,6 +52,7 @@ def _get_thread_safe_llm():
             model=llm_service.model,
             temperature=llm_service.temperature,
             num_ctx=llm_service.context_window,
+            num_predict=llm_service.max_tokens,
             client=http_client,
         )
         logger.info(f"Created thread-local ChatOllama for thread {threading.current_thread().name} (HTTP timeout: {timeout_seconds}s)")
@@ -1142,7 +1143,7 @@ def extract_drug_info(
     # own training knowledge. This frees ~3,700 tokens (the 330-row KB table),
     # giving 15,484 tokens for brief_facts text vs 11,763 previously.
     est_input_tokens    = _estimate_tokens(filtered_text)
-    CONTEXT_WINDOW      = 16384
+    CONTEXT_WINDOW      = get_llm('extraction').context_window
     PROMPT_OVERHEAD     = 900   # rules (R1-R21) + examples + output schema
     available_for_input = CONTEXT_WINDOW - PROMPT_OVERHEAD
     if est_input_tokens > available_for_input:

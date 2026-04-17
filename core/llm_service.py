@@ -46,7 +46,7 @@ class LLMService:
             model=self.model,
             temperature=self.temperature,
             num_ctx=self.context_window,
-            # Use max_tokens internally if strictly required by underlying Langchain versions
+            num_predict=self.max_tokens,
         )
         return self._langchain_model_instance
 
@@ -106,7 +106,7 @@ def get_llm(task_type: str) -> LLMService:
         return LLMService(
             model=model,
             temperature=0.0,          # Deterministic JSON
-            max_tokens=4096,          # Allow large JSON responses
+            max_tokens=1536,          # Reduced from 4096; accused JSON rarely exceeds this
             context_window=8192,      # Reduced from 16384 for 2x faster inference
             stream=False
         )
