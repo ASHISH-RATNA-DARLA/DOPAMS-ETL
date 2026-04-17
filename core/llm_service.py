@@ -107,7 +107,7 @@ def get_llm(task_type: str) -> LLMService:
             model=model,
             temperature=0.0,          # Deterministic JSON
             max_tokens=4096,          # Allow large JSON responses
-            context_window=16384,     # Crucial for preventing FIR truncation
+            context_window=8192,      # Reduced from 16384 for 2x faster inference
             stream=False
         )
         
