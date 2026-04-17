@@ -393,65 +393,141 @@ def _extract_person_codes(drug_data):
         if normalized: codes.add(normalized)
     return codes
 
+def _match_rows_by_name(source_sentence, bfai_rows):
+    """
+    Fallback: when source_sentence has no A-code pattern, scan accused full_names
+    against the sentence. Returns list of matching bfai rows.
+
+    Handles cases like "seized 100g Ganja from Raju" where LLM wrote the name
+    instead of the accused code — still need to attribute to Raju's row.
+    """
+    if not source_sentence or not bfai_rows:
+        return []
+    sentence_lower = source_sentence.lower()
+    matched = []
+    for row in bfai_rows:
+        name = (row.get('full_name') or '').strip()
+        if not name or len(name) < 4:
+            continue
+        # Require at least 2 tokens to match (avoids single-word false hits)
+        tokens = [t for t in name.lower().split() if len(t) >= 3]
+        if len(tokens) >= 2 and sum(1 for t in tokens if t in sentence_lower) >= 2:
+            matched.append(row)
+        elif len(tokens) == 1 and tokens[0] in sentence_lower:
+            matched.append(row)
+    return matched
+
+
 def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
-    if not bfai_rows: return bfai_rows
+    """
+    Merge drug extraction results into accused rows (bfai_rows).
+
+    Attribution rules (one entry per drug — no ghost/reference copies):
+
+    Case 1 — INDIVIDUAL (code match):
+        source_sentence names exactly 1 A-code → that accused only.
+        Covers: A1 has Drug X; A2 has Drug Y; A1 has Drug X AND A2 has Drug X
+        separately (2 LLM entries, each with own code).
+
+    Case 2 — INDIVIDUAL (name match):
+        No A-code in source_sentence but accused name present.
+        e.g. "seized 100g from Raju" → matched to Raju's row.
+
+    Case 3 — COLLECTIVE_TOTAL:
+        source_sentence names 2+ accused → first mentioned only, no duplication.
+        e.g. "A1, A2, A3 caught with 520 KG ganja total" → stored on A1.
+
+    Case 4 — UNATTRIBUTED_FALLBACK_A1:
+        No code or name match → primary (A1/first) accused only.
+
+    Case 5 — NO_DRUGS_DETECTED:
+        Marker stamped on ALL accused so every row has a drugs[].
+
+    Case 6 — NO_ACCUSED_ORPHAN:
+        Sentinel crime row (no real accused) → drug on orphan row.
+
+    Why no ghost entries: one seizure → one row. REFERENCED_A1 nulled-quantity
+    copies inflated aggregates and caused double-counting.
+    """
+    if not bfai_rows:
+        return bfai_rows
+
     rows_by_code = {}
     for row in bfai_rows:
-        row['drugs'] = [] 
+        row['drugs'] = []
         normalized = _norm_person_code(row.get('person_code'))
-        if normalized: rows_by_code[normalized] = row
+        if normalized:
+            rows_by_code[normalized] = row
 
-    orphan_row = next((r for r in bfai_rows if r.get('role_in_crime') == 'NO_ACCUSED_DRUGS_ONLY'), None)
+    orphan_row = next(
+        (r for r in bfai_rows if r.get('role_in_crime') == 'NO_ACCUSED_DRUGS_ONLY'),
+        None
+    )
     real_rows = [r for r in bfai_rows if r.get('accused_id')]
     ordered_real_rows = real_rows if real_rows else bfai_rows
     primary_row = ordered_real_rows[0] if ordered_real_rows else bfai_rows[0]
-    primary_code = _norm_person_code(primary_row.get('person_code'))
 
     for drug_data in drug_data_list:
         if not isinstance(drug_data, dict):
-            try: drug_data = drug_data.model_dump()
-            except BaseException: pass
-            
-        primary_name = str(drug_data.get('primary_drug_name') or '').strip().upper()
+            try:
+                drug_data = drug_data.model_dump()
+            except BaseException:
+                pass
 
+        primary_name = str(drug_data.get('primary_drug_name') or '').strip().upper()
+        drug_label   = drug_data.get('primary_drug_name') or drug_data.get('raw_drug_name') or '?'
+        qty_label    = f"{drug_data.get('raw_quantity')} {drug_data.get('raw_unit') or ''}".strip()
+
+        # ── Case 6: orphan sentinel ──
         if orphan_row:
-            orphan_elem = _build_drug_element(drug_data, 'NO_ACCUSED_ORPHAN')
-            orphan_row['drugs'].append(orphan_elem)
+            orphan_row['drugs'].append(_build_drug_element(drug_data, 'NO_ACCUSED_ORPHAN'))
             continue
 
+        # ── Case 5: no-drug marker → stamp all accused rows ──
         if primary_name == 'NO_DRUGS_DETECTED':
             for row in ordered_real_rows:
-                elem = _build_drug_element(drug_data, 'NO_DRUGS_DETECTED')
-                row['drugs'].append(elem)
+                row['drugs'].append(_build_drug_element(drug_data, 'NO_DRUGS_DETECTED'))
             continue
 
+        # ── Primary: A-code based matching ──
         mentioned_codes = _extract_person_codes(drug_data)
-        matched_rows = [rows_by_code[c] for c in sorted(mentioned_codes) if c in rows_by_code]
+        matched_rows    = [rows_by_code[c] for c in sorted(mentioned_codes) if c in rows_by_code]
+
+        # ── Fallback: name-based matching when no A-codes found ──
+        source_sentence = (drug_data.get('extraction_metadata') or {}).get('source_sentence', '')
+        if not matched_rows and source_sentence:
+            matched_rows = _match_rows_by_name(source_sentence, ordered_real_rows)
+            if matched_rows:
+                logger.info(
+                    f"[DrugAttrib] NAME_MATCH: {drug_label} ({qty_label}) "
+                    f"→ {[r.get('full_name') for r in matched_rows]}"
+                )
 
         if len(matched_rows) == 1:
-            target = matched_rows[0]
-            elem = _build_drug_element(drug_data, 'INDIVIDUAL')
-            target['drugs'].append(elem)
-            continue
+            # ── Cases 1 & 2: individual — one accused has this drug ──
+            code = matched_rows[0].get('person_code') or matched_rows[0].get('full_name') or '?'
+            logger.info(f"[DrugAttrib] INDIVIDUAL: {drug_label} ({qty_label}) → {code}")
+            matched_rows[0]['drugs'].append(_build_drug_element(drug_data, 'INDIVIDUAL'))
 
-        if len(matched_rows) > 1:
-            holder = matched_rows[0]
-            holder_code = _norm_person_code(holder.get('person_code'))
-            holder_elem = _build_drug_element(drug_data, 'COLLECTIVE_TOTAL')
-            holder['drugs'].append(holder_elem)
-            for row in matched_rows[1:]:
-                ref_elem = _build_drug_element(drug_data, 'REFERENCED_A1', attribution_ref=holder_code, nullify_quantity=True)
-                row['drugs'].append(ref_elem)
-            continue
+        elif len(matched_rows) > 1:
+            # ── Case 3: collective — same drug/seizure shared by multiple accused ──
+            # One entry on the first accused; no ghost copies on the rest.
+            holder_code = matched_rows[0].get('person_code') or '?'
+            all_codes   = [r.get('person_code') or r.get('full_name') or '?' for r in matched_rows]
+            logger.info(
+                f"[DrugAttrib] COLLECTIVE_TOTAL: {drug_label} ({qty_label}) "
+                f"mentioned with {all_codes} → stored on {holder_code} only"
+            )
+            matched_rows[0]['drugs'].append(_build_drug_element(drug_data, 'COLLECTIVE_TOTAL'))
 
-        holder = primary_row
-        holder_code = primary_code
-        holder_elem = _build_drug_element(drug_data, 'UNATTRIBUTED_FALLBACK_A1')
-        holder['drugs'].append(holder_elem)
-        for row in ordered_real_rows:
-            if row.get('bf_accused_id') == holder.get('bf_accused_id'): continue
-            ref_elem = _build_drug_element(drug_data, 'REFERENCED_A1', attribution_ref=holder_code, nullify_quantity=True)
-            row['drugs'].append(ref_elem)
+        else:
+            # ── Case 4: no attribution found — assign to A1/primary ──
+            fallback_code = primary_row.get('person_code') or 'A1'
+            logger.info(
+                f"[DrugAttrib] FALLBACK_A1: {drug_label} ({qty_label}) "
+                f"no code/name in source → {fallback_code}"
+            )
+            primary_row['drugs'].append(_build_drug_element(drug_data, 'UNATTRIBUTED_FALLBACK_A1'))
 
     return bfai_rows
 

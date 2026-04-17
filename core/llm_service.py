@@ -1,10 +1,12 @@
 import os
+import re
 import json
 import logging
 from typing import Dict, Any, Optional
 from functools import lru_cache
 
 from dotenv import load_dotenv
+from langchain_core.output_parsers import JsonOutputParser
 
 # Load central environment configurations
 load_dotenv()
@@ -235,4 +237,45 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) 
     # If we get here, all retries failed
     logger.error(f"All {max_retries + 1} extraction attempts failed. Last error: {last_error}")
     return {}
+
+
+# --- Robust JSON Output Parser ---
+
+_RE_LINE_COMMENT   = re.compile(r'(?m)(?<!:)//[^\n\r]*')        # // ...  (avoid URLs http://)
+_RE_BLOCK_COMMENT  = re.compile(r'/\*.*?\*/', re.DOTALL)         # /* ... */
+_RE_TRAILING_COMMA = re.compile(r',(\s*[}\]])')                  # ,} or ,]
+_RE_FENCE_OPEN     = re.compile(r'^\s*```(?:json)?\s*', re.IGNORECASE)
+_RE_FENCE_CLOSE    = re.compile(r'\s*```\s*$')
+
+
+def _sanitize_json_text(text: str) -> str:
+    """Strip common LLM-emitted non-JSON artefacts before strict parse."""
+    if not isinstance(text, str):
+        return text
+    cleaned = _RE_FENCE_OPEN.sub('', text)
+    cleaned = _RE_FENCE_CLOSE.sub('', cleaned)
+    cleaned = _RE_BLOCK_COMMENT.sub('', cleaned)
+    cleaned = _RE_LINE_COMMENT.sub('', cleaned)
+    cleaned = _RE_TRAILING_COMMA.sub(r'\1', cleaned)
+    return cleaned.strip()
+
+
+class RobustJsonOutputParser(JsonOutputParser):
+    """JsonOutputParser that tolerates JS-style comments, trailing commas,
+    and markdown code fences in LLM output before strict JSON parse."""
+
+    def parse(self, text: str):
+        try:
+            return super().parse(text)
+        except Exception:
+            cleaned = _sanitize_json_text(text)
+            return super().parse(cleaned)
+
+    def parse_result(self, result, *, partial: bool = False):
+        try:
+            return super().parse_result(result, partial=partial)
+        except Exception:
+            if result and hasattr(result[0], 'text'):
+                result[0].text = _sanitize_json_text(result[0].text)
+            return super().parse_result(result, partial=partial)
 

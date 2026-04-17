@@ -39,10 +39,15 @@ from db import (
 )
 from extractor_accused import (
     extract_accused_info,
+    extract_accused_names_pass1,
+    extract_details_pass2,
     extract_roles_for_known_accused,
     detect_gender,
     detect_ccl,
     classify_accused_type,
+    compute_shared_role,
+    _is_procedural_role,
+    clean_accused_name,
 )
 
 # Configure logging
@@ -768,6 +773,11 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     if len(valid_accused) == 1 and len(roles_by_code) == 1:
         single_role = list(roles_by_code.values())[0]
 
+    # Shared-role fallback: when the FIR describes a collective action but the
+    # LLM assigns the role text to only a subset of accused codes, inherit the
+    # dominant role for the crime so every accused gets classified consistently.
+    shared_role_text, shared_role_key_details = compute_shared_role(roles_by_code)
+
     branch_records = []
     count = 0
     for i, row in enumerate(valid_accused, start=1):
@@ -807,6 +817,17 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
 
         role_in_crime = role_data.get('role_in_crime') if role_data else None
         key_details   = role_data.get('key_details') if role_data else None
+
+        # ---- Shared-role inheritance ----
+        # If this accused has no role (or only a procedural/status note like
+        # "41A Cr.P.C issued"), inherit the dominant crime-wide role so the
+        # downstream classifier can assign accused_type.
+        shared_role_applied = False
+        if (not role_in_crime or _is_procedural_role(role_in_crime)) and shared_role_text:
+            role_in_crime = shared_role_text
+            if not key_details and shared_role_key_details:
+                key_details = shared_role_key_details
+            shared_role_applied = True
 
         # ---- LLM fallback: fill missing person fields ----
         source_person = {k: 'DB' for k in ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'phone_numbers', 'address']
@@ -860,9 +881,9 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
         source_accused['ps_code'] = ps_code
         source_summary = {}
         if role_in_crime:
-            source_summary['role_in_crime'] = 'LLM'
+            source_summary['role_in_crime'] = 'LLM_SHARED' if shared_role_applied else 'LLM'
         if key_details:
-            source_summary['key_details'] = 'LLM'
+            source_summary['key_details'] = 'LLM_SHARED' if shared_role_applied else 'LLM'
         if accused_type:
             source_summary['accused_type'] = 'LLM_CLASSIFICATION'
 
@@ -912,6 +933,154 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
         branch_records.append(row_data)
         insert_accused_facts(conn, row_data)
         count += 1
+
+    # ── Branch A gap-fill: text-only accused not in DB ──────────────────────
+    # FIRs sometimes name accused (suppliers, absconders, associates) who are
+    # not registered in the accused/persons tables yet. Branch A would silently
+    # drop them. We detect them via Pass 1 name extraction, diff against DB
+    # names, and create LLM-sourced rows so they still appear in output.
+    try:
+        db_names_norm = {
+            _normalize_name(row.get('full_name'))
+            for row in valid_accused
+            if row.get('full_name')
+        }
+
+        text_names = extract_accused_names_pass1(facts_text)
+        if text_names:
+            new_names = []
+            for raw in text_names:
+                clean = clean_accused_name(raw)
+                if not clean:
+                    continue
+                norm = _normalize_name(clean)
+                # Skip if this name already matched a DB accused (exact or
+                # 2-token overlap to handle "Rahul Singh" vs "Singh Rahul").
+                if norm in db_names_norm:
+                    continue
+                norm_tokens = set(norm.split())
+                if any(
+                    len(norm_tokens & set(dn.split())) >= 2
+                    for dn in db_names_norm
+                    if dn
+                ):
+                    continue
+                new_names.append(raw)
+
+            if new_names:
+                logging.info(
+                    f"Branch A gap-fill: {len(new_names)} text-only accused "
+                    f"found for Crime {crime_id}: {new_names}"
+                )
+                extra_details = extract_details_pass2(facts_text, new_names) or []
+                detail_map_extra = {
+                    d.full_name.lower().strip(): d for d in extra_details
+                }
+                for raw_name in new_names:
+                    clean = clean_accused_name(raw_name)
+                    d_obj = detail_map_extra.get(raw_name.lower().strip()) \
+                        or detail_map_extra.get(clean.lower().strip())
+                    if not d_obj:
+                        # Partial name match fallback
+                        toks = set(clean.lower().split())
+                        for k, v in detail_map_extra.items():
+                            if len(toks & set(k.split())) >= 2:
+                                d_obj = v
+                                break
+
+                    role_desc = (d_obj.role_in_crime if d_obj else None) or None
+                    key_details_extra = d_obj.key_details if d_obj else None
+                    age_extra = d_obj.age if d_obj else None
+                    gender_extra = d_obj.gender if d_obj else None
+                    occupation_extra = d_obj.occupation if d_obj else None
+                    address_extra = d_obj.address if d_obj else None
+                    alias_extra = d_obj.alias_name if d_obj else None
+                    phone_extra = d_obj.phone_numbers if d_obj else None
+
+                    # Apply shared-role inheritance for text-only accused too
+                    if (not role_desc or _is_procedural_role(role_desc)) and shared_role_text:
+                        role_desc = shared_role_text
+                        if not key_details_extra and shared_role_key_details:
+                            key_details_extra = shared_role_key_details
+
+                    synth_id = _synthetic_accused_id(crime_id, clean, None)
+                    accused_type_extra = classify_accused_type(
+                        role_desc + (" " + key_details_extra if key_details_extra else "")
+                    ) if role_desc else None
+                    if accused_type_extra == "unknown":
+                        accused_type_extra = None
+
+                    gender_extra = detect_gender(facts_text, clean, gender_extra)
+                    status_extra = resolve_status_for_insert(None, facts_text, clean)
+                    is_ccl_extra = detect_ccl(clean, role_desc or "")
+
+                    canonical_extra, dedup_conf_extra, dedup_tier_extra, dedup_flag_extra = \
+                        _resolve_canonical_identity(
+                            conn,
+                            crime_id,
+                            {
+                                'accused_id': synth_id,
+                                'person_code': None,
+                                'full_name': clean,
+                                'alias_name': alias_extra,
+                                'age': age_extra,
+                                'gender': gender_extra,
+                                'address': address_extra,
+                            },
+                            ps_code,
+                        )
+
+                    extra_row = {
+                        'crime_id'             : crime_id,
+                        'accused_id'           : synth_id,
+                        'person_id'            : None,
+                        'canonical_person_id'  : canonical_extra,
+                        'person_code'          : None,
+                        'seq_num'              : None,
+                        'existing_accused'     : False,
+                        'full_name'            : clean,
+                        'alias_name'           : alias_extra,
+                        'age'                  : age_extra,
+                        'gender'               : gender_extra,
+                        'occupation'           : occupation_extra,
+                        'address'              : address_extra,
+                        'phone_numbers'        : phone_extra,
+                        'role_in_crime'        : role_desc,
+                        'key_details'          : key_details_extra,
+                        'accused_type'         : accused_type_extra,
+                        'status'               : status_extra,
+                        'is_ccl'               : is_ccl_extra,
+                        'dedup_match_tier'     : dedup_tier_extra,
+                        'dedup_confidence'     : dedup_conf_extra,
+                        'dedup_review_flag'    : dedup_flag_extra,
+                        'source_person_fields' : {},  # populated below
+                        'source_accused_fields': {'ps_code': ps_code, 'accused_id': 'SYNTHETIC_GAP_FILL'},
+                        'source_summary_fields': {
+                            k: 'LLM' for k, v in [
+                                ('role_in_crime', role_desc),
+                                ('key_details', key_details_extra),
+                                ('accused_type', accused_type_extra),
+                            ] if v is not None
+                        },
+                        'etl_run_id'           : run_id,
+                    }
+                    # Fix source_person_fields using the actual values
+                    extra_row['source_person_fields'] = {
+                        k: 'LLM' for k, v in [
+                            ('full_name', clean),
+                            ('alias_name', alias_extra),
+                            ('age', age_extra),
+                            ('gender', gender_extra),
+                            ('occupation', occupation_extra),
+                            ('address', address_extra),
+                            ('phone_numbers', phone_extra),
+                        ] if v is not None
+                    }
+                    branch_records.append(extra_row)
+                    insert_accused_facts(conn, extra_row)
+                    count += 1
+    except Exception as gap_err:
+        logging.warning(f"Branch A gap-fill failed for Crime {crime_id}: {gap_err}", exc_info=True)
 
     logging.info(f"Branch A processed Crime {crime_id}. row_count={count}")
     return count, branch_records
@@ -1019,6 +1188,147 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             branch_records.append(data)
             insert_accused_facts(conn, data)
             count += 1
+
+    # ── Branch B gap-fill: DB stubs LLM didn't extract ──────────────────────
+    # LLM may not find every accused in text (uncommon names, implicit refs).
+    # DB stubs that were never paired remain unwritten. Detect them via the
+    # matched accused_ids collected above, then fill details from text via
+    # Pass 2 for each missed stub's accused_code/name.
+    try:
+        matched_accused_ids = {
+            r.get('accused_id')
+            for r in branch_records
+            if r.get('accused_id')
+        }
+
+        unmatched_stubs = [
+            row for row in db_accused
+            if row.get('accused_id') not in matched_accused_ids
+        ]
+
+        if unmatched_stubs:
+            logging.info(
+                f"Branch B gap-fill: {len(unmatched_stubs)} unmatched DB stubs "
+                f"for Crime {crime_id}"
+            )
+            # Compute shared role from what was already extracted
+            shared_b_role, shared_b_kd = compute_shared_role({
+                r.get('person_code') or str(i): {
+                    'role_in_crime': r.get('role_in_crime'),
+                    'key_details': r.get('key_details'),
+                }
+                for i, r in enumerate(branch_records)
+            })
+
+            for stub in unmatched_stubs:
+                stub_code    = stub.get('accused_code') or ''
+                stub_name    = stub.get('full_name') or stub_code or 'Unknown'
+                stub_id      = stub.get('accused_id')
+                stub_seq     = stub.get('seq_num')
+                stub_is_ccl  = stub.get('is_ccl', False)
+                stub_status  = stub.get('accused_status')
+
+                # Try Pass 2 for this specific stub to get any details in text
+                stub_details_list = extract_details_pass2(facts_text, [stub_name]) or []
+                d_obj = stub_details_list[0] if stub_details_list else None
+
+                role_desc  = (d_obj.role_in_crime if d_obj else None) or None
+                key_d      = d_obj.key_details if d_obj else None
+                age_s      = d_obj.age if d_obj else None
+                gender_s   = d_obj.gender if d_obj else None
+                occ_s      = d_obj.occupation if d_obj else None
+                addr_s     = d_obj.address if d_obj else None
+                alias_s    = d_obj.alias_name if d_obj else None
+                phone_s    = d_obj.phone_numbers if d_obj else None
+
+                # Inherit shared role when Pass 2 found nothing useful
+                if (not role_desc or _is_procedural_role(role_desc)) and shared_b_role:
+                    role_desc = shared_b_role
+                    if not key_d and shared_b_kd:
+                        key_d = shared_b_kd
+
+                accused_type_s = classify_accused_type(
+                    role_desc + (" " + key_d if key_d else "")
+                ) if role_desc else None
+                if accused_type_s == 'unknown':
+                    accused_type_s = None
+
+                gender_s  = detect_gender(facts_text, stub_name, gender_s)
+                status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
+                is_ccl_s  = bool(stub_is_ccl) or detect_ccl(stub_name, role_desc or '')
+
+                synth_id = stub_id or _synthetic_accused_id(crime_id, stub_name, stub_seq)
+
+                canonical_s, dedup_conf_s, dedup_tier_s, dedup_flag_s = \
+                    _resolve_canonical_identity(
+                        conn,
+                        crime_id,
+                        {
+                            'accused_id': synth_id,
+                            'person_code': stub_code or None,
+                            'full_name': stub_name,
+                            'alias_name': alias_s,
+                            'age': age_s,
+                            'gender': gender_s,
+                            'address': addr_s,
+                        },
+                        ps_code,
+                    )
+
+                stub_row = {
+                    'crime_id'             : crime_id,
+                    'accused_id'           : synth_id,
+                    'person_id'            : None,
+                    'canonical_person_id'  : canonical_s,
+                    'person_code'          : stub_code or None,
+                    'seq_num'              : stub_seq,
+                    'existing_accused'     : False,
+                    'full_name'            : stub_name,
+                    'alias_name'           : alias_s,
+                    'age'                  : age_s,
+                    'gender'               : gender_s,
+                    'occupation'           : occ_s,
+                    'address'              : addr_s,
+                    'phone_numbers'        : phone_s,
+                    'role_in_crime'        : role_desc,
+                    'key_details'          : key_d,
+                    'accused_type'         : accused_type_s,
+                    'status'               : status_s,
+                    'is_ccl'               : is_ccl_s,
+                    'dedup_match_tier'     : dedup_tier_s,
+                    'dedup_confidence'     : dedup_conf_s,
+                    'dedup_review_flag'    : dedup_flag_s,
+                    'source_person_fields' : {
+                        k: 'LLM' for k, v in [
+                            ('full_name', stub_name), ('alias_name', alias_s),
+                            ('age', age_s), ('gender', gender_s),
+                            ('occupation', occ_s), ('address', addr_s),
+                            ('phone_numbers', phone_s),
+                        ] if v is not None
+                    },
+                    'source_accused_fields': {
+                        'accused_id': 'DB_STUB_GAP_FILL',
+                        'person_code': stub_code or 'UNKNOWN',
+                        'ps_code': ps_code,
+                    },
+                    'source_summary_fields': {
+                        k: 'LLM' for k, v in [
+                            ('role_in_crime', role_desc),
+                            ('key_details', key_d),
+                            ('accused_type', accused_type_s),
+                        ] if v is not None
+                    },
+                    'etl_run_id'           : run_id,
+                }
+                branch_records.append(stub_row)
+                insert_accused_facts(conn, stub_row)
+                count += 1
+
+    except Exception as gap_b_err:
+        logging.warning(
+            f"Branch B gap-fill failed for Crime {crime_id}: {gap_b_err}",
+            exc_info=True
+        )
 
     logging.info(f"Branch B processed Crime {crime_id}. row_count={count}")
     return count, branch_records

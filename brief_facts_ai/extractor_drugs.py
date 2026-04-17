@@ -4,7 +4,7 @@ import threading
 from typing import List, Optional, Set, Dict, Tuple
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.output_parsers import JsonOutputParser  # noqa: F401  (kept for back-compat)
 import sys
 import os
 import re
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Ensure core is accessible
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.llm_service import get_llm, invoke_extraction_with_retry
+from core.llm_service import get_llm, invoke_extraction_with_retry, RobustJsonOutputParser
 import config
 
 # =============================================================================
@@ -1161,7 +1161,7 @@ def extract_drug_info(
     # to identify drugs and set primary_drug_name. Post-processing
     # (resolve_primary_drug_name + fuzzy_match_drug_name) standardises names
     # against drug_categories using exact match, substring, and pg_trgm.
-    parser = JsonOutputParser(pydantic_object=CrimeReportExtraction)
+    parser = RobustJsonOutputParser(pydantic_object=CrimeReportExtraction)
     prompt  = ChatPromptTemplate.from_template(_safe_prompt_template(EXTRACTION_PROMPT))
 
     try:

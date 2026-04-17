@@ -1,13 +1,13 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.output_parsers import JsonOutputParser  # noqa: F401
 import sys
 import os
 
 # Ensure core is accessible
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.llm_service import get_llm, invoke_extraction_with_retry
+from core.llm_service import get_llm, invoke_extraction_with_retry, RobustJsonOutputParser
 
 import config
 import logging
@@ -269,11 +269,14 @@ def classify_accused_type(role_text: str) -> str:
     if any(k in t for k in [
         "habitually consuming",
         "consuming",
+        "consumption",
+        "consumption of",
         "smoking",
         "urine test",
         "tested positive",
         "for personal use",
         "for self use",
+        "addict",
         "addicted",
         "purchased for consumption",
         "bought for consumption",
@@ -311,7 +314,7 @@ def classify_accused_type(role_text: str) -> str:
         return "organizer_kingpin"
 
     # ------------------
-    # SUPPLIER (Distributor/Wholesaler/Transporter - all supply-chain roles)
+    # SUPPLIER (Distributor/Wholesaler/Transporter/Receiver - all supply-chain roles)
     # ------------------
     if any(k in t for k in [
         "supplied",
@@ -325,6 +328,8 @@ def classify_accused_type(role_text: str) -> str:
         "procured from",
         "procured",
         "transporting",
+        "transport",
+        "transporter",
         "carrying",
         "delivering",
         "courier",
@@ -333,6 +338,16 @@ def classify_accused_type(role_text: str) -> str:
         "shipment",
         "transit",
         "source of",
+        "receiver",
+        "recipient",
+        "received from",
+        "owner of crime vehicle",
+        "owner of the vehicle",
+        "crime vehicle",
+        "brought from",
+        "bought from",
+        "intended to hand over",
+        "hand over",
     ]):
         return "supplier"
 
@@ -430,6 +445,105 @@ def classify_accused_type(role_text: str) -> str:
         "small scale",
     ]):
         return "peddler"
+
+    return "unknown"
+
+
+_MEANINGFUL_ROLE_KEYWORDS = (
+    "sold", "selling", "sell", "resell",
+    "consumed", "consuming", "consumption", "consumer",
+    "possession", "possessing", "caught with",
+    "purchased", "purchase", "bought", "buy",
+    "supplied", "supplying", "supplier", "supply",
+    "transported", "transporting", "transporter",
+    "carrying", "delivering", "courier", "driver",
+    "manufactured", "manufacturing", "cultivated", "cultivation", "producer",
+    "processed", "processing", "packed", "packing",
+    "harbour", "harboured", "concealed", "stash", "stored",
+    "financed", "financier", "funded",
+    "kingpin", "mastermind", "organizer", "ringleader",
+    "received", "receiver", "recipient",
+    "distributor", "distributing", "peddler", "peddling", "trafficking",
+    "owner of", "crime vehicle",
+    "ganja", "cocaine", "heroin", "opium", "opiate", "charas", "hashish",
+    "alprazolam", "benzodiazepine", "meth", "mdma", "lsd",
+    "drug", "drugs", "narcotic", "contraband", "tablets",
+)
+
+_PROCEDURAL_ROLE_MARKERS = (
+    "41a cr", "41 a cr", "41-a cr",
+    "cr.p.c issued", "crpc issued",
+    "notice issued", "notice served",
+    "remanded", "arrested", "absconding", "absconded",
+    "surrendered", "apprehended",
+    "judicial custody", "police custody",
+    "bailed", "granted bail",
+)
+
+
+def _is_procedural_role(role_text: Optional[str]) -> bool:
+    """True when role_text is empty, 'Role not clearly stated', or purely a
+    procedural/status note (e.g. '41A Cr.P.C issued', 'remanded', 'arrested')
+    with no actual crime role content.
+
+    Why: such placeholders cannot drive classification and should defer to the
+    crime-wide shared role so downstream classify_accused_type has a chance.
+    How to apply: called by compute_shared_role (to skip procedural rows from
+    the vote) and by Branch A/Pass 2 to decide whether to inherit.
+    """
+    if not role_text:
+        return True
+    t = role_text.lower().strip()
+    if not t:
+        return True
+    if t == "role not clearly stated" or t in {"n/a", "none", "null", "-"}:
+        return True
+    # Real crime-role content — not procedural.
+    if any(k in t for k in _MEANINGFUL_ROLE_KEYWORDS):
+        return False
+    return any(m in t for m in _PROCEDURAL_ROLE_MARKERS)
+
+
+def compute_shared_role(
+    roles_by_code: Dict[str, Dict[str, Any]]
+) -> Tuple[Optional[str], Optional[str]]:
+    """Pick the dominant role_in_crime + key_details across accused in a crime.
+
+    Edge case — some FIRs describe a collective action once ("A1 and A2
+    purchased...") but the LLM assigns the role text only to one code. This
+    leaves the rest with NULL role. We inherit the majority role so every
+    accused in the crime gets classified consistently.
+
+    Returns (role_in_crime, key_details) or (None, None) when no reliable
+    majority exists.
+    """
+    if not roles_by_code:
+        return None, None
+
+    role_counts: Dict[str, int] = {}
+    key_details_by_role: Dict[str, str] = {}
+    for v in roles_by_code.values():
+        if not isinstance(v, dict):
+            continue
+        rc = (v.get('role_in_crime') or '').strip()
+        if not rc or _is_procedural_role(rc):
+            continue
+        role_counts[rc] = role_counts.get(rc, 0) + 1
+        kd = v.get('key_details')
+        if kd and rc not in key_details_by_role:
+            key_details_by_role[rc] = kd
+
+    if not role_counts:
+        return None, None
+
+    # Tie-break: prefer role with the highest count; on tie, pick the longest
+    # (more descriptive) text.
+    best_role = max(
+        role_counts.items(),
+        key=lambda kv: (kv[1], len(kv[0]))
+    )[0]
+    return best_role, key_details_by_role.get(best_role)
+
 
 def normalize_gender_value(raw_gender: Optional[str]) -> Optional[str]:
     if raw_gender is None:
@@ -531,7 +645,7 @@ def get_llm_chain(prompt_template, parser):
     return prompt | llm | parser
 
 def extract_accused_names_pass1(text: str) -> Optional[List[str]]:
-    parser = JsonOutputParser(pydantic_object=AccusedNamesResponse)
+    parser = RobustJsonOutputParser(pydantic_object=AccusedNamesResponse)
     chain = get_llm_chain(PASS1_PROMPT, parser)
 
     try:
@@ -571,7 +685,7 @@ def extract_details_pass2(text: str, accused_names: List[str]) -> Optional[List[
     if not accused_names:
         return []
 
-    parser = JsonOutputParser(pydantic_object=AccusedDetailsResponse)
+    parser = RobustJsonOutputParser(pydantic_object=AccusedDetailsResponse)
     chain = get_llm_chain(PASS2_PROMPT, parser)
 
     try:
@@ -675,6 +789,19 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
 
     detail_map = {d.full_name.lower().strip(): d for d in details}
 
+    # Shared-role fallback across Pass 2 outputs: when the FIR describes a
+    # collective action but the LLM only tagged one accused, inherit the
+    # dominant role so every accused gets a non-null role/classification.
+    synthetic_roles = {
+        name: {
+            'role_in_crime': d.role_in_crime,
+            'key_details': d.key_details,
+        }
+        for name, d in detail_map.items()
+        if d.role_in_crime
+    }
+    shared_role_text, shared_role_key_details = compute_shared_role(synthetic_roles)
+
     for name in names:
         raw_name = name.strip()
         clean_name = clean_accused_name(raw_name)
@@ -717,6 +844,16 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             address = d_obj.address
             phone = d_obj.phone_numbers
             key_details = d_obj.key_details
+
+        # Inherit dominant crime role when this accused has none or only a
+        # procedural note (e.g., "41A Cr.P.C issued", "remanded").
+        if shared_role_text and (
+            role_desc == "Role not clearly stated"
+            or _is_procedural_role(role_desc)
+        ):
+            role_desc = shared_role_text
+            if not key_details and shared_role_key_details:
+                key_details = shared_role_key_details
 
         classification_text = role_desc + (" " + key_details if key_details else "")
         accused_type = classify_accused_type(classification_text)
@@ -891,7 +1028,7 @@ def extract_roles_for_known_accused(
         accused_entries.append(entry)
     accused_list_str = "\n".join(accused_entries)
 
-    parser = JsonOutputParser(pydantic_object=RoleExtractionResponse)
+    parser = RobustJsonOutputParser(pydantic_object=RoleExtractionResponse)
     chain = get_llm_chain(PASS2_KNOWN_ACCUSED_PROMPT, parser)
 
     try:
