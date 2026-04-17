@@ -217,8 +217,8 @@ def classify_domicile(
         return CLASSIFICATION_NATIVE
     if effective_state in INDIAN_STATES:
         return CLASSIFICATION_INTER
-    
-    # Unrecognized state (but country is India)
+
+    # Unrecognized state — deterministic rules only
     return None
 
 

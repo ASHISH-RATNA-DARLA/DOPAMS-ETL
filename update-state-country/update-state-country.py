@@ -58,6 +58,7 @@ from dotenv import load_dotenv
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
+from core.geo_resolver import resolve_state, resolve_country
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -907,6 +908,106 @@ def apply_updates(
 
 
 # ---------------------------------------------------------------------------
+# Phase 3: embedding + LLM fallback
+# ---------------------------------------------------------------------------
+
+def _phase3_embedding_fallback(
+    table:    str,
+    id_col:   str,
+    rec:      "PersonRecord",
+    dry_run:  bool,
+    stats:    dict,
+    lock:     threading.Lock,
+) -> bool:
+    """
+    Run embedding + LLM fallback when both pg_trgm phases failed.
+
+    Tries Indian state first using all available state/district tokens.
+    If state hits, writes as Indian (country=India).
+    Otherwise tries country resolution on country/state tokens.
+
+    Writes geo_resolution_source + geo_resolution_confidence audit cols.
+    Returns True if any update was applied.
+    """
+    state_tokens = [t for t in [
+        rec.perm_state, rec.perm_district, rec.pres_state, rec.pres_district,
+    ] if t and t.strip()]
+    country_tokens = [t for t in [
+        rec.perm_country, rec.pres_country, rec.perm_state, rec.pres_state,
+    ] if t and t.strip()]
+
+    if not state_tokens and not country_tokens:
+        return False
+
+    pool = get_db_pool()
+    with pool.get_connection_context() as conn:
+        # Try state first
+        for token in state_tokens:
+            state, conf, source = resolve_state(token)
+            if state:
+                logger.info(
+                    "  [%s] PHASE3 state '%s' → %s (conf=%.3f, src=%s)",
+                    rec.person_id, token, state, conf, source,
+                )
+                if dry_run:
+                    logger.info("  [DRY-RUN] %s: would set state=%s country=India src=%s",
+                                rec.person_id, state, source)
+                else:
+                    _write_phase3(conn, table, id_col, rec.person_id,
+                                  state=state, country="India",
+                                  source=source, confidence=conf)
+                with lock:
+                    stats["embedding_resolved"] = stats.get("embedding_resolved", 0) + 1
+                    stats["updated"] += 1
+                return True
+
+        # Fall back to country resolution
+        for token in country_tokens:
+            country, conf, source = resolve_country(token, conn)
+            if country:
+                logger.info(
+                    "  [%s] PHASE3 country '%s' → %s (conf=%.3f, src=%s)",
+                    rec.person_id, token, country, conf, source,
+                )
+                if dry_run:
+                    logger.info("  [DRY-RUN] %s: would set country=%s src=%s",
+                                rec.person_id, country, source)
+                else:
+                    _write_phase3(conn, table, id_col, rec.person_id,
+                                  state=None, country=country,
+                                  source=source, confidence=conf)
+                with lock:
+                    stats["embedding_resolved"] = stats.get("embedding_resolved", 0) + 1
+                    stats["updated"] += 1
+                return True
+
+    return False
+
+
+def _write_phase3(conn, table, id_col, person_id, state, country, source, confidence):
+    """Write Phase 3 result with audit metadata."""
+    sets = []
+    params = []
+    if state:
+        sets.append("permanent_state_ut = COALESCE(NULLIF(TRIM(permanent_state_ut), ''), %s)")
+        params.append(state)
+    if country:
+        sets.append("permanent_country = COALESCE(NULLIF(TRIM(permanent_country), ''), %s)")
+        params.append(country)
+    sets.append("geo_resolution_source = %s")
+    params.append(source)
+    sets.append("geo_resolution_confidence = %s")
+    params.append(confidence)
+    params.append(person_id)
+    sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {id_col} = %s"
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+    conn.commit()
+    logger.info("  [WRITE-P3] %s: state=%s country=%s src=%s conf=%.3f",
+                person_id, state or '-', country or '-', source, confidence)
+
+
+# ---------------------------------------------------------------------------
 # Per-record processing
 # ---------------------------------------------------------------------------
 
@@ -999,9 +1100,20 @@ def process_record(
             logger.debug("  [%s] Phase 2: no candidate tokens", rec.person_id)
 
     # ------------------------------------------------------------------
+    # PHASE 3 — Embedding + LLM fallback (Indian state / foreign country)
+    # Triggered ONLY when Phase 1 + Phase 2 both failed.
+    # Writes to persons + audit columns (geo_resolution_source/confidence).
+    # ------------------------------------------------------------------
+    embedding_resolved = False
+    if perm_geo is None and pres_geo is None and foreign_match is None:
+        embedding_resolved = _phase3_embedding_fallback(
+            table, id_col, rec, dry_run, stats, lock,
+        )
+
+    # ------------------------------------------------------------------
     # Nothing resolved at all
     # ------------------------------------------------------------------
-    if perm_geo is None and pres_geo is None and foreign_match is None:
+    if perm_geo is None and pres_geo is None and foreign_match is None and not embedding_resolved:
         with lock:
             stats["skipped"] += 1
         return
@@ -1071,6 +1183,7 @@ def run(
         "foreign_matched":    0,
         "foreign_unresolved": 0,
         "foreign_written":    0,
+        "embedding_resolved": 0,
     }
 
     processed = 0
