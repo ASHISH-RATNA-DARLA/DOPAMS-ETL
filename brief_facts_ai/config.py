@@ -1,4 +1,8 @@
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from env_utils import first_env, load_repo_environment, resolve_db_config, resolve_table_name
 
 load_repo_environment()
