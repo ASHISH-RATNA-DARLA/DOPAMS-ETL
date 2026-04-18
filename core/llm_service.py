@@ -246,6 +246,22 @@ _RE_BLOCK_COMMENT  = re.compile(r'/\*.*?\*/', re.DOTALL)         # /* ... */
 _RE_TRAILING_COMMA = re.compile(r',(\s*[}\]])')                  # ,} or ,]
 _RE_FENCE_OPEN     = re.compile(r'^\s*```(?:json)?\s*', re.IGNORECASE)
 _RE_FENCE_CLOSE    = re.compile(r'\s*```\s*$')
+# LLM sometimes writes arithmetic in numeric positions: 11829.0 / 57.0  or  43 * 2
+_RE_ARITHMETIC     = re.compile(r'(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)')
+
+
+def _eval_arithmetic(m: re.Match) -> str:
+    """Replace a simple binary arithmetic expression with its evaluated result."""
+    try:
+        a, op, b = float(m.group(1)), m.group(2), float(m.group(3))
+        if op == '+': result = a + b
+        elif op == '-': result = a - b
+        elif op == '*': result = a * b
+        elif op == '/' and b != 0: result = a / b
+        else: return m.group(0)
+        return str(int(result)) if result == int(result) else f"{result:.6g}"
+    except Exception:
+        return m.group(0)
 
 
 def _sanitize_json_text(text: str) -> str:
@@ -257,6 +273,8 @@ def _sanitize_json_text(text: str) -> str:
     cleaned = _RE_BLOCK_COMMENT.sub('', cleaned)
     cleaned = _RE_LINE_COMMENT.sub('', cleaned)
     cleaned = _RE_TRAILING_COMMA.sub(r'\1', cleaned)
+    # Evaluate inline arithmetic expressions the LLM emitted (e.g. 11829.0 / 57.0)
+    cleaned = _RE_ARITHMETIC.sub(_eval_arithmetic, cleaned)
     return cleaned.strip()
 
 

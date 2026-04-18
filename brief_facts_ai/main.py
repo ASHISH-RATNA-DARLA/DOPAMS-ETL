@@ -701,9 +701,24 @@ import os
 
 def process_crimes_parallel(crimes):
     """Processes a list of crimes in parallel using thread pool and connection pool."""
-    # Scale LLM workers for 64GB server
     max_workers = int(os.environ.get('PARALLEL_LLM_WORKERS', '6'))
     logging.info(f"🚀 Scaling accused extraction with {max_workers} parallel workers")
+
+    # Fetch drug KB once — shared read-only across all worker threads.
+    # Previously fetched+rebuilt inside every worker (3 DB queries + 379KB parse per crime).
+    from extractor_drugs import build_drug_keywords, extract_drug_info
+    import db as db_module
+    from db_pooling import PostgreSQLConnectionPool as _Pool
+    _bootstrap_conn = _Pool().get_connection()
+    try:
+        _drug_categories = db_module.fetch_drug_categories(_bootstrap_conn)
+        _ignore_dict     = db_module.fetch_drug_ignore_list(_bootstrap_conn)
+    finally:
+        _Pool().return_connection(_bootstrap_conn)
+    _ignore_set      = set(_ignore_dict.keys())
+    _kb_lookup       = {row['raw_name'].lower().strip(): row['standard_name'] for row in _drug_categories}
+    _dynamic_keywords = build_drug_keywords(_drug_categories)
+    logging.info(f"Drug KB loaded once: {len(_dynamic_keywords)} keywords, {len(_drug_categories)} categories")
 
     def worker(crime):
         crime_id = crime['crime_id']
@@ -737,22 +752,16 @@ def process_crimes_parallel(crimes):
                     rows_written, branch_records = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id)
 
                 if unified_mode:
-                    # _run_unified_drug_enrichment(conn, crime_id, facts_text) -> replaced
-                    from extractor_drugs import extract_drug_info
-                    import db as db_module
-                    
-                    db_module._load_drug_context = lambda c: None # mock to prevent error, we can just load directly
-                    
-                    drug_categories = db_module.fetch_drug_categories(conn)
-                    ignore_dict = db_module.fetch_drug_ignore_list(conn)
-                    ignore_set = set(ignore_dict.keys())
-                    kb_lookup = {row['raw_name'].lower().strip(): row['standard_name'] for row in drug_categories}
-                    from extractor_drugs import build_drug_keywords
-                    dynamic_keywords = build_drug_keywords(drug_categories)
-                    
-                    augmented_text = _inject_accused_roster(facts_text, [tuple([None, None, r.get('person_code'), r.get('full_name')]) for r in branch_records if r.get('person_code')])
-                    
-                    extractions = extract_drug_info(augmented_text, drug_categories, ignore_set=ignore_set, kb_lookup=kb_lookup, dynamic_drug_keywords=dynamic_keywords, conn=conn)
+                    augmented_text = _inject_accused_roster(
+                        facts_text,
+                        [tuple([None, None, r.get('person_code'), r.get('full_name')])
+                         for r in branch_records if r.get('person_code')]
+                    )
+                    extractions = extract_drug_info(
+                        augmented_text, _drug_categories,
+                        ignore_set=_ignore_set, kb_lookup=_kb_lookup,
+                        dynamic_drug_keywords=_dynamic_keywords, conn=conn,
+                    )
 
                     if not extractions and branch_records:
                         # Accused exist but no drugs found — stamp NO_DRUGS_DETECTED on each accused row
