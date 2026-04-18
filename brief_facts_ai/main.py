@@ -16,6 +16,12 @@ try:
 except Exception:  # pragma: no cover - optional dependency fallback
     _unidecode = None
 
+try:
+    import Levenshtein as _lev
+    _jaro_winkler = _lev.jaro_winkler
+except Exception:  # pragma: no cover - optional
+    _jaro_winkler = None
+
 from db import (
     get_db_connection,
     return_db_connection,
@@ -32,6 +38,7 @@ from db import (
     strip_alias_name,
     compute_age_from_dob,
     fetch_dedup_candidates,
+    fetch_canonical_by_accused_id,
     fetch_crime_profile,
     fetch_crime_associate_person_codes,
     delete_brief_facts_for_crime,
@@ -137,6 +144,50 @@ def _normalize_name(value):
     return cleaned
 
 
+_SOUNDEX_MAP = {
+    'B': '1', 'F': '1', 'P': '1', 'V': '1',
+    'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
+    'D': '3', 'T': '3',
+    'L': '4',
+    'M': '5', 'N': '5',
+    'R': '6',
+}
+
+def _soundex(token):
+    """SOUNDEX matching PostgreSQL's algorithm.
+    H/W are transparent. Vowels reset prev so same-code consonants across a
+    vowel are counted separately (e.g., MOHAMMED → M530, not M300).
+    """
+    if not token:
+        return '0000'
+    t = token.upper()
+    result = t[0]
+    prev = _SOUNDEX_MAP.get(t[0], '0')
+    for ch in t[1:]:
+        if ch in 'HW':
+            continue
+        if ch in 'AEIOU':
+            prev = '0'
+            continue
+        code = _SOUNDEX_MAP.get(ch, '0')
+        if code != '0' and code != prev:
+            result += code
+            if len(result) == 4:
+                break
+        prev = code
+    return result.ljust(4, '0')[:4]
+
+
+def _name_similarity(a, b):
+    """Best of SequenceMatcher and Jaro-Winkler for robust Indian name matching."""
+    na = _normalize_name(a)
+    nb = _normalize_name(b)
+    sm = SequenceMatcher(None, na, nb).ratio()
+    if _jaro_winkler and na and nb:
+        return max(sm, _jaro_winkler(na, nb))
+    return sm
+
+
 def _norm_person_code(value):
     if not value:
         return None
@@ -152,7 +203,12 @@ def _token_set_similarity(a, b):
     if not ta or not tb:
         return 0.0
     inter = len(ta & tb)
-    return (2.0 * inter) / (len(ta) + len(tb))
+    if inter:
+        return (2.0 * inter) / (len(ta) + len(tb))
+    # Single-token names with no overlap: use char-level similarity (discounted)
+    if len(ta) == 1 and len(tb) == 1:
+        return _name_similarity(list(ta)[0], list(tb)[0]) * 0.5
+    return 0.0
 
 
 def _phonetic_overlap(a, b):
@@ -160,8 +216,13 @@ def _phonetic_overlap(a, b):
     nb = _normalize_name(b)
     if not na or not nb:
         return 0.0
-    prefix = 4
-    return 1.0 if na[:prefix] == nb[:prefix] else 0.0
+    # Compare SOUNDEX of the first (primary) name token — matches PostgreSQL
+    first_a = na.split()[0]
+    first_b = nb.split()[0]
+    if _soundex(first_a) == _soundex(first_b) and _soundex(first_a) != '0000':
+        return 1.0
+    # Fallback: 3-char prefix for very short names
+    return 1.0 if na[:3] == nb[:3] else 0.0
 
 
 def _address_similarity(a, b):
@@ -200,7 +261,7 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
     name_a = current.get('full_name')
     name_b = candidate.get('full_name')
 
-    prefix_similarity = SequenceMatcher(None, _normalize_name(name_a), _normalize_name(name_b)).ratio()
+    prefix_similarity = _name_similarity(name_a, name_b)
     token_similarity = _token_set_similarity(name_a, name_b)
     phonetic_similarity = _phonetic_overlap(name_a, name_b)
     addr_similarity = _address_similarity(current.get('address'), candidate.get('address'))
@@ -239,22 +300,45 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
     return round(min(score, 1.0), 2)
 
 
-def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code):
+def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
+                                _crime_profile_cache=None, _assoc_cache=None):
+    """
+    _crime_profile_cache and _assoc_cache are caller-owned dicts passed in so
+    repeated calls within the same crime reuse already-fetched data instead of
+    hitting the DB once per accused.  Both default to None (first call or
+    standalone use) and are populated in place.
+    """
+    if _crime_profile_cache is None:
+        _crime_profile_cache = {}
+    if _assoc_cache is None:
+        _assoc_cache = {}
+
     current_accused_id = payload.get('accused_id')
     current_person_code = payload.get('person_code')
     full_name = payload.get('full_name')
     gender = payload.get('gender')
     fallback_canonical = _canonical_person_id(full_name, gender, ps_code)
-    current_crime_profile = fetch_crime_profile(conn, current_crime_id)
-    assoc_cache = {current_crime_id: fetch_crime_associate_person_codes(conn, current_crime_id)}
-    current_assoc_codes = assoc_cache[current_crime_id]
 
-    # Layer 1: deterministic exact identity reuse by accused_id/person_code
+    if current_crime_id not in _crime_profile_cache:
+        _crime_profile_cache[current_crime_id] = fetch_crime_profile(conn, current_crime_id)
+    current_crime_profile = _crime_profile_cache[current_crime_id]
+
+    if current_crime_id not in _assoc_cache:
+        _assoc_cache[current_crime_id] = fetch_crime_associate_person_codes(conn, current_crime_id)
+    current_assoc_codes = _assoc_cache[current_crime_id]
+
+    # Layer 0: direct accused_id lookup — bypasses candidate pool entirely.
+    # person_code (A1, A2...) is crime-relative sequence, NOT a cross-crime identifier.
+    # Only accused_id (DB UUID from public.accused) is person-specific and safe to match across crimes.
+    if current_accused_id:
+        row = fetch_canonical_by_accused_id(conn, current_accused_id, current_crime_id)
+        if row and row.get('canonical_person_id'):
+            return row['canonical_person_id'], None, 0, False
+
+    # Layer 1: exact accused_id match within candidate pool (phonetic neighbours)
     candidates = fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code)
     for cand in candidates:
         if current_accused_id and cand.get('accused_id') and str(current_accused_id) == str(cand.get('accused_id')):
-            return cand.get('canonical_person_id') or fallback_canonical, None, 1, False
-        if current_person_code and cand.get('person_code') and str(current_person_code) == str(cand.get('person_code')):
             return cand.get('canonical_person_id') or fallback_canonical, None, 1, False
 
     # Layer 3-5: weighted match and thresholding
@@ -262,9 +346,9 @@ def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code):
     best_score = -1.0
     for cand in candidates:
         cand_crime_id = cand.get('crime_id')
-        if cand_crime_id not in assoc_cache:
-            assoc_cache[cand_crime_id] = fetch_crime_associate_person_codes(conn, cand_crime_id)
-        candidate_assoc_codes = assoc_cache.get(cand_crime_id, set())
+        if cand_crime_id not in _assoc_cache:
+            _assoc_cache[cand_crime_id] = fetch_crime_associate_person_codes(conn, cand_crime_id)
+        candidate_assoc_codes = _assoc_cache.get(cand_crime_id, set())
         score = _dedup_score(
             payload,
             cand,
@@ -749,6 +833,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     """
     DB is authoritative for identity. LLM extracts roles + fills missing fields.
     Skips accused rows where person_id IS NULL (spec SKIP RULE).
+    Shared dedup caches passed to all _resolve_canonical_identity calls so
+    crime_profile and co-accused lookups are fetched once per crime, not once per accused.
 
     person_code logic by accused.type:
       - 'Accused' / 'CCL': person_code = accused_code (direct from DB)
@@ -810,6 +896,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
 
     branch_records = []
     count = 0
+    _cp_cache: dict = {}   # crime_profile cache — shared across all accused in this crime
+    _ac_cache: dict = {}   # associate codes cache — shared across all accused in this crime
     for i, row in enumerate(valid_accused, start=1):
         accused_id    = row.get('accused_id')
         person_id     = row.get('person_id')
@@ -930,6 +1018,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 'address': address,
             },
             ps_code,
+            _crime_profile_cache=_cp_cache,
+            _assoc_cache=_ac_cache,
         )
 
         row_data = {
@@ -1062,6 +1152,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                                 'address': address_extra,
                             },
                             ps_code,
+                            _crime_profile_cache=_cp_cache,
+                            _assoc_cache=_ac_cache,
                         )
 
                     extra_row = {
@@ -1130,6 +1222,8 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
         f"Branch B: crime {crime_id} has {len(db_accused)} stub accused rows "
         f"(person_id IS NULL). Running full LLM extraction."
     )
+    _cp_cache: dict = {}
+    _ac_cache: dict = {}
 
     extractions = extract_accused_info(facts_text)
 
@@ -1212,6 +1306,8 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 crime_id,
                 data,
                 ps_code,
+                _crime_profile_cache=_cp_cache,
+                _assoc_cache=_ac_cache,
             )
             data['canonical_person_id'] = canonical_person_id
             data['dedup_confidence'] = dedup_confidence
@@ -1307,6 +1403,8 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                             'address': addr_s,
                         },
                         ps_code,
+                        _crime_profile_cache=_cp_cache,
+                        _assoc_cache=_ac_cache,
                     )
 
                 stub_row = {
@@ -1404,6 +1502,8 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
 
     branch_records = []
     count = 0
+    _cp_cache: dict = {}
+    _ac_cache: dict = {}
 
     if not extractions:
         logging.info(f"Branch C: No accused found for Crime {crime_id}.")
@@ -1447,6 +1547,8 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
                 crime_id,
                 data,
                 ps_code,
+                _crime_profile_cache=_cp_cache,
+                _assoc_cache=_ac_cache,
             )
             data['canonical_person_id'] = canonical_person_id
             data['dedup_confidence'] = dedup_confidence

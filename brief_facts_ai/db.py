@@ -129,6 +129,21 @@ def get_incremental_cutoff_date(conn):
             return row[0]
     return None
 
+def fetch_canonical_by_accused_id(conn, accused_id, current_crime_id):
+    """Direct canonical lookup by exact accused_id across crimes.
+    Handles same accused with differently-spelled name in different crimes (Branch A).
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            SELECT canonical_person_id FROM public.brief_facts_ai
+            WHERE accused_id = %s AND crime_id != %s
+              AND canonical_person_id IS NOT NULL
+            LIMIT 1
+        """, (str(accused_id), current_crime_id))
+        return cur.fetchone()
+
+
+
 def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limit=200):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
@@ -138,10 +153,18 @@ def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limi
             FROM public.brief_facts_ai bfa
             LEFT JOIN public.crimes c ON c.crime_id = bfa.crime_id
             WHERE bfa.crime_id != %s AND bfa.full_name IS NOT NULL
-              AND (SOUNDEX(bfa.full_name) = SOUNDEX(%s) OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s)
+              AND (SOUNDEX(bfa.full_name) = SOUNDEX(%s)
+                   OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s)
                    OR bfa.source_accused_fields->>'ps_code' = %s)
+            ORDER BY
+              CASE
+                WHEN SOUNDEX(bfa.full_name) = SOUNDEX(%s) THEN 0
+                WHEN dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s) THEN 1
+                ELSE 2
+              END
             LIMIT %s
-        """, (current_crime_id, full_name or '', full_name or '', ps_code, limit))
+        """, (current_crime_id, full_name or '', full_name or '', ps_code,
+              full_name or '', full_name or '', limit))
         return cur.fetchall()
 
 def fetch_crime_profile(conn, crime_id):
