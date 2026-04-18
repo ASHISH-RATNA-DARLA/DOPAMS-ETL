@@ -44,6 +44,52 @@ class AccusedNamesResponse(BaseModel):
 # Pass 2 Intermediate Model
 import re
 
+# ---------------------------------------------------------------------------
+# Police / official title guard — second-layer filter after LLM output
+# ---------------------------------------------------------------------------
+# Matches police ranks, railway police, revenue officials, and FIR support
+# roles that appear near a name in the text (within 80 chars either side).
+# Used to reject names the LLM extracted despite prompt exclusions.
+_POLICE_TITLE_RE = re.compile(
+    r'\b(?:'
+    r'SI|SIP|SHO|ASI|CI|DSP|DCP|SP|ACP|Inspector|Sub[\s\-]?Inspector|'
+    r'PC|HC|HG|WPC|HHC|Constable|Head[\s]?Constable|'
+    r'RPC|WRPC|ARPC|RHC|SIRP|IRP|IPF|RPF|RPS|W/?Con|'
+    r'FRO|Tahsildar|MRO|GPO|'
+    r'Mediator|Panch(?:a|as|ayathdars?)?|'
+    r'Investigating[\s]?Officer|Beat[\s]?Officer|'
+    r'Complainant|Clues[\s]?Team|'
+    r'Prohibition[\s]?Officer|Excise[\s]?Inspector|'
+    r'Gazetted[\s]?Officer|GO\b'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
+def _is_police_name(name: str, text: str) -> bool:
+    """
+    Returns True when `name` appears in `text` immediately adjacent to a police
+    or official title — within 20 chars before (title precedes name) or 30 chars
+    after (name then title, dominant Telangana FIR pattern e.g.
+    "Sri P.B.Ingle, IPF/RPF/NLG" or "B Ramesh, RPC 252 of RPS Kazipet").
+
+    Window is intentionally narrow so accused names that happen to share a
+    sentence with investigating officers are NOT wrongly blocked.
+    """
+    if not name or not text:
+        return False
+    text_lower = text.lower()
+    name_lower = name.lower().strip()
+    idx = text_lower.find(name_lower)
+    while idx >= 0:
+        prefix = text[max(0, idx - 20): idx]
+        suffix = text[idx + len(name_lower): min(len(text), idx + len(name_lower) + 30)]
+        if _POLICE_TITLE_RE.search(prefix) or _POLICE_TITLE_RE.search(suffix):
+            return True
+        idx = text_lower.find(name_lower, idx + 1)
+    return False
+
+
 EXPLICIT_GENDER_MAP = {
     "male": "Male",
     "man": "Male",
@@ -140,33 +186,55 @@ TASK: ACCUSED IDENTIFICATION ONLY
 
 From the input FIR / Brief Facts text:
 
-1. Extract ONLY persons who are ACCUSED or SUSPECTED in the crime.
+1. Extract ONLY persons who COMMITTED the crime — buying, selling, transporting,
+   harbouring, cultivating, manufacturing, or financing drugs/contraband.
 2. Include:
-   - Persons apprehended, arrested, confessed, absconding
-   - Persons referred as A1, A2, accused, suspect, JCL/CCL
-   - **Crucial**: Include Suppliers / Transporters / Producers / Sources mentioned in confessions, even if not arrested or "absconding".
+   - Persons apprehended, arrested, confessed, or absconding
+   - Persons referred as A1, A2, A-1, A-2, accused, suspect, JCL/CCL
+   - Suppliers / Transporters / Producers named in confessions, even if not arrested
 
 =====================================
-STRICT EXCLUSIONS (MANDATORY)
+STRICT EXCLUSIONS — DO NOT EXTRACT ANY OF THESE
 =====================================
-DO NOT extract:
-- Police officers (SI, CI, Inspector, PC, HC, HG, WPC, ASI, SHO)
-- Complainants
-- Clues team members
-- Panchas / Mediators
-- Government officials (GPO, MRO, Tahsildar, GHMC, Revenue staff)
-- Witnesses or drivers
 
-If a person’s occupation is:
-GPO, MRO, Panch, Official, Police -> IGNORE COMPLETELY.
+POLICE / INVESTIGATING OFFICIALS (all ranks and forces):
+  State Police  : SI, SIP, ASI, CI, Inspector, Sub-Inspector, SHO, DSP, DCP, SP, ACP
+                  PC (Police Constable), HC (Head Constable), HG (Home Guard), WPC
+  Railway Police: RPF, RPC, WRPC, ARPC, RHC, SIRP, IRP, IPF, RPS, W/Con, SIRP
+  Any person described as "complainant", "investigating officer", "IO", "beat officer",
+  "patrol staff", "on duty officer", or "along with his staff / team"
+
+GOVERNMENT / REVENUE OFFICIALS:
+  Tahsildar, MRO, GPO, FRO (Forest Range Officer), Revenue Officer, Excise Inspector,
+  Prohibition & Excise Officer, GHMC / Municipal staff, Gazetted Officer (GO)
+
+PANCHAS / MEDIATORS / WITNESSES:
+  Panchas, Panchayathdars, Mediators, independent witnesses, mahazar witnesses,
+  any person described as "1) Sri..." / "2) Sri..." in a numbered witness list
+
+COMPLAINANT’S SUPPORT STAFF:
+  Clues team, photographer, videographer, dog squad, translator / interpreter,
+  weighing shop owner (called only to weigh seized material)
+
+PERSONS NOT PRESENT OR UNNAMED:
+  "Unknown person", "unidentified person", "some persons", "one person" with NO name
+  Persons whose name appears ONLY on a found ID card / document but are not present
+  Persons who "ran away / fled / escaped" with NO name given anywhere in the text
+
+=====================================
+CRITICAL RULE
+=====================================
+A name appearing in the FIR does NOT make that person an accused.
+Police officers are routinely named in every FIR — IGNORE ALL OF THEM.
+Extract ONLY persons who committed the drug / crime offence itself.
 
 =====================================
 OUTPUT RULES
 =====================================
 - Output ONLY accused persons.
-- Extract ONLY the full name string as it appears.
+- Extract ONLY the full name string as it appears in text.
 - DO NOT infer roles, types, gender, age, or status.
-- If no accused exist, return an empty list.
+- If no accused exist, return an empty list [].
 
 Input Text:
 {text}
@@ -779,6 +847,17 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
     if not names:
         return []
 
+    # Python-side police guard: drop any name the LLM extracted despite prompt
+    # exclusions, detected by proximity to a police/official title in the text.
+    filtered_names = [n for n in names if not _is_police_name(n, text)]
+    dropped = set(names) - set(filtered_names)
+    if dropped:
+        logger.info(f"Police guard filtered out: {dropped}")
+    names = filtered_names
+    if not names:
+        logger.info("All Pass 1 names removed by police guard — no accused.")
+        return []
+
     logger.info("Starting Pass 2: Details Extraction")
     details = extract_details_pass2(text, names)
     if details is None:
@@ -926,7 +1005,7 @@ TASK: ACCUSED ANALYSIS FROM BRIEF FACTS
 
 You are given:
 1. FIR / Brief Facts text
-2. A list of accused persons linked to the crime with their known details.
+2. A confirmed list of accused persons linked to this crime.
 
 For EACH person in the accused list, you MUST:
 1. Search the ENTIRE text for ALL mentions of their accused_code (A-1, A-2, A1, A2, etc.)
@@ -936,22 +1015,32 @@ For EACH person in the accused list, you MUST:
    - "A-1 to A-3 were apprehended..." → assign to A-1, A-2, AND A-3.
    - "Both accused..." / "They..." / "All accused..." → assign to ALL relevant persons.
 3. Extract their specific role_in_crime and key_details.
-4. For fields annotated [MISSING], extract that field from the text if available.
+4. For fields annotated [MISSING], extract that field from the text ONLY if present.
 5. For accused annotated [ASSIGN_CODE], assign a person code (A1, A2, A3...) based on
    order of first mention in the narrative text.
 
 =====================================
 CRITICAL: ROLE EXTRACTION RULES
 =====================================
-- EVERY accused person MUST have a role_in_crime extracted if they are mentioned in the text.
-- Role must describe WHAT THEY DID (e.g. "Selling hash oil to customers",
-  "Purchased hash oil for personal consumption", "Supplied hash oil from Visakhapatnam",
-  "Co-supplier and business partner in hash oil trade").
-- Key Details: Quantities, drug type, vehicle, items seized, phone numbers seized,
-  or other specific investigative facts unique to this accused.
-- Extract strictly from the text. Do not guess or fabricate.
-- If a person is genuinely not mentioned at all in the text, return role_in_crime: null.
+- EVERY accused MUST have role_in_crime describing WHAT THEY DID.
+  Examples: "Selling hash oil to customers", "Transporting 120 kg ganja in vehicle",
+  "Supplied ganja from Visakhapatnam", "Caught with 378g ganja for personal consumption".
+- Key Details: Quantities, drug type, vehicle used, items seized, phone seized.
+- Extract strictly from text. Do not guess or fabricate.
+- If a person is genuinely not mentioned in text, return role_in_crime: null.
 
+=====================================
+STRICT: DO NOT CONFUSE THESE WITH ACCUSED
+=====================================
+The following persons appear in every FIR but are NOT accused — ignore them completely:
+- Police officers of any rank: SI, ASI, SHO, Inspector, PC, HC, HG, WPC, RPC, SIRP,
+  IRP, RPF, RHC, IPF, RPS, WRPC, ARPC — these are investigating / arresting officers
+- Gazetted Officers (GO) present for search and seizure
+- Panchas, mediators, witnesses (often listed as "1) Sri..., 2) Sri..." in text)
+- Tahsildar, MRO, Excise Inspector, Prohibition Officer attending scene
+- Complainant and their staff / patrol team
+
+=====================================
 Known Accused List:
 {accused_list}
 

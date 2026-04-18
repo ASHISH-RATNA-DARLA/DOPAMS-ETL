@@ -48,6 +48,7 @@ from extractor_accused import (
     compute_shared_role,
     _is_procedural_role,
     clean_accused_name,
+    _is_police_name,
 )
 
 # Configure logging
@@ -668,19 +669,48 @@ def process_crimes_parallel(crimes):
                     augmented_text = _inject_accused_roster(facts_text, [tuple([None, None, r.get('person_code'), r.get('full_name')]) for r in branch_records if r.get('person_code')])
                     
                     extractions = extract_drug_info(augmented_text, drug_categories, ignore_set=ignore_set, kb_lookup=kb_lookup, dynamic_drug_keywords=dynamic_keywords, conn=conn)
-                    
-                    if extractions:
-                        pass
+
+                    if not extractions and branch_records:
+                        # Accused exist but no drugs found — stamp NO_DRUGS_DETECTED on each accused row
+                        extractions = [{'raw_drug_name': 'NO_DRUGS_DETECTED'}]
+
+                    if not branch_records and extractions:
+                        # Drugs found but no accused — upgrade sentinel and attach each drug individually
+                        update_sentinel_role(conn, crime_id, 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY')
+                        update_sentinel_role(conn, crime_id, 'LLM_EXTRACTION_FAILED', 'NO_ACCUSED_DRUGS_ONLY')
+                        orphan_row = {
+                            'crime_id'             : crime_id,
+                            'accused_id'           : None,
+                            'person_id'            : None,
+                            'canonical_person_id'  : None,
+                            'person_code'          : None,
+                            'seq_num'              : None,
+                            'existing_accused'     : False,
+                            'full_name'            : None,
+                            'alias_name'           : None,
+                            'age'                  : None,
+                            'gender'               : None,
+                            'occupation'           : None,
+                            'address'              : None,
+                            'phone_numbers'        : None,
+                            'role_in_crime'        : 'NO_ACCUSED_DRUGS_ONLY',
+                            'key_details'          : None,
+                            'accused_type'         : None,
+                            'status'               : None,
+                            'is_ccl'               : False,
+                            'dedup_match_tier'     : None,
+                            'dedup_confidence'     : None,
+                            'dedup_review_flag'    : False,
+                            'source_person_fields' : {},
+                            'source_accused_fields': {},
+                            'source_summary_fields': {'note': 'NO_ACCUSED_DRUGS_ONLY'},
+                            'drugs'                : [],
+                            'etl_run_id'           : run_id,
+                        }
+                        enriched_rows = db_module.write_drugs_by_accused_in_memory([orphan_row], extractions)
                     else:
-                        if branch_records:
-                            placeholder = {'raw_drug_name': 'NO_DRUGS_DETECTED'}
-                            extractions = [placeholder]
-                        else:
-                            update_sentinel_role(conn, crime_id, 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY')
-                            update_sentinel_role(conn, crime_id, 'LLM_EXTRACTION_FAILED', 'NO_ACCUSED_DRUGS_ONLY')
-                            extractions = []
-                    
-                    enriched_rows = db_module.write_drugs_by_accused_in_memory(branch_records, extractions)
+                        enriched_rows = db_module.write_drugs_by_accused_in_memory(branch_records, extractions)
+
                     db_module.bulk_upsert_brief_facts_ai(conn, enriched_rows)
 
                 if unified_mode and run_id:
@@ -953,6 +983,10 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 clean = clean_accused_name(raw)
                 if not clean:
                     continue
+                # Police guard: skip names found near police/official titles in text
+                if _is_police_name(raw, facts_text) or _is_police_name(clean, facts_text):
+                    logging.info(f"Branch A gap-fill: police guard dropped '{clean}'")
+                    continue
                 norm = _normalize_name(clean)
                 # Skip if this name already matched a DB accused (exact or
                 # 2-token overlap to handle "Rahul Singh" vs "Singh Rahul").
@@ -1111,7 +1145,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             'source_summary_fields': {'error': 'LLM_EXTRACTION_FAILED'},
             'etl_run_id'      : run_id,
         })
-        return 1
+        return 1, []
 
     branch_records = []
     count = 0
@@ -1324,6 +1358,18 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 insert_accused_facts(conn, stub_row)
                 count += 1
 
+        # Gap-fill wrote real accused — delete stale NO_ACCUSED_IN_TEXT sentinel
+        # that was inserted earlier when LLM returned empty. Leaving it causes
+        # a ghost row with no identity alongside real accused rows.
+        if unmatched_stubs and branch_records:
+            with conn.cursor() as _cur:
+                _cur.execute(
+                    "DELETE FROM public.brief_facts_ai "
+                    "WHERE crime_id = %s AND role_in_crime = 'NO_ACCUSED_IN_TEXT' AND accused_id IS NULL",
+                    (crime_id,),
+                )
+            count = max(0, count - 1)  # sentinel no longer in final count
+
     except Exception as gap_b_err:
         logging.warning(
             f"Branch B gap-fill failed for Crime {crime_id}: {gap_b_err}",
@@ -1354,7 +1400,7 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
             'source_summary_fields': {'error': 'LLM_EXTRACTION_FAILED'},
             'etl_run_id'      : run_id,
         })
-        return 1
+        return 1, []
 
     branch_records = []
     count = 0
