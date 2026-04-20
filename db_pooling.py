@@ -150,21 +150,17 @@ class PostgreSQLConnectionPool:
 
             print(f"[DB CONNECT] host={pg_config['host']} db={pg_config['dbname']} user={pg_config['user']}")
 
-            dsn = (
-                f"dbname={pg_config['dbname']} "
-                f"user={pg_config['user']} "
-                f"password={pg_config['password']} "
-                f"host={pg_config['host']} "
-                f"port={pg_config['port']} "
-                f"connect_timeout=10 "
-                f"statement_timeout=60000 "
-                f"application_name='dopams-etl'"
-            )
-            
             self.pool = psycopg2.pool.ThreadedConnectionPool(
                 self.minconn,
                 self.maxconn,
-                dsn,
+                dbname=pg_config['dbname'],
+                user=pg_config['user'],
+                password=pg_config['password'],
+                host=pg_config['host'],
+                port=pg_config['port'],
+                connect_timeout=10,
+                application_name='dopams-etl',
+                options='-c statement_timeout=60000',
                 keepalives=1,
                 keepalives_idle=30,
                 keepalives_interval=10,

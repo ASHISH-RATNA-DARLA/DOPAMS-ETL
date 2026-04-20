@@ -260,15 +260,38 @@ def _source_fields(source: str) -> list[str]:
     return [f"{source}_HOST", f"{source}_PORT", f"{source}_DB", f"{source}_USER", f"{source}_PASSWORD"]
 
 
+def _source_field_alias_groups(source: str) -> list[tuple[str, tuple[str, ...]]]:
+    if source == "DATABASE_URL":
+        return [("DATABASE_URL", ("DATABASE_URL",))]
+
+    groups: list[tuple[str, tuple[str, ...]]] = [
+        (f"{source}_HOST", (f"{source}_HOST",)),
+        (f"{source}_PORT", (f"{source}_PORT",)),
+        (f"{source}_DB", (f"{source}_DB",)),
+        (f"{source}_USER", (f"{source}_USER",)),
+        (f"{source}_PASSWORD", (f"{source}_PASSWORD",)),
+    ]
+
+    if source == "DB":
+        groups[2] = ("DB_DB", ("DB_DB", "DB_NAME"))
+        groups[4] = ("DB_PASSWORD", ("DB_PASSWORD", "DB_PASS"))
+    elif source == "RDS":
+        groups[4] = ("RDS_PASSWORD", ("RDS_PASSWORD", "RDS_PASS"))
+
+    return groups
+
+
 def _collect_source_values(source: str) -> Dict[str, Optional[str]]:
     if source == "DATABASE_URL":
         return {"DATABASE_URL": first_env("DATABASE_URL")}
+
+    groups = dict(_source_field_alias_groups(source))
     return {
-        "host": first_env(f"{source}_HOST"),
-        "port": first_env(f"{source}_PORT"),
-        "dbname": first_env(f"{source}_DB"),
-        "user": first_env(f"{source}_USER"),
-        "password": first_env(f"{source}_PASSWORD"),
+        "host": first_env(*groups[f"{source}_HOST"]),
+        "port": first_env(*groups[f"{source}_PORT"]),
+        "dbname": first_env(*groups[f"{source}_DB"]),
+        "user": first_env(*groups[f"{source}_USER"]),
+        "password": first_env(*groups[f"{source}_PASSWORD"]),
     }
 
 
@@ -288,7 +311,11 @@ def _present_source_fields(source: str) -> list[str]:
     if source == "DATABASE_URL":
         return ["DATABASE_URL"] if _is_present(first_env("DATABASE_URL")) else []
 
-    return [field for field in _source_fields(source) if _is_present(first_env(field))]
+    present: list[str] = []
+    for canonical, aliases in _source_field_alias_groups(source):
+        if _is_present(first_env(*aliases)):
+            present.append(canonical)
+    return present
 
 
 def _partial_db_sources() -> Dict[str, list[str]]:
