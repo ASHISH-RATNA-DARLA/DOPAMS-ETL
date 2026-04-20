@@ -45,6 +45,7 @@ def fix_surname_field():
 
     pool = connect_to_db()
     pool.reset()
+    pool = connect_to_db()
 
     print("\n=== Fixing 'surname' Field ===\n")
     print("This script will clean the 'surname' field by removing @ symbols\n")

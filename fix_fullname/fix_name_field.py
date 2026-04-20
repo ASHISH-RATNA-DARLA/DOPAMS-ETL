@@ -41,6 +41,7 @@ def fix_name_field():
 
     pool = connect_to_db()
     pool.reset()
+    pool = connect_to_db()
 
     print("\n=== Fixing 'name' Field ===\n")
     print(

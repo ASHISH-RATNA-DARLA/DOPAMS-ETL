@@ -157,6 +157,7 @@ def fix_person_data():
 
     pool = PostgreSQLConnectionPool()
     pool.reset()
+    pool = PostgreSQLConnectionPool()
 
     print("\n=== Fixing Person Name Data ===\n")
     print("This script will:")
