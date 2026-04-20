@@ -441,6 +441,7 @@ def process_sections():
     print("\n[STEP 1] Initializing Database Connection Pool...")
     try:
         db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
+        db_pool.reset()
         with db_pool.get_connection_context() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             print("  ✓ Connected successfully")

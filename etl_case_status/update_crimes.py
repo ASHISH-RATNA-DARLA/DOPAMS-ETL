@@ -90,7 +90,10 @@ def execute_update(sql: str, db_pool: PostgreSQLConnectionPool, idx: int, total:
 
 def update_crimes_table():
     """Update crimes table based on UPDATE statements from case-status.sql concurrently"""
-    
+    from db_pooling import PostgreSQLConnectionPool
+    pool = PostgreSQLConnectionPool()
+    pool.reset()
+
     # Check if all required environment variables are set
     required_vars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']
     missing_vars = [var for var in required_vars if not os.getenv(var)]

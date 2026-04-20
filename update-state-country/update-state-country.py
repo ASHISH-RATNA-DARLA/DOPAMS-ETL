@@ -59,7 +59,7 @@ from dotenv import load_dotenv
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
-from core.geo_resolver import resolve_state, resolve_country
+from core.geo_resolver import resolve_state, resolve_country, _embed_query
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -1264,6 +1264,7 @@ def run(
                 table, id_col, limit or "ALL", dry_run)
 
     _lookup_foreign_token.cache_clear()
+    _embed_query.cache_clear()
     pool = get_db_pool()
     pool.reset()
     pool = get_db_pool()

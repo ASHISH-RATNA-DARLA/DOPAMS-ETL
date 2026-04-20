@@ -40,6 +40,7 @@ def fix_name_field():
     """Fix the name field to match the cleaned full_name field"""
 
     pool = connect_to_db()
+    pool.reset()
 
     print("\n=== Fixing 'name' Field ===\n")
     print(

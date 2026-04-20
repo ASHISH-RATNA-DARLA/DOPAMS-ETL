@@ -157,7 +157,6 @@ class PostgreSQLConnectionPool:
                 f"host={pg_config['host']} "
                 f"port={pg_config['port']} "
                 f"connect_timeout=10 "
-                f"statement_timeout=60000 "
                 f"application_name='dopams-etl'"
             )
             

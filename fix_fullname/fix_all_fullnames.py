@@ -116,7 +116,8 @@ def clean_full_name(full_name):
 
 def fix_all_fullnames():
     pool = connect_to_db()
-    
+    pool.reset()
+
     print("\n=== Fixing ALL full_name Fields ===\n")
     print("This script will:")
     print("1. Clean full_name fields that contain @ symbols")

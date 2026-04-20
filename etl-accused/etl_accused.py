@@ -2040,6 +2040,10 @@ class AccusedETL:
 
 
 def main():
+    from db_pooling import PostgreSQLConnectionPool
+    pool = PostgreSQLConnectionPool()
+    pool.reset()
+
     etl = AccusedETL()
     success = etl.run()
     sys.exit(0 if success else 1)

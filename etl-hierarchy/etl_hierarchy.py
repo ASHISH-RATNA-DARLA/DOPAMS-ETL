@@ -1189,6 +1189,10 @@ class HierarchyETL:
 
 def main():
     """Main entry point"""
+    from db_pooling import PostgreSQLConnectionPool
+    pool = PostgreSQLConnectionPool()
+    pool.reset()
+
     etl = HierarchyETL()
     success = etl.run()
     sys.exit(0 if success else 1)

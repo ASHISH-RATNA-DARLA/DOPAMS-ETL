@@ -587,6 +587,11 @@ def main():
     logging.info("Starting Accused Extraction Service (Hybrid DB+LLM 3-Branch)...")
 
     try:
+        from db_pooling import PostgreSQLConnectionPool
+        pool = PostgreSQLConnectionPool()
+        pool.reset()
+        logging.info("Connection pool reset for fresh start")
+
         conn = get_db_connection()
         logging.info("Database connection established.")
     except Exception as e:
