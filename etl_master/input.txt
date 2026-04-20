@@ -65,6 +65,7 @@ python3 mandal_imputation_from_address.py
 update-state-country
 cd /data-drive/etl-process-dev/update-state-country
 source /data-drive/etl-process-dev/venv/bin/activate
+python3 ensure_geo_indexes.py
 python3 update-state-country.py
 
 [Order 9]

@@ -49,6 +49,7 @@ import re
 import sys
 import threading
 import unicodedata
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -1007,7 +1008,6 @@ def _phase3_embedding_fallback(
     rec:      "PersonRecord",
     dry_run:  bool,
     stats:    dict,
-    lock:     threading.Lock,
 ) -> bool:
     """
     Run embedding + LLM fallback when both pg_trgm phases failed.
@@ -1046,9 +1046,8 @@ def _phase3_embedding_fallback(
                     _write_phase3(conn, table, id_col, rec.person_id,
                                   state=state, country="India",
                                   source=source, confidence=conf)
-                with lock:
-                    stats["embedding_resolved"] = stats.get("embedding_resolved", 0) + 1
-                    stats["updated"] += 1
+                stats["embedding_resolved"] += 1
+                stats["updated"] += 1
                 return True
 
         # Fall back to country resolution
@@ -1066,9 +1065,8 @@ def _phase3_embedding_fallback(
                     _write_phase3(conn, table, id_col, rec.person_id,
                                   state=None, country=country,
                                   source=source, confidence=conf)
-                with lock:
-                    stats["embedding_resolved"] = stats.get("embedding_resolved", 0) + 1
-                    stats["updated"] += 1
+                stats["embedding_resolved"] += 1
+                stats["updated"] += 1
                 return True
 
     return False
@@ -1109,7 +1107,6 @@ def process_record(
     total:   int,
     dry_run: bool,
     stats:   dict,
-    lock:    threading.Lock,
 ) -> None:
     logger.info("[%d/%d] ID=%s", idx, total, rec.person_id)
 
@@ -1129,11 +1126,9 @@ def process_record(
             rec.person_id, "permanent",
         )
         if perm_geo:
-            with lock:
-                stats["perm_matched"] += 1
+            stats["perm_matched"] += 1
         else:
-            with lock:
-                stats["perm_unresolved"] += 1
+            stats["perm_unresolved"] += 1
 
     # ------------------------------------------------------------------
     # PHASE 1B — Present address fallback (geo_reference)
@@ -1173,15 +1168,13 @@ def process_record(
         if soft_perm:
             perm_geo = soft_perm
             phase1_attempted = True
-            with lock:
-                stats["perm_matched"] += 1
-                stats["soft_geo_resolved"] = stats.get("soft_geo_resolved", 0) + 1
+            stats["perm_matched"] += 1
+            stats["soft_geo_resolved"] += 1
         if soft_pres:
             pres_geo = soft_pres
             phase1_attempted = True
-            with lock:
-                stats["pres_matched"] += 1
-                stats["soft_geo_resolved"] = stats.get("soft_geo_resolved", 0) + 1
+            stats["pres_matched"] += 1
+            stats["soft_geo_resolved"] += 1
 
     # ------------------------------------------------------------------
     # PHASE 2 — Foreign country fallback (geo_countries)
@@ -1205,11 +1198,9 @@ def process_record(
         if candidates:
             foreign_match = match_foreign_country(candidates, rec.person_id)
             if foreign_match:
-                with lock:
-                    stats["foreign_matched"] += 1
+                stats["foreign_matched"] += 1
             else:
-                with lock:
-                    stats["foreign_unresolved"] += 1
+                stats["foreign_unresolved"] += 1
         else:
             logger.debug("  [%s] Phase 2: no candidate tokens", rec.person_id)
 
@@ -1221,7 +1212,7 @@ def process_record(
     embedding_resolved = False
     if perm_geo is None and pres_geo is None and foreign_match is None:
         embedding_resolved = _phase3_embedding_fallback(
-            table, id_col, rec, dry_run, stats, lock,
+            table, id_col, rec, dry_run, stats,
         )
 
     # ------------------------------------------------------------------
@@ -1249,13 +1240,11 @@ def process_record(
                 table, id_col, rec.person_id,
                 foreign_match.country, dry_run,
             )
-            with lock:
-                stats["foreign_written"] += 1
+            stats["foreign_written"] += 1
 
     except Exception as exc:
         logger.error("  [%s] write failed: %s", rec.person_id, exc, exc_info=True)
-        with lock:
-            stats["failed"] += 1
+        stats["failed"] += 1
 
 
 # ---------------------------------------------------------------------------
@@ -1274,8 +1263,10 @@ def run(
     logger.info("Table: %s  |  ID: %s  |  Limit: %s  |  Dry-run: %s",
                 table, id_col, limit or "ALL", dry_run)
 
-    # Ensure the pool is initialised before spawning threads
-    get_db_pool()
+    _lookup_foreign_token.cache_clear()
+    pool = get_db_pool()
+    pool.reset()
+    pool = get_db_pool()
 
     total_pending = count_pending(table, id_col)
     effective_total = min(total_pending, limit) if limit else total_pending
@@ -1285,8 +1276,7 @@ def run(
         logger.info("Nothing to process — all records are already complete.")
         return
 
-    lock  = threading.Lock()
-    stats = {
+    stats = Counter({
         "updated":            0,
         "skipped":            0,
         "failed":             0,
@@ -1299,7 +1289,7 @@ def run(
         "foreign_written":    0,
         "embedding_resolved": 0,
         "soft_geo_resolved":  0,
-    }
+    })
 
     processed = 0
     last_seen_id: Optional[str] = None
@@ -1319,7 +1309,7 @@ def run(
                     process_record,
                     rec, table, id_col,
                     processed + i + 1, effective_total,
-                    dry_run, stats, lock,
+                    dry_run, stats,
                 ): rec
                 for i, rec in enumerate(batch)
             }
@@ -1328,8 +1318,7 @@ def run(
                     future.result()
                 except Exception as exc:
                     logger.error("Thread error: %s", exc, exc_info=True)
-                    with lock:
-                        stats["failed"] += 1
+                    stats["failed"] += 1
 
             processed += len(batch)
             last_seen_id = batch[-1].person_id

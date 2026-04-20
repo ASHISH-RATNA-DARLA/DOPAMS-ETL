@@ -157,6 +157,7 @@ class PostgreSQLConnectionPool:
                 f"host={pg_config['host']} "
                 f"port={pg_config['port']} "
                 f"connect_timeout=10 "
+                f"statement_timeout=60000 "
                 f"application_name='dopams-etl'"
             )
             
@@ -243,6 +244,13 @@ class PostgreSQLConnectionPool:
         if self.pool:
             self.pool.closeall()
             logger.info("Connection pool closed")
+
+    def reset(self):
+        """Force pool reset - clears singleton for fresh initialization"""
+        self.close_all()
+        PostgreSQLConnectionPool._instance = None
+        PostgreSQLConnectionPool._initialized = False
+        logger.info("Connection pool reset - singleton cleared")
     
     def stats(self) -> Dict[str, int]:
         """Get pool statistics"""

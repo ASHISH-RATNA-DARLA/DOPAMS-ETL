@@ -477,7 +477,12 @@ def main():
         sys.exit(1)
 
     logger.info("Found %d processes to execute.", len(processes))
-    
+
+    from db_pooling import PostgreSQLConnectionPool
+    pool = PostgreSQLConnectionPool()
+    pool.reset()
+    logger.info("Connection pool reset for fresh start")
+
     pipeline_start_time = time.time()
 
     for process_index, process in enumerate(processes, start=1):
