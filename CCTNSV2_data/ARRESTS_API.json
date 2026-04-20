@@ -1,0 +1,23 @@
+{
+  "status": true,
+  "data": [
+    {
+      "CRIME_ID": "63b95deb15c4073c8aebb367",
+      "ACCUSED_SEQ_NO": "202001423000567001",
+      "ACCUSED_CODE": "A1",
+      "PERSON_ID": "63b960a720965f2bc5b6081c",
+      "ACCUSED_TYPE": "Accused",
+      "IS_ARRESTED": null,
+      "ARRESTED_DATE": "2023-01-07 09:00:00",
+      "IS_41A_CRPC": false,
+      "IS_41A_EXPLAIN_SUBMITTED": false,
+      "DATE_OF_ISSUE_41A": "",
+      "IS_CCL": false,
+      "IS_APPREHENDED": false,
+      "IS_ABSCONDING": false,
+      "IS_DIED": false,
+      "DATE_CREATED": "2023-01-07T11:56:27.278Z",
+      "DATE_MODIFIED": "2025-01-02T11:27:09.641Z"
+    }
+  ]
+}

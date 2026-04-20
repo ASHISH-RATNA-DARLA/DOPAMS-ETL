@@ -1,0 +1,23 @@
+{
+  "status": true,
+  "data": [
+    {
+      "ADG_NAME": "ADG L&O",
+      "ADG_CODE": "2000999",
+      "ZONE_NAME": "Multi Zone-I",
+      "ZONE_CODE": "2000800",
+      "RANGE_NAME": "Zone-I Kaleshwaram",
+      "RANGE_CODE": "2000705",
+      "DIST_NAME": "Kumrambheem Asifabad",
+      "DIST_CODE": "37016500",
+      "SUB_ZONE_NAME": "",
+      "SUB_ZONE_CODE": "",
+      "SDPO_NAME": "Asifabad Division",
+      "SDPO_CODE": "2061401",
+      "CIRCLE_NAME": "Jainoor Circle",
+      "CIRCLE_CODE": "2011203",
+      "PS_NAME": "Sirpur U PS",
+      "PS_CODE": "2011043"
+    }
+  ]
+}

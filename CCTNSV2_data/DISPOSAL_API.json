@@ -1,0 +1,14 @@
+{
+  "status": true,
+  "data": [
+    {
+      "DISPOSAL_TYPE": "Acquittal",
+      "DISPOSED_DATE": "2024-10-22T03:19:25.505Z",
+      "DISPOSAL": "COURT DISPOSAL",
+      "CRIME_ID": "644cf4db127781dbdac27a84",
+      "CASE_STATUS": "Disposal",
+      "DATE_CREATED": "2023-04-29T10:43:39.067Z",
+      "DATE_MODIFIED": "2025-01-03T03:19:56.473Z"
+    }
+  ]
+}

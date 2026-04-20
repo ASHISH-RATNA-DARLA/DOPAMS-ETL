@@ -1,0 +1,48 @@
+{
+  "status": true,
+  "data": [
+    {
+      "PROPERTY_ID": "63b9620115c4071147ec408e",
+      "CRIME_ID": "63b95deb15c4073c8aebb367",
+      "CASE_PROPERTY_ID": null,
+      "PROPERTY_STATUS": "Seized",
+      "RECOVERED_FROM": "",
+      "PLACE_OF_RECOVERY": "",
+      "DATE_OF_SEIZURE": "",
+      "NATURE": "Ganja",
+      "BELONGS": "Accused",
+      "ESTIMATE_VALUE": 60000,
+      "RECOVERED_VALUE": 0,
+      "PARTICULAR_OF_PROPERTY": "  3 kgs Ganga",
+      "CATEGORY": "Drugs/Narcotics",
+      "ADDITIONAL_DETAILS": {
+        "WEIGHT_IN": "Kg",
+        "PLACE_TYPE": "",
+        "CULTIVATION_TYPE": "",
+        "LOCATION_TYPE": "",
+        "DRUG_PARTICULARS": "",
+        "DESCRIPTION_OF_PACKING": "",
+        "SPECIFICATION_OF_DRUG": "",
+        "OTHER": "",
+        "AGENCY_NAME": "",
+        "GANG_NAME": "",
+        "REMARKS": "",
+        "WEIGHT": 3,
+        "WHETHER_NOTICE": false,
+        "WHETHER_LAB": false,
+        "WHETHER_ACCUSED": false,
+        "WHETHER_DRUG_SYNDICATE": false,
+        "WHETHER_TRAFFICKER": false,
+        "WHETHER_CARRIER": false,
+        "WHETHER_ADDICT": false,
+        "WHETHER_PEDDLER": false,
+        "WHETHER_DETAINED": false,
+        "WHETHER_EMERGENCY": false,
+        "WHETHER_INTERROGATION": false
+      },
+      "MEDIA": [],
+      "DATE_CREATED": "2023-01-07T12:13:53.921Z",
+      "DATE_MODIFIED": "2025-01-02T11:29:37.634Z"
+    }
+  ]
+}

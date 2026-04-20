@@ -1,0 +1,30 @@
+{
+  "status": true,
+  "data": [
+    {
+      "CRIME_ID": "63b95deb15c4073c8aebb367",
+      "ACCUSED_ID": "63b9630e20965f0602b65b94",
+      "IS_CCL": false,
+      "PERSON_ID": "63b960a720965f2bc5b6081c",
+      "ACCUSED_STATUS": "Arrest By Police and Remanded",
+      "ACCUSED_CODE": "A1",
+      "TYPE": "Accused",
+      "SEQ_NUM": "202001423000567001",
+      "PHYSICAL_FEATURES": {
+        "BEARD": "",
+        "BUILD": "",
+        "COLOR": "",
+        "EAR": "",
+        "EYES": "",
+        "FACE": "",
+        "HAIR": "",
+        "HEIGHT": "",
+        "LEUCODERMA": "",
+        "MOLE": "",
+        "MUSTACHE": "",
+        "NOSE": "",
+        "TEETH": ""
+      }
+    }
+  ]
+}

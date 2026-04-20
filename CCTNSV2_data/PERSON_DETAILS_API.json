@@ -1,0 +1,63 @@
+{
+  "status": true,
+  "data": {
+    "PERSON_ID": "631edc61b06f53d8788ade60",
+    "PERSONAL_DETAILS": {
+      "NAME": "Yousuf ",
+      "SURNAME": "",
+      "ALIAS": "Party",
+      "FULL_NAME": "Yousuf @Party",
+      "RELATION_TYPE": "",
+      "RELATIVE_NAME": "",
+      "GENDER": "Male",
+      "IS_DIED": false,
+      "DATE_OF_BIRTH": "",
+      "AGE": 26,
+      "OCCUPATION": "",
+      "EDUCATION_QUALIFICATION": "",
+      "CASTE": "",
+      "SUB_CASTE": "",
+      "RELIGION": "",
+      "NATIONALITY": "",
+      "DESIGNATION": "",
+      "PLACE_OF_WORK": ""
+    },
+    "PRESENT_ADDRESS": {
+      "HOUSE_NO": "",
+      "STREET_ROAD_NO": "",
+      "WARD_COLONY": "",
+      "LANDMARK_MILESTONE": "",
+      "LOCALITY_VILLAGE": "",
+      "AREA_MANDAL": "",
+      "DISTRICT": "",
+      "STATE_UT": "",
+      "COUNTRY": "",
+      "RESIDENCY_TYPE": "",
+      "PIN_CODE": "",
+      "JURISDICTION_PS": ""
+    },
+    "PERMANENT_ADDRESS": {
+      "HOUSE_NO": "",
+      "STREET_ROAD_NO": "",
+      "WARD_COLONY": "",
+      "LANDMARK_MILESTONE": "",
+      "LOCALITY_VILLAGE": "",
+      "AREA_MANDAL": "",
+      "DISTRICT": "",
+      "STATE_UT": "",
+      "COUNTRY": "",
+      "RESIDENCY_TYPE": "",
+      "PIN_CODE": "",
+      "JURISDICTION_PS": ""
+    },
+    "CONTACT_DETAILS": {
+      "PHONE_NUMBER": "",
+      "COUNTRY_CODE": "",
+      "EMAIL_ID": ""
+    },
+    "IDENTITY_DETAILS": [],
+    "MEDIA": [],
+    "DATE_CREATED": "2022-09-12T07:14:41.815Z",
+    "DATE_MODIFIED": "2022-10-04T08:31:08.025Z"
+  }
+}

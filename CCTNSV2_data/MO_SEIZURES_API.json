@@ -1,0 +1,32 @@
+{
+  "status": true,
+  "data": [
+    {
+      "MO_SEIZURE_ID": "6776323022046cc9a5d3f3ef",
+      "CRIME_ID": "6751c1466534c6afc08cab31",
+      "SEQ_NO": "20110832403550001",
+      "MO_ID": "MO1",
+      "TYPE": "Drugs/Narcotics",
+      "SUB_TYPE": "Ganja",
+      "DESCRIPTION": "On 05-12-2024, the SI of Police, Mavala along with staff were performing town patrolling and reached in front of Kendriya vidyalam, Balaji nagar, Adilabad at about 10:00 hrs, where we found four persons in which three persons having polythene cover in front of Kendriya Vidyalam under suspicious circumstances. On seeing the police party they try escape from there. Immediately the SIP, Mavala apprehended them, checked the polythene cover and found Ganja smell from plastic cover, taken the accused persons as above, summoned two panhcas by giving notice to them, the SI of Police, Mavala conducted confessional cum seizure panchanama and seized the 500 grams Ganja from possession of A-2 to A-4. Entire episode photographed and video graphed with the help of photographer & video grapher",
+      "SEIZED_FROM": "At the instance of Accused",
+      "SEIZED_DATE": "2024-12-05 11:58:27",
+      "SEIZED_BY": "KANDULA PHANIDHAR",
+      "STRENGTH_OF_EVIDENCE": "Accused was identified",
+      "POS_ADDRESS1": "",
+      "POS_ADDRESS2": "",
+      "POS_CITY": "",
+      "POS_DISTRICT": "",
+      "POS_PINCODE": "",
+      "POS_LANDMARK": "",
+      "POS_DESCRIPTION": "",
+      "POS_LATITUDE": "",
+      "POS_LONGITUDE": "",
+      "MO_MEDIA_URL": "http://10.20.2.213:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/fba6fc85-3a10-4368-a394-f67ed8666175/content?attachment=false&alf_ticket=TICKET_ec2feab3e7a2dbc8ff0221ae45ceafca3e91cf94",
+      "MO_MEDIA_NAME": "lett355nm.jpg",
+      "MO_MEDIA_FILE_ID": "fba6fc85-3a10-4368-a394-f67ed8666175",
+      "DATE_CREATED": "2025-01-02T06:29:04.280Z",
+      "DATE_MODIFIED": "2025-01-02T06:31:24.670Z"
+    }
+  ]
+}

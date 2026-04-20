@@ -1,0 +1,27 @@
+{
+  "_meta": "HEAD probe \u2014 actual endpoint returns binary PDF",
+  "endpoint": "http://103.164.200.184:3000/api/DOPAMS/files/{fileId}",
+  "probe_url": "http://103.164.200.184:3000/api/DOPAMS/files/probe-check",
+  "http_status": 400,
+  "response_headers": {
+    "Content-Type": "application/json",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=15552000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-DNS-Prefetch-Control": "off",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-XSS-Protection": "0",
+    "X-Request-Id": "855c8fe1-437c-48cc-a9c1-a3383ded5d1b",
+    "RateLimit-Policy": "10;w=60",
+    "RateLimit-Limit": "10",
+    "RateLimit-Remaining": "5",
+    "RateLimit-Reset": "35",
+    "Origin-Agent-Cluster": "?1",
+    "X-Download-Options": "noopen",
+    "X-Permitted-Cross-Domain-Policies": "none",
+    "content-length": "0"
+  },
+  "usage": "GET /files/{fileId} streams PDF binary \u2014 not JSON-samplable"
+}

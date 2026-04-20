@@ -1,0 +1,48 @@
+{
+  "status": true,
+  "data": [
+    {
+      "CASE_PROPERTY_ID": "677632bc4ba134f6b242285b",
+      "CASE_TYPE": "Material Objects",
+      "CRIME_ID": "6751c1466534c6afc08cab31",
+      "MO_ID": "6776323022046cc9a5d3f3ef",
+      "STATUS": "Send To FSL",
+      "SEND_DATE": "2024-12-24T06:30:19.307Z",
+      "FORWARDING_THROUGH": "Court",
+      "COURT_NAME": "",
+      "FSL_COURT_NAME": "Judicial First Class Megistrate (Pcr Mobile) Court Adilabad",
+      "FSL_REQUEST_ID": "",
+      "MEDIA": [
+        {
+          "FILE_ID": ""
+        }
+      ],
+      "CPR_NO": "",
+      "DIRECTION_BY_COURT": "",
+      "DETAILS_DISPOSAL": "",
+      "CPR_COURT_NAME": "",
+      "PLACE_DISPOSAL": "",
+      "DATE_DISPOSAL": "",
+      "RELEASE_ORDER_NO": "",
+      "RELEASE_DATE": "",
+      "RETURN_DATE": "",
+      "PLACE_CUSTODY": "",
+      "ASSIGN_CUSTODY": "",
+      "DATE_CUSTODY": "",
+      "FSL_NO": "SFSL(TS)/13451 NAR/2012/24",
+      "FSL_DATE": "2024-12-24T06:32:19.066Z",
+      "REPORT_RECEIVED": false,
+      "OPINION": "",
+      "OPINION_FURNISHED": "",
+      "STRENGTH_OF_EVIDENCE": "",
+      "PROPERTY_RECEIVED_BACK": true,
+      "EXPERT_TYPE": "",
+      "OTHER_EXPERT_TYPE": "",
+      "DATE_SENT_TO_EXPERT": "",
+      "COURT_ORDER_NUMBER": "",
+      "COURT_ORDER_DATE": "",
+      "DATE_CREATED": "2025-01-02T06:31:24.666Z",
+      "DATE_MODIFIED": "2025-01-02T06:32:19.977Z"
+    }
+  ]
+}

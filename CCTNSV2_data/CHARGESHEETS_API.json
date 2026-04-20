@@ -1,0 +1,187 @@
+{
+  "status": true,
+  "data": [
+    {
+      "uploadChargeSheet": {
+        "fileId": "99b2ae18-9741-4622-8502-ec7b7cd20f88"
+      },
+      "chargeSheetId": "677620b322046c073ecf5445",
+      "crimeId": "661a950a379a431ace4b3844",
+      "chargeSheetNo": "547/2024",
+      "chargeSheetDate": "2024-11-30T05:11:55.136Z",
+      "chargeSheetType": "Original",
+      "courtName": "Judicial First Class Magistrate Court Vemulawada Town",
+      "isCcl": false,
+      "isEsigned": false,
+      "chargeSheetNoForIcjs": "202405024018401",
+      "accusedParticulars": [
+        {
+          "requestedForNBW": false,
+          "_id": "677620f4b16fe2d8341d6fd6",
+          "accusedPersonId": "661a969edbffaa54eea865c3",
+          "chargeStatus": "Charged",
+          "reasonForNoCharge": ""
+        },
+        {
+          "requestedForNBW": false,
+          "_id": "677620f4b16fe2da351d6fd7",
+          "accusedPersonId": "661a96f06cf30fdd29a37c68",
+          "chargeStatus": "Charged",
+          "reasonForNoCharge": ""
+        },
+        {
+          "requestedForNBW": false,
+          "_id": "677620f4b16fe2cf661d6fd8",
+          "accusedPersonId": "661a9745c97e2c5e174c17c8",
+          "chargeStatus": "Charged",
+          "reasonForNoCharge": ""
+        },
+        {
+          "requestedForNBW": false,
+          "_id": "677620f4b16fe2bc7b1d6fd9",
+          "accusedPersonId": "661a9794379a4353bb4b778e",
+          "chargeStatus": "Charged",
+          "reasonForNoCharge": ""
+        },
+        {
+          "requestedForNBW": false,
+          "_id": "677620f4b16fe23e251d6fda",
+          "accusedPersonId": "661a97cf0ce7a414ba8fe48d",
+          "chargeStatus": "Charged",
+          "reasonForNoCharge": ""
+        },
+        {
+          "requestedForNBW": false,
+          "_id": "677620f4b16fe261d01d6fdb",
+          "accusedPersonId": "661a9806dbffaa7cc9a8ac4b",
+          "chargeStatus": "Charged",
+          "reasonForNoCharge": ""
+        }
+      ],
+      "actsAndSections": [
+        {
+          "section": [
+            "8c"
+          ],
+          "rwRequired": false,
+          "_id": "677620b322046c45b4cf544d",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "20(b)(ii)(A)"
+          ],
+          "rwRequired": true,
+          "_id": "677620b322046c7f26cf544e",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "8c"
+          ],
+          "rwRequired": false,
+          "_id": "677620b322046c14d3cf5450",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "20(b)(ii)(A)"
+          ],
+          "rwRequired": true,
+          "_id": "677620b322046c620acf5451",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "8c"
+          ],
+          "rwRequired": false,
+          "_id": "677620b322046c0179cf5453",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "20(b)(ii)(A)"
+          ],
+          "rwRequired": true,
+          "_id": "677620b322046cea7bcf5454",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "8c"
+          ],
+          "rwRequired": false,
+          "_id": "677620b322046cf284cf5456",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "20(b)(ii)(A)"
+          ],
+          "rwRequired": true,
+          "_id": "677620b322046c97e9cf5457",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "8c"
+          ],
+          "rwRequired": false,
+          "_id": "677620b322046c09e6cf5459",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "20(b)(ii)(A)"
+          ],
+          "rwRequired": true,
+          "_id": "677620b322046c56c2cf545a",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "8c"
+          ],
+          "rwRequired": false,
+          "_id": "677620b322046c7a5acf545c",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        },
+        {
+          "section": [
+            "20(b)(ii)(A)"
+          ],
+          "rwRequired": true,
+          "_id": "677620b322046c1e1ccf545d",
+          "actDescription": "Narcotic Drugs And Psychotropic Substances Act",
+          "sectionDescription": "false",
+          "graveParticulars": ""
+        }
+      ],
+      "dateCreated": "2025-01-02T05:14:27.307Z",
+      "dateModified": "2025-01-02T05:16:34.236Z"
+    }
+  ]
+}

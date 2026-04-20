@@ -1,0 +1,18 @@
+{
+  "status": true,
+  "data": [
+    {
+      "takenOnFile": {
+        "date": "2024-12-30T06:59:13.676Z",
+        "caseType": "SC",
+        "courtCaseNo": "1071/2024"
+      },
+      "updateChargeSheetId": "67752768f4213357cf215a75",
+      "crimeId": "6684457fe191fff91bc3a8fb",
+      "chargeSheetNo": "146/2024",
+      "chargeSheetDate": "2024-10-05T06:11:00.069Z",
+      "chargeSheetStatus": "Taken on File",
+      "dateCreated": "2025-01-01T11:30:48.357Z"
+    }
+  ]
+}

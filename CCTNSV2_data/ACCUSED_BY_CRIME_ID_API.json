@@ -1,0 +1,30 @@
+{
+  "status": true,
+  "data": [
+    {
+      "CRIME_ID": "6774e2cf22046c00c7c2f98f",
+      "ACCUSED_ID": "6774f4b3f42133a9c91ef0de",
+      "IS_CCL": false,
+      "PERSON_ID": "6774e4ef335dfe1beb3dee14",
+      "ACCUSED_STATUS": "Absconding",
+      "ACCUSED_CODE": "",
+      "TYPE": "Known",
+      "SEQ_NUM": "202306724113567001",
+      "PHYSICAL_FEATURES": {
+        "BEARD": "",
+        "BUILD": "",
+        "COLOR": "",
+        "EAR": "",
+        "EYES": "",
+        "FACE": "",
+        "HAIR": "",
+        "HEIGHT": "",
+        "LEUCODERMA": "",
+        "MOLE": "",
+        "MUSTACHE": "",
+        "NOSE": "",
+        "TEETH": ""
+      }
+    }
+  ]
+}

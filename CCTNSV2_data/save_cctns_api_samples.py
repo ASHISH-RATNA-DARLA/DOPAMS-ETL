@@ -34,8 +34,8 @@ TIMEOUT = int(os.environ.get('API_TIMEOUT', '60'))
 HEADERS = {'x-api-key': API_KEY}
 
 # API enforces max 7-day window
-SAMPLE_FROM = '2022-07-01'
-SAMPLE_TO = '2022-07-07'
+SAMPLE_FROM = '2025-01-01'
+SAMPLE_TO = '2025-01-07'
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -123,7 +123,7 @@ def resolve_crime_id() -> str | None:
                     rec = val[0]
                     break
         if rec:
-            for field in ('crimeId', 'crime_id', 'id', 'caseId', 'case_id', '_id'):
+            for field in ('CRIME_ID', 'crimeId', 'crime_id', 'id', 'caseId', 'case_id', '_id', 'CASE_ID'):
                 if rec.get(field):
                     cid = str(rec[field])
                     log.info(f'  Resolved crime_id={cid} (field={field})')
@@ -142,7 +142,7 @@ def resolve_person_id() -> str | None:
         conn = psycopg2.connect(**{k: v for k, v in cfg.items()
                                    if k in ('host', 'port', 'dbname', 'user', 'password')})
         cur = conn.cursor()
-        cur.execute("SELECT id FROM persons LIMIT 1")
+        cur.execute("SELECT person_id FROM persons LIMIT 1")
         row = cur.fetchone()
         cur.close()
         conn.close()

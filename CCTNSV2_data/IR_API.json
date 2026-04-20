@@ -1,0 +1,137 @@
+{
+  "status": true,
+  "data": [
+    {
+      "INTERROGATION_REPORT_ID": "66727c5b3e0f0d12bb2b5aa2",
+      "CRIME_ID": "666a230a3fc9502adfbf8bbf",
+      "PERSON_ID": "666a25c6f4a1d75e37a85f5f",
+      "MEDIA": [],
+      "PHYSICAL_FEATURES": {
+        "BEARD": "Others",
+        "BUILD": "Normal",
+        "BURN_MARKS": "OTHERS",
+        "COLOR": "Fair",
+        "DEFORMITIES_OR_PECULIARITIES": "Others",
+        "DEFORMITIES": "Others",
+        "EAR": "Others",
+        "EYES": "Black",
+        "FACE": "Normal",
+        "HAIR": "Black",
+        "HEIGHT": "4.6 - 5.0 ft",
+        "IDENTIFICATION_MARKS": "a mole on the left chin.",
+        "LANGUAGE_OR_DIALECT": [
+          "Hindi"
+        ],
+        "LEUCODERMA": "no",
+        "MOLE": "Chin",
+        "MUSTACHE": "Others",
+        "NOSE": "Normal Nose",
+        "SCAR": "OTHERS",
+        "TATTOO": "OTHERS",
+        "TEETH": "Normal Teeth"
+      },
+      "SOCIO_ECONOMIC_PROFILE": {
+        "LIVING_STATUS": "With family",
+        "MARITAL_STATUS": "Unmarried",
+        "EDUCATION": "Illiterate",
+        "OCCUPATION": "Labourer",
+        "INCOME_GROUP": "Lower Middle Income Rs.2500 to Rs.5000"
+      },
+      "FAMILY_HISTORY": [],
+      "ASSOCIATE_DETAILS": [],
+      "COMMISSION_OF_OFFENCE": {
+        "OFFENCE_TIME": "",
+        "OTHER_OFFENCE_TIME": ""
+      },
+      "LOCAL_CONTACTS": [],
+      "REGULAR_HABITS": [
+        "Chewing Pan / Gutka"
+      ],
+      "OTHER_REGULAR_HABITS": "",
+      "INDULGANCE_BEFORE_OFFENCE": [],
+      "OTHER_INDULGANCE_BEFORE_OFFENCE": "",
+      "MODUS_OPERANDI": [],
+      "SHELTER": [],
+      "PROPERTY_DISPOSAL": [],
+      "SHARE_OF_AMOUNT_SPENT": {
+        "SHARE_OF_AMOUNT_SPENT": "",
+        "OTHER_SHARE_OF_AMOUNT_SPENT": "",
+        "REMARKS": ""
+      },
+      "PREVIOUS_OFFENCES_CONFESSED": [],
+      "REGULARIZATION_OF_TRANSIT_WARRANTS": [],
+      "EXECUTION_OF_NBW": [],
+      "PENDING_NBW": [],
+      "SURETIES": [],
+      "DEFENCE_COUNSEL": [],
+      "JAIL_SENTENCE": [],
+      "NEW_GANG_FORMATION": [],
+      "CONVICTION_ACQUITTAL": [],
+      "PRESENT_WHEREABOUTS": {
+        "IN_JAIL": {
+          "IS_IN_JAIL": false,
+          "FROM_WHERE_SENT_IN_JAIL": "",
+          "CRIME_NUM": "",
+          "DIST_UNIT": ""
+        },
+        "ON_BAIL": {
+          "IS_ON_BAIL": false,
+          "FROM_WHERE_SENT_ON_BAIL": "",
+          "CRIME_NUM": "",
+          "DATE_OF_BAIL": ""
+        },
+        "ABSCONDING": {
+          "IS_ABSCONDING": false,
+          "WANTED_IN_POLICE_STATION": "",
+          "CRIME_NUM": ""
+        },
+        "NORMAL_LIFE": {
+          "IS_NORMAL_LIFE": false,
+          "EKING_LIVELIHOOD_BY_LABOR_WORK": ""
+        },
+        "REHABILITATED": {
+          "IS_REHABILITATED": false,
+          "REHABILITATION_DETAILS": ""
+        },
+        "DEAD": {
+          "IS_DEAD": false,
+          "DEATH_DETAILS": ""
+        },
+        "FACING_TRIAL": {
+          "IS_FACING_TRIAL": false,
+          "PS_NAME": "",
+          "CRIME_NUM": ""
+        }
+      },
+      "INTERROGATION_REPORT": [
+        "1df58fbf-9029-4a9d-8e47-51bab334f595"
+      ],
+      "TYPES_OF_DRUGS": [
+        {
+          "TYPE_OF_DRUG": "Ganja",
+          "QUANTITY": "56.52 kgs",
+          "PURCHASE_AMOUN_IN_INR": "1488000",
+          "MODE_OF_PAYMENT": "",
+          "MODE_OF_TRANSPORT": "",
+          "SUPPLIER_PERSON_ID": "",
+          "RECEIVERS_PERSON_ID": ""
+        }
+      ],
+      "CONSUMER_DETAILS": [],
+      "TIME_SINCE_MODUS_OPERANDI": "nil",
+      "FINANCIAL_HISTORY": [],
+      "SIM_DETAILS": [
+        {
+          "PHONE_NUMBER": "8928187506",
+          "SDR": "",
+          "IMEI": "864470061776647",
+          "TRUE_CALLER_NAME": "",
+          "PERSON_ID": ""
+        }
+      ],
+      "DOPAMS_LINKS": [],
+      "DATE_CREATED": "2024-06-19T06:36:11.462Z",
+      "DATE_MODIFIED": "2025-01-02T12:38:27.228Z"
+    }
+  ]
+}
