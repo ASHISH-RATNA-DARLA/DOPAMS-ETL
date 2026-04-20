@@ -442,6 +442,7 @@ def process_sections():
     try:
         db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
         db_pool.reset()
+        db_pool = PostgreSQLConnectionPool(minconn=1, maxconn=10)
         with db_pool.get_connection_context() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             print("  ✓ Connected successfully")
