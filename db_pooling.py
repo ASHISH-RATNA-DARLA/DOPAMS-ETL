@@ -242,11 +242,13 @@ class PostgreSQLConnectionPool:
             logger.info("Connection pool closed")
 
     def reset(self):
-        """Force pool reset - clears singleton for fresh initialization"""
+        """Force pool reset and reinitialize on the same instance."""
         self.close_all()
-        PostgreSQLConnectionPool._instance = None
+        self.pool = None
         PostgreSQLConnectionPool._initialized = False
-        logger.info("Connection pool reset - singleton cleared")
+        self._initialize_pool()
+        PostgreSQLConnectionPool._initialized = True
+        logger.info("Connection pool reset - reinitialized")
     
     def stats(self) -> Dict[str, int]:
         """Get pool statistics"""
