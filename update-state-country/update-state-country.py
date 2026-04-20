@@ -1107,6 +1107,7 @@ def process_record(
     total:   int,
     dry_run: bool,
     stats:   dict,
+    lock:    threading.Lock,
 ) -> None:
     logger.info("[%d/%d] ID=%s", idx, total, rec.person_id)
 
@@ -1267,6 +1268,8 @@ def run(
     _embed_query.cache_clear()
     pool = get_db_pool()
     pool.reset()
+    global _DB_POOL
+    _DB_POOL = None
     pool = get_db_pool()
 
     total_pending = count_pending(table, id_col)
@@ -1294,6 +1297,7 @@ def run(
 
     processed = 0
     last_seen_id: Optional[str] = None
+    stats_lock = threading.Lock()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         while processed < effective_total:
@@ -1310,7 +1314,7 @@ def run(
                     process_record,
                     rec, table, id_col,
                     processed + i + 1, effective_total,
-                    dry_run, stats,
+                    dry_run, stats, stats_lock,
                 ): rec
                 for i, rec in enumerate(batch)
             }
