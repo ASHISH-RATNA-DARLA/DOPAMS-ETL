@@ -28,6 +28,9 @@ from preflight_check import (
     run_preflight,
 )
 from checkpoint_manager import mark_backfill_complete
+import etl_run_config
+
+STEP_TIMEOUT_SEC = int(os.environ.get("STEP_TIMEOUT_SEC", "7200")) or None
 
 
 MASTER_LOG_DIR = None
@@ -289,6 +292,7 @@ def run_command(command, cwd, env, execution_log_path):
             text=True,
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            timeout=STEP_TIMEOUT_SEC,
         )
 
 
@@ -483,6 +487,26 @@ def main():
     pool.reset()
     logger.info("Connection pool reset for fresh start")
 
+    # --- Run-mode: RESTART vs incremental ---
+    restart_mode = etl_run_config.is_restart_mode()
+    from_date = etl_run_config.get_from_date()
+    to_date = etl_run_config.get_to_date()
+
+    if restart_mode:
+        logger.warning(
+            "RESTART=true detected. DB wipe starting. KB tables preserved: %s",
+            sorted(etl_run_config.KB_PRESERVE_TABLES),
+        )
+        etl_run_config.wipe_database(pool, logger)
+        logger.warning("RESTART wipe complete. Reloading from %s → %s", from_date, to_date)
+    else:
+        logger.info("Incremental mode: FROM=%s TO=%s", from_date, to_date)
+
+    # Inject date window into all child subprocess environments
+    os.environ["ETL_FROM_DATE"] = from_date
+    os.environ["ETL_TO_DATE"] = to_date
+    logger.info("ETL_FROM_DATE=%s  ETL_TO_DATE=%s injected into child env", from_date, to_date)
+
     pipeline_start_time = time.time()
 
     for process_index, process in enumerate(processes, start=1):
@@ -493,13 +517,16 @@ def main():
     total_time = time.time() - pipeline_start_time
     logger.info("All ETL processes finished successfully. Total execution time: %.2fs", total_time)
 
-    # Mark backfill as complete ONLY if all 28 steps succeeded
-    # This allows config.py to switch from fixed date range to dynamic daily mode
+    # Persist successful run watermark back into .env
+    etl_run_config.persist_last_run(to_date)
+    logger.info("LAST_RUN persisted: %s", to_date)
+
+    # Mark backfill as complete ONLY if all steps succeeded (keeps etl_run_state in sync)
     logger.info("Updating master checkpoint to mark backfill complete...")
     if mark_backfill_complete():
-        logger.info("✅ Backfill marked complete. Future runs will use daily incremental mode.")
+        logger.info("Backfill marked complete. Future runs will use daily incremental mode.")
     else:
-        logger.warning("⚠️ Failed to update master checkpoint. Backfill not marked complete.")
+        logger.warning("Failed to update master checkpoint. Backfill not marked complete.")
 
 
 if __name__ == "__main__":

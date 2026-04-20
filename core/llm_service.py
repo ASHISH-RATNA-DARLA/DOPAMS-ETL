@@ -145,7 +145,17 @@ def get_llm(task_type: str) -> LLMService:
             context_window=4096,
             stream=False
         )
-        
+
+    elif task_type == 'address':
+        model = os.getenv("LLM_MODEL_ADDRESS", "qwen2.5:14b-instruct")
+        return LLMService(
+            model=model,
+            temperature=0.0,          # deterministic KB-validated extraction
+            max_tokens=256,
+            context_window=4096,
+            stream=False
+        )
+
     else:
         logger.warning(f"Unknown task_type '{task_type}', defaulting to extraction parameters.")
         model = os.getenv("LLM_MODEL_EXTRACTION")

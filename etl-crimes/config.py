@@ -12,10 +12,10 @@ from env_utils import (
 
 load_repo_environment()
 
-# Calculate yesterday's end time in IST (UTC+05:30)
+import os as _os
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
-now_ist = datetime.now(IST_OFFSET)
-yesterday_end = (now_ist - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=0)
+_from_date = _os.environ.get('ETL_FROM_DATE', '2022-06-01')
+_to_date = _os.environ.get('ETL_TO_DATE', (datetime.now(IST_OFFSET) - timedelta(days=1)).strftime('%Y-%m-%d'))
 
 DB_CONFIG = resolve_db_config()
 
@@ -31,42 +31,9 @@ API_CONFIG = {
     'ir_url': f"{resolve_api_base_url('DOPAMAS_API_URL')}/interrogation-reports/v1/",
 }
 
-# Determine end_date based on backfill completion status
-# After backfill completes, use dynamic yesterday's end
-# During backfill, use fixed date to prevent gaps if pipeline fails mid-backfill
-# Check if backfill is complete by looking for master_etl_state checkpoint
-def get_etl_end_date():
-    """
-    Returns end_date for ETL:
-    - During backfill: Fixed to 2026-04-16 23:59:59 (prevents gaps if pipeline fails)
-    - After backfill: Dynamic to yesterday's end (24hr rolling window)
-
-    Master checkpoint 'master_etl_backfill_complete' must exist in etl_run_state
-    and only updates after ALL 28 ETL steps complete successfully.
-    """
-    try:
-        # Try to read master backfill completion state
-        from db_pooling import PostgreSQLConnectionPool
-        db_pool = PostgreSQLConnectionPool(DB_CONFIG)
-        with db_pool.get_connection_context() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
-                    ('master_etl_backfill_complete',)
-                )
-                result = cur.fetchone()
-                if result:
-                    # Backfill completed - use dynamic yesterday's end for daily runs
-                    return yesterday_end.isoformat()
-    except Exception:
-        pass
-
-    # Backfill not yet complete - use fixed date (2026-04-16) to prevent gaps
-    return '2026-04-16T23:59:59+05:30'
-
 ETL_CONFIG = {
-    'start_date': '2022-06-01T00:00:00+05:30',
-    'end_date': get_etl_end_date(),  # Fixed during backfill, dynamic after
+    'start_date': f"{_from_date}T00:00:00+05:30",
+    'end_date': f"{_to_date}T23:59:59+05:30",
     'chunk_days': 5,
     'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),
     'batch_size': 100,

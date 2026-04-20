@@ -11,6 +11,12 @@ from env_utils import (
 
 load_repo_environment()
 
+import os as _os
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+_IST = _tz(_td(hours=5, minutes=30))
+_from_date = _os.environ.get('ETL_FROM_DATE', '2022-06-01')
+_to_date = _os.environ.get('ETL_TO_DATE', (_dt.now(_IST) - _td(days=1)).strftime('%Y-%m-%d'))
+
 DB_CONFIG = resolve_db_config()
 
 API_BASE_URL = resolve_api_base_url('DOPAMAS_API_URL')
@@ -28,8 +34,8 @@ API_CONFIG = {
 }
 
 ETL_CONFIG = {
-    'start_date': '2022-01-01T00:00:00+05:30',
-    'end_date': '2025-12-31T23:59:59+05:30',
+    'start_date': f"{_from_date}T00:00:00+05:30",
+    'end_date': f"{_to_date}T23:59:59+05:30",
     'chunk_days': 5,
     'chunk_overlap_days': get_int_env('CHUNK_OVERLAP_DAYS', 1),
     'batch_size': 100,
