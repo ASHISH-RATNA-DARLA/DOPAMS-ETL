@@ -34,8 +34,8 @@ TIMEOUT = int(os.environ.get('API_TIMEOUT', '60'))
 HEADERS = {'x-api-key': API_KEY}
 
 # API enforces max 7-day window
-SAMPLE_FROM = '2022-06-01'
-SAMPLE_TO = '2022-06-07'
+SAMPLE_FROM = '2022-07-01'
+SAMPLE_TO = '2022-07-07'
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -166,8 +166,7 @@ def main():
     if not API_KEY:
         log.warning('DOPAMAS_API_KEY is empty — requests may be rejected.')
 
-    log.info(f'API1 (port 3000): {API1}')
-    log.info(f'API2 (port 3001): {API2}')
+    log.info(f'API (port 3000): {API1}')
     log.info(f'Sample window : {SAMPLE_FROM} → {SAMPLE_TO}')
     log.info(f'Output dir    : {OUTPUT_DIR}\n')
 
@@ -220,32 +219,26 @@ def main():
     results.append(('HIERARCHY_API',
                     *save_sample('HIERARCHY_API', f'{API1}/master-data/hierarchy', date_params)))
 
-    # ── API2 endpoints (DOPAMAS_API_URL2 / port 3001) ─────────────────────────
-    log.info('\n--- API2 endpoints ---')
+    # ── API1 endpoints (continued) ───────────────────────────────────────────
+    log.info('\n--- Additional API1 endpoints ---')
 
     results.append(('DISPOSAL_API',
-                    *save_sample('DISPOSAL_API',
-                                 get_api2_url('disposal', '/crimes/disposal'), date_params)))
+                    *save_sample('DISPOSAL_API', f'{API1}/crimes/disposal', date_params)))
 
     results.append(('ARRESTS_API',
-                    *save_sample('ARRESTS_API',
-                                 get_api2_url('arrests', '/arrests'), date_params)))
+                    *save_sample('ARRESTS_API', f'{API1}/arrests', date_params)))
 
     results.append(('MO_SEIZURES_API',
-                    *save_sample('MO_SEIZURES_API',
-                                 get_api2_url('seizures', '/mo-seizures'), date_params)))
+                    *save_sample('MO_SEIZURES_API', f'{API1}/mo-seizures', date_params)))
 
     results.append(('CHARGESHEETS_API',
-                    *save_sample('CHARGESHEETS_API',
-                                 get_api2_url('chargesheets', '/chargesheets'), date_params)))
+                    *save_sample('CHARGESHEETS_API', f'{API1}/chargesheets', date_params)))
 
     results.append(('UPDATE_CHARGESHEETS_API',
-                    *save_sample('UPDATE_CHARGESHEETS_API',
-                                 get_api2_url('update_chargesheets', '/update-chargesheets'), date_params)))
+                    *save_sample('UPDATE_CHARGESHEETS_API', f'{API1}/update-chargesheets', date_params)))
 
     results.append(('CASE_PROPERTY_API',
-                    *save_sample('CASE_PROPERTY_API',
-                                 get_api2_url('fsl_case_property', '/case-property'), date_params)))
+                    *save_sample('CASE_PROPERTY_API', f'{API1}/case-property', date_params)))
 
     # ── FILES endpoint (binary PDF — save probe metadata only) ────────────────
     log.info('\n--- FILES endpoint (binary — HEAD probe) ---')
