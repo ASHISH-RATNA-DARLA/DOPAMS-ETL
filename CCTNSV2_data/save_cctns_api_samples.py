@@ -33,9 +33,9 @@ API_KEY = os.environ.get('DOPAMAS_API_KEY', '')
 TIMEOUT = int(os.environ.get('API_TIMEOUT', '60'))
 HEADERS = {'x-api-key': API_KEY}
 
-# Wide window — maximises chance of finding at least 1 record
+# API enforces max 7-day window
 SAMPLE_FROM = '2022-06-01'
-SAMPLE_TO = '2022-12-31'
+SAMPLE_TO = '2022-06-07'
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(

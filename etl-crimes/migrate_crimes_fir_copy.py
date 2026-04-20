@@ -5,6 +5,7 @@ One-time migration to backfill fir_copy column for existing crimes
 Only updates fir_copy column, does not touch other fields
 """
 
+import os
 import sys
 import time
 import requests
@@ -131,6 +132,10 @@ class FIRCopyMigration:
         - If table is empty: return 2022-01-01T00:00:00+05:30
         - If table has data: return max(date_created, date_modified) from table
         """
+        force_start = os.environ.get('FORCE_START_DATE')
+        if force_start:
+            logger.info(f"⚠️  FORCE_START_DATE override: {force_start}")
+            return force_start
         try:
             self.db_cursor.execute(f"SELECT COUNT(*) FROM {CRIMES_TABLE}")
             count = self.db_cursor.fetchone()[0]

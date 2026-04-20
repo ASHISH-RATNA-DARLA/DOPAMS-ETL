@@ -245,6 +245,10 @@ class CrimesETL:
     
     def get_effective_start_date(self) -> str:
         """Get effective start date for ETL"""
+        force_start = os.environ.get('FORCE_START_DATE')
+        if force_start:
+            logger.info(f"⚠️  FORCE_START_DATE override: {force_start}")
+            return force_start
         try:
             with self.db_pool.get_connection_context() as conn:
                 cursor = conn.cursor()

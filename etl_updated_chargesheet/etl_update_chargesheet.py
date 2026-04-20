@@ -348,6 +348,10 @@ class UpdatedChargesheetETL:
         - If table is empty: return 2022-01-01T00:00:00+05:30
         - If table has data: return max(date_created) from table (only date_created, no date_modified)
         """
+        force_start = os.environ.get('FORCE_START_DATE')
+        if force_start:
+            logger.info(f"⚠️  FORCE_START_DATE override: {force_start}")
+            return force_start
         try:
             # Check if table has any data
             self._cursor.execute(f"SELECT COUNT(*) FROM {UPDATE_CHARGESHEET_TABLE}")

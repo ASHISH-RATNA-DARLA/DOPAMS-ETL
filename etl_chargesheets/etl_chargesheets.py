@@ -341,6 +341,10 @@ class ChargesheetsETL:
         - If any table has data: return max(date_created, date_modified) across all tables
         - Uses overlap: goes back by overlap_days to ensure no data is missed
         """
+        force_start = os.environ.get('FORCE_START_DATE')
+        if force_start:
+            logger.info(f"⚠️  FORCE_START_DATE override: {force_start}")
+            return force_start
         try:
             # Rollback any previous failed transaction
             self._conn.rollback()

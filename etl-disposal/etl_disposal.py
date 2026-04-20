@@ -405,6 +405,10 @@ class DisposalETL:
         - If table has data: return max(date_created, date_modified) from table
         - Always respect API_DATA_START_DATE as minimum (API has no data before this)
         """
+        force_start = os.environ.get('FORCE_START_DATE')
+        if force_start:
+            logger.info(f"⚠️  FORCE_START_DATE override: {force_start}")
+            return force_start
         try:
             with self.db_pool.get_connection_context() as conn:
                 with conn.cursor() as cur:
