@@ -129,12 +129,121 @@ class PersonsETL:
             'not available': 'Unknown',
             '': 'Unknown'
         }
+        # Expanded rule map — unambiguous Indian given names (consulted against
+        # Telugu / Kannada / Hindi / Urdu / Muslim naming conventions).
+        # Keys must be lowercase. Values are canonical gender strings.
         self.name_gender_rule_map = {
+            # --- Male Telugu/Kannada given names ---
             'ramesh': 'Male', 'rajesh': 'Male', 'suresh': 'Male', 'mahesh': 'Male',
-            'rahul': 'Male', 'vijay': 'Male', 'kiran': 'Male', 'arun': 'Male',
+            'rahul': 'Male', 'vijay': 'Male', 'arun': 'Male', 'ashok': 'Male',
+            'ajith': 'Male', 'ajay': 'Male', 'ravi': 'Male', 'siva': 'Male',
+            'shiva': 'Male', 'surya': 'Male', 'sravan': 'Male', 'sravanthi': 'Female',
+            'shekar': 'Male', 'sekhar': 'Male', 'shankar': 'Male', 'sankar': 'Male',
+            'srikanth': 'Male', 'srikar': 'Male', 'venkat': 'Male', 'venkateswara': 'Male',
+            'venkateswarlu': 'Male', 'venkataramana': 'Male', 'nagesh': 'Male',
+            'naresh': 'Male', 'ganesh': 'Male', 'dinesh': 'Male', 'rakesh': 'Male',
+            'lokesh': 'Male', 'mukesh': 'Male', 'satish': 'Male', 'girish': 'Male',
+            'harish': 'Male', 'manish': 'Male', 'umesh': 'Male', 'yogesh': 'Male',
+            'praveen': 'Male', 'naveen': 'Male', 'sandeep': 'Male', 'pradeep': 'Male',
+            'deepak': 'Male', 'karthik': 'Male', 'kartik': 'Male', 'aakash': 'Male',
+            'akash': 'Male', 'arjun': 'Male', 'abhishek': 'Male', 'anand': 'Male',
+            'anurag': 'Male', 'arvind': 'Male', 'ashwin': 'Male', 'balaji': 'Male',
+            'bhaskar': 'Male', 'charan': 'Male', 'chandra': 'Male', 'dhanush': 'Male',
+            'gopal': 'Male', 'govind': 'Male', 'hari': 'Male', 'harsha': 'Male',
+            'jagadeesh': 'Male', 'jagadish': 'Male', 'jagan': 'Male', 'jagath': 'Male',
+            'kalyan': 'Male', 'kamal': 'Male', 'kishore': 'Male', 'krishna': 'Male',
+            'madhu': 'Male', 'manoj': 'Male', 'mohan': 'Male', 'murali': 'Male',
+            'nagaraju': 'Male', 'nataraju': 'Male', 'nataraj': 'Male', 'nikhil': 'Male',
+            'niranjan': 'Male', 'pavan': 'Male', 'prabhu': 'Male', 'prasad': 'Male',
+            'prashanth': 'Male', 'prashant': 'Male', 'praveen': 'Male', 'prem': 'Male',
+            'raghav': 'Male', 'raghavendra': 'Male', 'raghu': 'Male', 'rajiv': 'Male',
+            'rajkumar': 'Male', 'raju': 'Male', 'rakesh': 'Male', 'ram': 'Male',
+            'ramakrishna': 'Male', 'raman': 'Male', 'ramana': 'Male', 'rambabu': 'Male',
+            'ranga': 'Male', 'ranjith': 'Male', 'rishikesh': 'Male', 'ritesh': 'Male',
+            'rohith': 'Male', 'rohit': 'Male', 'sampath': 'Male', 'santhosh': 'Male',
+            'santosh': 'Male', 'sashidhar': 'Male', 'satya': 'Male', 'satyam': 'Male',
+            'siddarth': 'Male', 'siddharth': 'Male', 'srinivas': 'Male', 'sriram': 'Male',
+            'subash': 'Male', 'subhash': 'Male', 'sunil': 'Male', 'suraj': 'Male',
+            'suryanarayana': 'Male', 'swamy': 'Male', 'tejas': 'Male', 'tilak': 'Male',
+            'uday': 'Male', 'upendra': 'Male', 'varun': 'Male', 'venkatesh': 'Male',
+            'vikram': 'Male', 'vikrant': 'Male', 'vikky': 'Male', 'vicky': 'Male',
+            'vinay': 'Male', 'vinod': 'Male', 'vishnu': 'Male', 'vivek': 'Male',
+            'yashwanth': 'Male', 'yashwant': 'Male', 'yash': 'Male', 'anoop': 'Male',
+            'anup': 'Male', 'kevin': 'Male', 'tejavardhan': 'Male', 'harivardhan': 'Male',
+            # --- Male Hindi/North Indian ---
+            'abhijeet': 'Male', 'aditya': 'Male', 'amitabh': 'Male', 'amrit': 'Male',
+            'ankur': 'Male', 'ankit': 'Male', 'atul': 'Male', 'gaurav': 'Male',
+            'himanshu': 'Male', 'karan': 'Male', 'lalit': 'Male', 'manuj': 'Male',
+            'neeraj': 'Male', 'niraj': 'Male', 'pankaj': 'Male', 'pardeep': 'Male',
+            'rajendra': 'Male', 'rajesh': 'Male', 'ranjeet': 'Male', 'ranjit': 'Male',
+            'ravindra': 'Male', 'sanjay': 'Male', 'sukhdev': 'Male', 'vikas': 'Male',
+            'vineet': 'Male',
+            # --- Male Muslim/Urdu names ---
+            'areef': 'Male', 'arif': 'Male', 'amer': 'Male', 'ameer': 'Male',
+            'amir': 'Male', 'baig': 'Male', 'faiz': 'Male', 'faizal': 'Male',
+            'farhan': 'Male', 'faisal': 'Male', 'imran': 'Male', 'irfan': 'Male',
+            'ishtiaq': 'Male', 'junaid': 'Male', 'khalid': 'Male', 'khaled': 'Male',
+            'khaleem': 'Male', 'nayeemuddin': 'Male', 'shabbir': 'Male', 'asif': 'Male',
+            'mohd': 'Male', 'mohammad': 'Male', 'mohammed': 'Male', 'mukhtar': 'Male',
+            'mustafa': 'Male', 'nadeem': 'Male', 'naseer': 'Male', 'naveed': 'Male',
+            'qayum': 'Male', 'riyaz': 'Male', 'rizwan': 'Male', 'salman': 'Male',
+            'shahid': 'Male', 'shakeel': 'Male', 'shafiq': 'Male', 'sharif': 'Male',
+            'shoaib': 'Male', 'sohail': 'Male', 'tariq': 'Male', 'usman': 'Male',
+            'waseem': 'Male', 'zafar': 'Male', 'zaheer': 'Male', 'zubair': 'Male',
+            # --- Specific names seen in audit data ---
+            'gajanandh': 'Male', 'gowrav': 'Male', 'jyothiram': 'Male',
+            'narsimma': 'Male', 'narsimha': 'Male', 'narasimha': 'Male',
+            'rajashekar': 'Male', 'rajashekhar': 'Male', 'ramulu': 'Male',
+            'tuntun': 'Male', 'abilash': 'Male', 'hemanth': 'Male', 'hemant': 'Male',
+            'vamshi': 'Male', 'nitish': 'Male', 'pawan': 'Male', 'aman': 'Male',
+            # --- Female Indian names ---
             'sita': 'Female', 'laxmi': 'Female', 'lakshmi': 'Female', 'kavitha': 'Female',
-            'kavita': 'Female', 'sunita': 'Female', 'anjali': 'Female', 'pooja': 'Female'
+            'kavita': 'Female', 'sunita': 'Female', 'anjali': 'Female', 'pooja': 'Female',
+            'puja': 'Female', 'anita': 'Female', 'archana': 'Female', 'asha': 'Female',
+            'bhavana': 'Female', 'deepa': 'Female', 'deepika': 'Female', 'divya': 'Female',
+            'geeta': 'Female', 'geetha': 'Female', 'hema': 'Female', 'indira': 'Female',
+            'jyothi': 'Female', 'jyoti': 'Female', 'kamala': 'Female', 'kiran': 'Female',
+            'komala': 'Female', 'krishnaveni': 'Female', 'kumari': 'Female',
+            'madhavi': 'Female', 'mamatha': 'Female', 'manasa': 'Female',
+            'meena': 'Female', 'meenakshi': 'Female', 'nandini': 'Female',
+            'padma': 'Female', 'padmavathi': 'Female', 'parvathi': 'Female',
+            'pavani': 'Female', 'priya': 'Female', 'priyanka': 'Female',
+            'radha': 'Female', 'rajani': 'Female', 'rajitha': 'Female',
+            'ramadevi': 'Female', 'ramya': 'Female', 'rani': 'Female',
+            'ratna': 'Female', 'rekha': 'Female', 'revathi': 'Female',
+            'rohini': 'Female', 'sarada': 'Female', 'saraswathi': 'Female',
+            'savithri': 'Female', 'shantha': 'Female', 'shanthi': 'Female',
+            'shobha': 'Female', 'sirisha': 'Female', 'sneha': 'Female',
+            'soujanya': 'Female', 'sowmya': 'Female', 'sravanthi': 'Female',
+            'sridevi': 'Female', 'subhadra': 'Female', 'sudha': 'Female',
+            'sukanya': 'Female', 'suma': 'Female', 'sumathi': 'Female',
+            'sunitha': 'Female', 'swapna': 'Female', 'swathi': 'Female',
+            'usha': 'Female', 'vasantha': 'Female', 'vasavi': 'Female',
+            'vidya': 'Female', 'vijaya': 'Female', 'vijayalaxmi': 'Female',
+            'vimala': 'Female', 'yamini': 'Female',
+            # --- Ambiguous / context-dependent — deliberately omitted ---
+            # 'durga': omitted (male devotee names exist; context needed)
+            # 'jagan': Male above; 'jagadamba' would be Female — distinct enough
         }
+
+        # Male honorific prefixes: if any token matches, force Male regardless of suffix.
+        # Handles names like "Mirza Amiar Baig", "Md Irfan", "Sheikh Rahman".
+        self.male_prefix_tokens = {
+            'mirza', 'mohammad', 'mohammed', 'md', 'mohd', 'sheikh', 'shaikh',
+            'sheik', 'shaik', 'shiak',                   # common Hyderabad spellings
+            'syed', 'sayyad', 'sayyed', 'mir', 'maulana', 'maulvi', 'hafiz',
+            'chaudhry', 'chaudhary', 'khan', 'malik',
+        }
+
+        # Telugu/Kannada/South-Indian surname suffixes that should NOT trigger
+        # the female heuristic. These are clan/caste/place endings that are
+        # gender-neutral (or predominantly male in criminal records context).
+        # Used to suppress the broad -a/-i suffix rule when the token is a surname.
+        self.neutral_surname_suffixes = (
+            'pati', 'pathi', 'kurthi', 'reddy', 'raju', 'naidu', 'gari', 'wari',
+            'ouri', 'uri', 'ari', 'puri', 'vari', 'neni', 'sani', 'gari',
+            'dhar', 'kar', 'war', 'pur',
+        )
 
     def _normalize_space(self, value: str) -> str:
         return ' '.join(value.strip().split())
@@ -154,6 +263,57 @@ class PersonsETL:
         if not text:
             return None
         return text
+
+    def _build_inference_name(self, personal: Dict) -> Optional[str]:
+        """
+        Build the richest possible name string for gender inference.
+
+        The DB stores full_name = FULL_NAME (or NAME+SURNAME fallback), but
+        FULL_NAME alone is often just a bare given name or surname from the API,
+        making inference unreliable.  This method assembles every useful name
+        field — FULL_NAME, NAME, SURNAME, ALIAS — into a single de-duplicated
+        string so the inference engine sees the most complete picture, e.g.:
+
+            API: FULL_NAME="Ravela", NAME="Ravela", SURNAME="", ALIAS=""
+            DB full_name = "Ravela"          ← only surname, triggers -a → Female
+
+            API: FULL_NAME="Ravela Sanjay Kumar", NAME="Ravela", SURNAME="", ...
+            inference_name = "Ravela Sanjay Kumar"  ← Kumar/Sanjay → Male ✅
+
+        Does NOT affect what is written to the DB — only used as input to
+        _resolve_gender().
+        """
+        parts: List[str] = []
+        seen_tokens: Set[str] = set()
+
+        def add(value: Optional[Any]) -> None:
+            if not value:
+                return
+            text = self._normalize_space(str(value).strip())
+            if not text:
+                return
+            # Strip alias markers like "@DJ Rahul" — keep real name segments only
+            segments = [seg.strip() for seg in re.split(r'@', text) if seg.strip()]
+            for seg in segments:
+                low = seg.lower()
+                if low and low not in seen_tokens:
+                    seen_tokens.add(low)
+                    parts.append(seg)
+
+        # Priority order: FULL_NAME first (most complete), then NAME, SURNAME, ALIAS
+        add(personal.get('FULL_NAME'))
+        add(personal.get('NAME'))
+        add(personal.get('SURNAME'))
+        # Include alias but only the non-@ real-name portion (add() already strips @)
+        add(personal.get('ALIAS'))
+
+        if not parts:
+            return None
+
+        # Join unique segments; the resulting string preserves "Ravela Sanjay Kumar"
+        # even when NAME="Ravela" and FULL_NAME="Ravela Sanjay Kumar" (deduped)
+        combined = ' '.join(parts)
+        return self._normalize_space(combined) or None
 
     def _is_valid_person_name(self, clean_name: Optional[str]) -> bool:
         if clean_name is None:
@@ -194,25 +354,67 @@ class PersonsETL:
         return None
 
     def _infer_gender_from_name(self, clean_name: Optional[str]) -> Tuple[Optional[str], float, str]:
+        """
+        Infer gender from a person name using a multi-stage strategy:
+
+        Stage 1 — male prefix/honorific detection (highest priority).
+            Tokens like 'mirza', 'syed', 'md' short-circuit to Male immediately.
+
+        Stage 2 — rule_map lookup on EVERY meaningful token (not just tokens[0]).
+            South Indian names follow Surname GivenName order, so we check all
+            tokens and prefer the last one (given name) over earlier tokens
+            (surname/clan prefix).  First unambiguous rule_map hit wins.
+
+        Stage 3 — suffix heuristic on the LAST token only, with suppression for
+            known neutral Telugu/Kannada surname suffixes and a reduced confidence
+            of 0.65 (below the default threshold of 0.8) so suffix-only guesses
+            do not commit unless the caller lowers the threshold explicitly.
+
+        Returns (gender | None, confidence 0.0-1.0, source label).
+        """
         if not clean_name:
             return None, 0.0, 'heuristic'
 
-        tokens = [token for token in re.findall(r"[A-Za-z]+", clean_name.lower()) if len(token) > 1]
+        # Strip alias markers like "@DJ Rahul", keep only real name parts
+        name_part = re.split(r'@', clean_name)[0].strip()
+        tokens = [t for t in re.findall(r"[A-Za-z]+", name_part.lower()) if len(t) > 1]
         if not tokens:
             return None, 0.0, 'heuristic'
 
-        first = tokens[0]
-        rule_match = self.name_gender_rule_map.get(first)
-        if rule_match:
-            return rule_match, 0.9, 'rule'
+        # ── Stage 1: male honorific / prefix detection ──────────────────────────
+        for token in tokens:
+            if token in self.male_prefix_tokens:
+                return 'Male', 0.95, 'prefix'
 
-        female_suffixes = ('a', 'i', 'ya', 'ika', 'ita')
-        male_suffixes = ('esh', 'endra', 'kumar', 'raj', 'veer')
-        if first.endswith(female_suffixes):
-            return 'Female', 0.8, 'heuristic'
-        if first.endswith(male_suffixes):
-            return 'Male', 0.8, 'heuristic'
+        # ── Stage 2: rule_map lookup — prefer last token (given name) ───────────
+        # Scan from the last token backwards so the given name wins over surnames.
+        for token in reversed(tokens):
+            match = self.name_gender_rule_map.get(token)
+            if match:
+                return match, 0.9, 'rule'
 
+        # ── Stage 3: suffix heuristic — LAST token only, suppressed for surnames ─
+        last = tokens[-1]
+
+        # Suppress if last token looks like a neutral South Indian surname suffix
+        if any(last.endswith(sfx) for sfx in self.neutral_surname_suffixes):
+            return None, 0.0, 'heuristic'
+
+        # Male-specific suffixes (stronger signal)
+        male_suffixes = ('esh', 'endra', 'kumar', 'raj', 'veer', 'wanth', 'kanth',
+                         'nath', 'deep', 'jeet', 'preet', 'arth')
+        if last.endswith(male_suffixes):
+            return 'Male', 0.65, 'heuristic'
+
+        # Female suffixes — reduced confidence to avoid false positives on surnames
+        female_suffixes = ('ya', 'ika', 'itha', 'ita', 'ini', 'avani', 'avathi',
+                           'avani', 'aveni', 'rani', 'devi', 'veni', 'vathi')
+        if last.endswith(female_suffixes):
+            return 'Female', 0.65, 'heuristic'
+
+        # Broad single-character suffix (-a, -i): only fire if first token is
+        # also a rule_map hit or a prefix, to reduce false positives on surnames.
+        # Standalone broad suffix is too unreliable — return no inference.
         return None, 0.0, 'heuristic'
 
     def _normalize_phone_numbers(self, raw_phone: Any) -> List[str]:
@@ -272,13 +474,24 @@ class PersonsETL:
             if not self.person_gender_infer_on_unknown:
                 return 'Unknown', 1.0, 'api'
             inferred_gender, confidence, source = self._infer_gender_from_name(clean_name)
-            if inferred_gender and confidence >= self.person_gender_inference_threshold:
+            # Suffix-only heuristics get a stricter threshold to prevent false positives.
+            effective_threshold = (
+                self.person_gender_inference_threshold
+                if source in ('rule', 'prefix', 'api')
+                else max(self.person_gender_inference_threshold, 0.75)
+            )
+            if inferred_gender and confidence >= effective_threshold:
                 return inferred_gender, confidence, source
             return 'Unknown', confidence, source
 
         # Invalid raw gender value from API.
         inferred_gender, confidence, source = self._infer_gender_from_name(clean_name)
-        if inferred_gender and confidence >= self.person_gender_inference_threshold:
+        effective_threshold = (
+            self.person_gender_inference_threshold
+            if source in ('rule', 'prefix', 'api')
+            else max(self.person_gender_inference_threshold, 0.75)
+        )
+        if inferred_gender and confidence >= effective_threshold:
             return inferred_gender, confidence, source
         return 'Unknown', confidence, source
 
@@ -821,7 +1034,96 @@ class PersonsETL:
                 logger.warning(f"⚠️  Error updating new fields for person {person_id}: {e}")
                 # Don't fail the whole operation, just log the warning
 
-    def get_last_processed_date(self) -> Optional[datetime]:
+    def correct_heuristic_gender_records(self, dry_run: Optional[bool] = None) -> int:
+        """
+        Re-evaluate all persons rows where gender was set by the heuristic/rule engine
+        (gender_source IN ('heuristic', 'rule', 'prefix')) and correct any that are
+        now classified differently under the updated inference logic.
+
+        This is a targeted remediation pass for records already written to the DB
+        before the suffix-bug fix.  It is safe to run multiple times (idempotent).
+
+        Pass dry_run=True to log changes without writing; defaults to
+        self.person_gender_dry_run if not specified.
+
+        Returns the number of rows corrected (or would-be corrected in dry-run).
+        """
+        effective_dry_run = self.person_gender_dry_run if dry_run is None else dry_run
+        corrected = 0
+
+        logger.info("🔍 Starting heuristic gender correction pass …")
+        if effective_dry_run:
+            logger.warning("⚠️  Dry-run mode — no DB writes will be made")
+
+        with self.db_pool.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT person_id, full_name, raw_full_name, name, surname, alias,
+                       gender, gender_confidence, gender_source
+                FROM {PERSONS_TABLE}
+                WHERE gender_source IN ('heuristic', 'rule', 'prefix')
+                  AND gender IN ('Male', 'Female', 'Transgender')
+            """)
+            rows = cursor.fetchall()
+
+        logger.info(f"   Found {len(rows)} heuristic-gender rows to re-evaluate")
+
+        fix_batch: List[Tuple[str, str, float, str, str]] = []
+
+        for person_id, full_name, raw_full_name, db_name, db_surname, db_alias, old_gender, old_conf, old_source in rows:
+            # Build the same enriched inference name the upsert path now uses,
+            # reconstructing it from the DB columns that mirror the API fields.
+            personal_mirror = {
+                'FULL_NAME': full_name or raw_full_name,
+                'NAME': db_name,
+                'SURNAME': db_surname,
+                'ALIAS': db_alias,
+            }
+            inference_name = self._build_inference_name(personal_mirror)
+            new_gender, new_conf, new_source = self._resolve_gender(
+                clean_name=inference_name,
+                api_gender_raw=None  # treat as Unknown — re-infer from name only
+            )
+            # Skip if nothing changed or inference returned Unknown (ambiguous)
+            if new_gender == old_gender or new_gender == 'Unknown':
+                continue
+
+            corrected += 1
+            logger.info(
+                f"   ✏️  {person_id} | {full_name!r} → "
+                f"{old_gender} ({old_source} {old_conf}) → {new_gender} ({new_source} {new_conf:.3f})"
+            )
+
+            if not effective_dry_run:
+                fix_batch.append((new_gender, new_conf, new_source, person_id, old_gender))
+
+        if fix_batch and not effective_dry_run:
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                execute_batch(
+                    cursor,
+                    f"""
+                    UPDATE {PERSONS_TABLE}
+                    SET gender = %s,
+                        gender_confidence = %s,
+                        gender_source = %s
+                    WHERE person_id = %s
+                      AND gender = %s
+                      AND gender_source IN ('heuristic', 'rule', 'prefix')
+                    """,
+                    fix_batch,
+                    page_size=500,
+                )
+                conn.commit()
+            logger.info(f"✅ Corrected {corrected} heuristic-gender records in DB")
+        elif effective_dry_run:
+            logger.info(f"🧪 Dry-run: would correct {corrected} records")
+        else:
+            logger.info("✅ No corrections needed — all heuristic records look correct")
+
+        return corrected
+
+
         """
         Get the last processed date from persons table.
         Returns max(date_created, date_modified) or None if table is empty.
@@ -1088,7 +1390,13 @@ class PersonsETL:
         raw_full_name_value = self.truncate_string(api_full_name, 500, 'raw_full_name')
         clean_full_name = self._normalize_person_name(api_full_name, personal)
         clean_full_name = self.truncate_string(clean_full_name, 500, 'full_name')
-        resolved_gender, gender_confidence, gender_source = self._resolve_gender(clean_full_name, personal.get('GENDER'))
+
+        # Build the richest possible name string for gender inference — this may
+        # be wider than clean_full_name (which only stores FULL_NAME / NAME+SURNAME).
+        # It is NOT written to the DB; it is only used as input to _resolve_gender.
+        inference_name = self._build_inference_name(personal)
+
+        resolved_gender, gender_confidence, gender_source = self._resolve_gender(inference_name, personal.get('GENDER'))
         resolved_gender = self.truncate_string(resolved_gender, 20, 'gender')
         gender_source = self.truncate_string(gender_source, 20, 'gender_source')
         normalized_phone_numbers = self._normalize_phone_numbers(contact.get('PHONE_NUMBER'))
@@ -1405,6 +1713,18 @@ class PersonsETL:
             else:
                 table_columns = self.ensure_person_enrichment_columns(table_columns)
             logger.debug(f"Existing table columns: {sorted(table_columns)}")
+
+            # ── One-time remediation pass ──────────────────────────────────────
+            # Re-evaluate any rows previously written with the old heuristic and
+            # correct gender misclassifications caused by the surname-token bug.
+            # This is idempotent and safe to run every time; it only touches rows
+            # whose gender_source is 'heuristic', 'rule', or 'prefix' AND whose
+            # inferred gender now differs under the fixed logic.
+            if not self.person_gender_dry_run:
+                self.correct_heuristic_gender_records()
+            else:
+                self.correct_heuristic_gender_records(dry_run=True)
+            # ──────────────────────────────────────────────────────────────────
             
             last_date = self.get_last_processed_date()
             checkpoint_date = self.get_run_checkpoint('persons')

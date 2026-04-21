@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict cbisX5Wtwa3UpIxxIYnlMv7CurRRdtvaUlsfB8YLTT04GUYkWDKwOBn2e3Ky5h8
+\restrict DAyb9UFreQItLALYrjovQJtyLYFi7kaaBMj3AeR7tm5UwCoJea6EKGjBT9WylGk
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-1.pgdg24.04+1)
 -- Dumped by pg_dump version 17.6
 
--- Started on 2026-04-21 13:01:56
+-- Started on 2026-04-21 16:33:53
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -32,7 +32,7 @@ SET row_security = off;
 ALTER SCHEMA public OWNER TO dev_dopamas;
 
 --
--- TOC entry 4399 (class 0 OID 0)
+-- TOC entry 4404 (class 0 OID 0)
 -- Dependencies: 24
 -- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: dev_dopamas
 --
@@ -49,7 +49,7 @@ CREATE EXTENSION IF NOT EXISTS dblink WITH SCHEMA public;
 
 
 --
--- TOC entry 4401 (class 0 OID 0)
+-- TOC entry 4406 (class 0 OID 0)
 -- Dependencies: 7
 -- Name: EXTENSION dblink; Type: COMMENT; Schema: -; Owner: 
 --
@@ -66,7 +66,7 @@ CREATE EXTENSION IF NOT EXISTS fuzzystrmatch WITH SCHEMA public;
 
 
 --
--- TOC entry 4402 (class 0 OID 0)
+-- TOC entry 4407 (class 0 OID 0)
 -- Dependencies: 2
 -- Name: EXTENSION fuzzystrmatch; Type: COMMENT; Schema: -; Owner: 
 --
@@ -83,7 +83,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 
 --
--- TOC entry 4403 (class 0 OID 0)
+-- TOC entry 4408 (class 0 OID 0)
 -- Dependencies: 3
 -- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: 
 --
@@ -100,7 +100,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 
 --
--- TOC entry 4404 (class 0 OID 0)
+-- TOC entry 4409 (class 0 OID 0)
 -- Dependencies: 4
 -- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
 --
@@ -117,7 +117,7 @@ CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
 
 
 --
--- TOC entry 4405 (class 0 OID 0)
+-- TOC entry 4410 (class 0 OID 0)
 -- Dependencies: 8
 -- Name: EXTENSION unaccent; Type: COMMENT; Schema: -; Owner: 
 --
@@ -134,7 +134,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 
 
 --
--- TOC entry 4406 (class 0 OID 0)
+-- TOC entry 4411 (class 0 OID 0)
 -- Dependencies: 5
 -- Name: EXTENSION "uuid-ossp"; Type: COMMENT; Schema: -; Owner: 
 --
@@ -151,7 +151,7 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 
 --
--- TOC entry 4407 (class 0 OID 0)
+-- TOC entry 4412 (class 0 OID 0)
 -- Dependencies: 6
 -- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: 
 --
@@ -422,7 +422,7 @@ CREATE FUNCTION public.get_accused_crime_history(target_accused_id character var
 ALTER FUNCTION public.get_accused_crime_history(target_accused_id character varying) OWNER TO dev_dopamas;
 
 --
--- TOC entry 4408 (class 0 OID 0)
+-- TOC entry 4413 (class 0 OID 0)
 -- Dependencies: 549
 -- Name: FUNCTION get_accused_crime_history(target_accused_id character varying); Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -463,7 +463,7 @@ CREATE FUNCTION public.get_person_crime_history(target_person_id character varyi
 ALTER FUNCTION public.get_person_crime_history(target_person_id character varying) OWNER TO dev_dopamas;
 
 --
--- TOC entry 4409 (class 0 OID 0)
+-- TOC entry 4414 (class 0 OID 0)
 -- Dependencies: 550
 -- Name: FUNCTION get_person_crime_history(target_person_id character varying); Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -501,7 +501,7 @@ CREATE FUNCTION public.search_person_by_name(search_name character varying) RETU
 ALTER FUNCTION public.search_person_by_name(search_name character varying) OWNER TO dev_dopamas;
 
 --
--- TOC entry 4410 (class 0 OID 0)
+-- TOC entry 4415 (class 0 OID 0)
 -- Dependencies: 551
 -- Name: FUNCTION search_person_by_name(search_name character varying); Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -548,7 +548,7 @@ CREATE TABLE public.accused (
 ALTER TABLE public.accused OWNER TO dev_dopamas;
 
 --
--- TOC entry 4411 (class 0 OID 0)
+-- TOC entry 4416 (class 0 OID 0)
 -- Dependencies: 234
 -- Name: TABLE accused; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -557,7 +557,7 @@ COMMENT ON TABLE public.accused IS 'Links persons to crimes as accused with phys
 
 
 --
--- TOC entry 4412 (class 0 OID 0)
+-- TOC entry 4417 (class 0 OID 0)
 -- Dependencies: 234
 -- Name: COLUMN accused.person_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -566,7 +566,7 @@ COMMENT ON COLUMN public.accused.person_id IS 'Can be NULL - stub persons are cr
 
 
 --
--- TOC entry 4413 (class 0 OID 0)
+-- TOC entry 4418 (class 0 OID 0)
 -- Dependencies: 234
 -- Name: COLUMN accused.is_ccl; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -720,7 +720,7 @@ CREATE TABLE public.crimes (
 ALTER TABLE public.crimes OWNER TO dev_dopamas;
 
 --
--- TOC entry 4414 (class 0 OID 0)
+-- TOC entry 4419 (class 0 OID 0)
 -- Dependencies: 237
 -- Name: TABLE crimes; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -729,7 +729,7 @@ COMMENT ON TABLE public.crimes IS 'Crime/FIR records registered at police statio
 
 
 --
--- TOC entry 4415 (class 0 OID 0)
+-- TOC entry 4420 (class 0 OID 0)
 -- Dependencies: 237
 -- Name: COLUMN crimes.brief_facts; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -786,7 +786,7 @@ CREATE TABLE public.hierarchy (
 ALTER TABLE public.hierarchy OWNER TO dev_dopamas;
 
 --
--- TOC entry 4416 (class 0 OID 0)
+-- TOC entry 4421 (class 0 OID 0)
 -- Dependencies: 239
 -- Name: TABLE hierarchy; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -859,7 +859,7 @@ CREATE TABLE public.persons (
 ALTER TABLE public.persons OWNER TO dev_dopamas;
 
 --
--- TOC entry 4417 (class 0 OID 0)
+-- TOC entry 4422 (class 0 OID 0)
 -- Dependencies: 240
 -- Name: TABLE persons; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1359,7 +1359,7 @@ CREATE SEQUENCE public.agent_deduplication_tracker_id_seq
 ALTER SEQUENCE public.agent_deduplication_tracker_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4418 (class 0 OID 0)
+-- TOC entry 4423 (class 0 OID 0)
 -- Dependencies: 244
 -- Name: agent_deduplication_tracker_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -1490,7 +1490,7 @@ CREATE TABLE public.charge_sheet_updates (
 ALTER TABLE public.charge_sheet_updates OWNER TO dev_dopamas;
 
 --
--- TOC entry 4419 (class 0 OID 0)
+-- TOC entry 4424 (class 0 OID 0)
 -- Dependencies: 324
 -- Name: TABLE charge_sheet_updates; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1517,7 +1517,7 @@ CREATE SEQUENCE public.charge_sheet_updates_id_seq
 ALTER SEQUENCE public.charge_sheet_updates_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4420 (class 0 OID 0)
+-- TOC entry 4425 (class 0 OID 0)
 -- Dependencies: 323
 -- Name: charge_sheet_updates_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -1586,7 +1586,7 @@ CREATE TABLE public.chargesheet_acts_sections (
 ALTER TABLE public.chargesheet_acts_sections OWNER TO dev_dopamas;
 
 --
--- TOC entry 4421 (class 0 OID 0)
+-- TOC entry 4426 (class 0 OID 0)
 -- Dependencies: 251
 -- Name: TABLE chargesheet_acts_sections; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1595,7 +1595,7 @@ COMMENT ON TABLE public.chargesheet_acts_sections IS 'Normalized sections for ch
 
 
 --
--- TOC entry 4422 (class 0 OID 0)
+-- TOC entry 4427 (class 0 OID 0)
 -- Dependencies: 251
 -- Name: COLUMN chargesheet_acts_sections.chargesheet_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1637,7 +1637,7 @@ CREATE TABLE public.chargesheet_media (
 ALTER TABLE public.chargesheet_media OWNER TO dev_dopamas;
 
 --
--- TOC entry 4423 (class 0 OID 0)
+-- TOC entry 4428 (class 0 OID 0)
 -- Dependencies: 253
 -- Name: TABLE chargesheet_media; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1646,7 +1646,7 @@ COMMENT ON TABLE public.chargesheet_media IS 'Normalized media references for ch
 
 
 --
--- TOC entry 4424 (class 0 OID 0)
+-- TOC entry 4429 (class 0 OID 0)
 -- Dependencies: 253
 -- Name: COLUMN chargesheet_media.chargesheet_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1655,7 +1655,7 @@ COMMENT ON COLUMN public.chargesheet_media.chargesheet_id IS 'API chargeSheetId 
 
 
 --
--- TOC entry 4425 (class 0 OID 0)
+-- TOC entry 4430 (class 0 OID 0)
 -- Dependencies: 253
 -- Name: COLUMN chargesheet_media.file_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1687,7 +1687,7 @@ CREATE TABLE public.chargesheets (
 ALTER TABLE public.chargesheets OWNER TO dev_dopamas;
 
 --
--- TOC entry 4426 (class 0 OID 0)
+-- TOC entry 4431 (class 0 OID 0)
 -- Dependencies: 254
 -- Name: COLUMN chargesheets.charge_sheet_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1725,7 +1725,7 @@ CREATE TABLE public.files (
 ALTER TABLE public.files OWNER TO dev_dopamas;
 
 --
--- TOC entry 4427 (class 0 OID 0)
+-- TOC entry 4432 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: TABLE files; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1734,7 +1734,7 @@ COMMENT ON TABLE public.files IS 'Stores file references (UUIDs) from various so
 
 
 --
--- TOC entry 4428 (class 0 OID 0)
+-- TOC entry 4433 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.source_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1743,7 +1743,7 @@ COMMENT ON COLUMN public.files.source_type IS 'Type of source: crime, interrogat
 
 
 --
--- TOC entry 4429 (class 0 OID 0)
+-- TOC entry 4434 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.source_field; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1752,7 +1752,7 @@ COMMENT ON COLUMN public.files.source_field IS 'Field name from source: FIR_COPY
 
 
 --
--- TOC entry 4430 (class 0 OID 0)
+-- TOC entry 4435 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.parent_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1761,7 +1761,7 @@ COMMENT ON COLUMN public.files.parent_id IS 'ID of the parent record (crime_id, 
 
 
 --
--- TOC entry 4431 (class 0 OID 0)
+-- TOC entry 4436 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.file_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1770,7 +1770,7 @@ COMMENT ON COLUMN public.files.file_id IS 'The actual file UUID that can be used
 
 
 --
--- TOC entry 4432 (class 0 OID 0)
+-- TOC entry 4437 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.has_field; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1779,7 +1779,7 @@ COMMENT ON COLUMN public.files.has_field IS 'TRUE if the field exists in API res
 
 
 --
--- TOC entry 4433 (class 0 OID 0)
+-- TOC entry 4438 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.is_empty; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1788,7 +1788,7 @@ COMMENT ON COLUMN public.files.is_empty IS 'TRUE if field exists but is null or 
 
 
 --
--- TOC entry 4434 (class 0 OID 0)
+-- TOC entry 4439 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.file_path; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1797,7 +1797,7 @@ COMMENT ON COLUMN public.files.file_path IS 'Relative file path on Tomcat server
 
 
 --
--- TOC entry 4435 (class 0 OID 0)
+-- TOC entry 4440 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.file_url; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1806,7 +1806,7 @@ COMMENT ON COLUMN public.files.file_url IS 'Full file URL on Tomcat server (auto
 
 
 --
--- TOC entry 4436 (class 0 OID 0)
+-- TOC entry 4441 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.file_index; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1815,7 +1815,7 @@ COMMENT ON COLUMN public.files.file_index IS 'Index position in array (for MEDIA
 
 
 --
--- TOC entry 4437 (class 0 OID 0)
+-- TOC entry 4442 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.identity_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1824,7 +1824,7 @@ COMMENT ON COLUMN public.files.identity_type IS 'For IDENTITY_DETAILS: type of i
 
 
 --
--- TOC entry 4438 (class 0 OID 0)
+-- TOC entry 4443 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.identity_number; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1833,7 +1833,7 @@ COMMENT ON COLUMN public.files.identity_number IS 'For IDENTITY_DETAILS: identit
 
 
 --
--- TOC entry 4439 (class 0 OID 0)
+-- TOC entry 4444 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.downloaded_at; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1842,7 +1842,7 @@ COMMENT ON COLUMN public.files.downloaded_at IS 'Timestamp when file was success
 
 
 --
--- TOC entry 4440 (class 0 OID 0)
+-- TOC entry 4445 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.is_downloaded; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1851,7 +1851,7 @@ COMMENT ON COLUMN public.files.is_downloaded IS 'Flag indicating if file has bee
 
 
 --
--- TOC entry 4441 (class 0 OID 0)
+-- TOC entry 4446 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.download_error; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1860,7 +1860,7 @@ COMMENT ON COLUMN public.files.download_error IS 'Error message if file download
 
 
 --
--- TOC entry 4442 (class 0 OID 0)
+-- TOC entry 4447 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.download_attempts; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -1869,7 +1869,7 @@ COMMENT ON COLUMN public.files.download_attempts IS 'Number of download attempts
 
 
 --
--- TOC entry 4443 (class 0 OID 0)
+-- TOC entry 4448 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: COLUMN files.created_at; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2049,7 +2049,7 @@ CREATE SEQUENCE public.dedup_cluster_state_id_seq
 ALTER SEQUENCE public.dedup_cluster_state_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4444 (class 0 OID 0)
+-- TOC entry 4449 (class 0 OID 0)
 -- Dependencies: 257
 -- Name: dedup_cluster_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2093,7 +2093,7 @@ CREATE SEQUENCE public.dedup_comparison_progress_id_seq
 ALTER SEQUENCE public.dedup_comparison_progress_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4445 (class 0 OID 0)
+-- TOC entry 4450 (class 0 OID 0)
 -- Dependencies: 259
 -- Name: dedup_comparison_progress_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2136,7 +2136,7 @@ CREATE SEQUENCE public.dedup_run_metadata_id_seq
 ALTER SEQUENCE public.dedup_run_metadata_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4446 (class 0 OID 0)
+-- TOC entry 4451 (class 0 OID 0)
 -- Dependencies: 261
 -- Name: dedup_run_metadata_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2179,7 +2179,7 @@ CREATE SEQUENCE public.drug_categories_id_seq
 ALTER SEQUENCE public.drug_categories_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4447 (class 0 OID 0)
+-- TOC entry 4452 (class 0 OID 0)
 -- Dependencies: 263
 -- Name: drug_categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2219,7 +2219,7 @@ CREATE SEQUENCE public.drug_ignore_list_id_seq
 ALTER SEQUENCE public.drug_ignore_list_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4448 (class 0 OID 0)
+-- TOC entry 4453 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: drug_ignore_list_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2339,7 +2339,7 @@ CREATE SEQUENCE public.etl_fk_retry_queue_queue_id_seq
 ALTER SEQUENCE public.etl_fk_retry_queue_queue_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4449 (class 0 OID 0)
+-- TOC entry 4454 (class 0 OID 0)
 -- Dependencies: 313
 -- Name: etl_fk_retry_queue_queue_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2383,7 +2383,7 @@ CREATE SEQUENCE public.etl_linked_id_queue_id_seq
 ALTER SEQUENCE public.etl_linked_id_queue_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4450 (class 0 OID 0)
+-- TOC entry 4455 (class 0 OID 0)
 -- Dependencies: 328
 -- Name: etl_linked_id_queue_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2470,7 +2470,7 @@ CREATE TABLE public.fsl_case_property (
 ALTER TABLE public.fsl_case_property OWNER TO dev_dopamas;
 
 --
--- TOC entry 4451 (class 0 OID 0)
+-- TOC entry 4456 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: TABLE fsl_case_property; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2479,7 +2479,7 @@ COMMENT ON TABLE public.fsl_case_property IS 'Main table storing case property r
 
 
 --
--- TOC entry 4452 (class 0 OID 0)
+-- TOC entry 4457 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.case_property_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2488,7 +2488,7 @@ COMMENT ON COLUMN public.fsl_case_property.case_property_id IS 'Primary key from
 
 
 --
--- TOC entry 4453 (class 0 OID 0)
+-- TOC entry 4458 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.crime_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2497,7 +2497,7 @@ COMMENT ON COLUMN public.fsl_case_property.crime_id IS 'Reference to crime/case 
 
 
 --
--- TOC entry 4454 (class 0 OID 0)
+-- TOC entry 4459 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.mo_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2506,7 +2506,7 @@ COMMENT ON COLUMN public.fsl_case_property.mo_id IS 'Material Object ID (MO_ID)'
 
 
 --
--- TOC entry 4455 (class 0 OID 0)
+-- TOC entry 4460 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.status; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2515,7 +2515,7 @@ COMMENT ON COLUMN public.fsl_case_property.status IS 'Current status (e.g., Send
 
 
 --
--- TOC entry 4456 (class 0 OID 0)
+-- TOC entry 4461 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.date_created; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2524,7 +2524,7 @@ COMMENT ON COLUMN public.fsl_case_property.date_created IS 'Record creation time
 
 
 --
--- TOC entry 4457 (class 0 OID 0)
+-- TOC entry 4462 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.date_modified; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2533,7 +2533,7 @@ COMMENT ON COLUMN public.fsl_case_property.date_modified IS 'Record modification
 
 
 --
--- TOC entry 4458 (class 0 OID 0)
+-- TOC entry 4463 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.fsl_no; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2542,7 +2542,7 @@ COMMENT ON COLUMN public.fsl_case_property.fsl_no IS 'FSL case number';
 
 
 --
--- TOC entry 4459 (class 0 OID 0)
+-- TOC entry 4464 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.report_received; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2551,7 +2551,7 @@ COMMENT ON COLUMN public.fsl_case_property.report_received IS 'Whether FSL repor
 
 
 --
--- TOC entry 4460 (class 0 OID 0)
+-- TOC entry 4465 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: COLUMN fsl_case_property.property_received_back; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2629,7 +2629,7 @@ CREATE SEQUENCE public.geo_reference_id_seq
 ALTER SEQUENCE public.geo_reference_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4461 (class 0 OID 0)
+-- TOC entry 4466 (class 0 OID 0)
 -- Dependencies: 307
 -- Name: geo_reference_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -2707,7 +2707,7 @@ CREATE TABLE public.interrogation_reports (
 ALTER TABLE public.interrogation_reports OWNER TO dev_dopamas;
 
 --
--- TOC entry 4462 (class 0 OID 0)
+-- TOC entry 4467 (class 0 OID 0)
 -- Dependencies: 269
 -- Name: TABLE interrogation_reports; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2732,7 +2732,7 @@ CREATE TABLE public.ir_associate_details (
 ALTER TABLE public.ir_associate_details OWNER TO dev_dopamas;
 
 --
--- TOC entry 4463 (class 0 OID 0)
+-- TOC entry 4468 (class 0 OID 0)
 -- Dependencies: 270
 -- Name: TABLE ir_associate_details; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2787,7 +2787,7 @@ CREATE TABLE public.ir_conviction_acquittal (
 ALTER TABLE public.ir_conviction_acquittal OWNER TO dev_dopamas;
 
 --
--- TOC entry 4464 (class 0 OID 0)
+-- TOC entry 4469 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: TABLE ir_conviction_acquittal; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2796,7 +2796,7 @@ COMMENT ON TABLE public.ir_conviction_acquittal IS 'Conviction/acquittal details
 
 
 --
--- TOC entry 4465 (class 0 OID 0)
+-- TOC entry 4470 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2805,7 +2805,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.interrogation_report_id IS 'For
 
 
 --
--- TOC entry 4466 (class 0 OID 0)
+-- TOC entry 4471 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.crime_num; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2814,7 +2814,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.crime_num IS 'Associated crime 
 
 
 --
--- TOC entry 4467 (class 0 OID 0)
+-- TOC entry 4472 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.court_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2823,7 +2823,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.court_name IS 'Court name where
 
 
 --
--- TOC entry 4468 (class 0 OID 0)
+-- TOC entry 4473 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.verdict; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2832,7 +2832,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.verdict IS 'Verdict (Convicted,
 
 
 --
--- TOC entry 4469 (class 0 OID 0)
+-- TOC entry 4474 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.verdict_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2841,7 +2841,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.verdict_date IS 'Date of verdic
 
 
 --
--- TOC entry 4470 (class 0 OID 0)
+-- TOC entry 4475 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.reason_if_acquitted; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2850,7 +2850,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.reason_if_acquitted IS 'Reason 
 
 
 --
--- TOC entry 4471 (class 0 OID 0)
+-- TOC entry 4476 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.sentence_if_convicted; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2859,7 +2859,7 @@ COMMENT ON COLUMN public.ir_conviction_acquittal.sentence_if_convicted IS 'Detai
 
 
 --
--- TOC entry 4472 (class 0 OID 0)
+-- TOC entry 4477 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: COLUMN ir_conviction_acquittal.appeal_status; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2927,7 +2927,7 @@ CREATE TABLE public.ir_execution_of_nbw (
 ALTER TABLE public.ir_execution_of_nbw OWNER TO dev_dopamas;
 
 --
--- TOC entry 4473 (class 0 OID 0)
+-- TOC entry 4478 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: TABLE ir_execution_of_nbw; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2936,7 +2936,7 @@ COMMENT ON TABLE public.ir_execution_of_nbw IS 'Execution of NBW (Non-Bailable W
 
 
 --
--- TOC entry 4474 (class 0 OID 0)
+-- TOC entry 4479 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2945,7 +2945,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.interrogation_report_id IS 'Foreign
 
 
 --
--- TOC entry 4475 (class 0 OID 0)
+-- TOC entry 4480 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.nbw_number; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2954,7 +2954,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.nbw_number IS 'NBW number/reference
 
 
 --
--- TOC entry 4476 (class 0 OID 0)
+-- TOC entry 4481 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.issued_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2963,7 +2963,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.issued_date IS 'Date NBW was issued
 
 
 --
--- TOC entry 4477 (class 0 OID 0)
+-- TOC entry 4482 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.executed_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2972,7 +2972,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.executed_date IS 'Date NBW was exec
 
 
 --
--- TOC entry 4478 (class 0 OID 0)
+-- TOC entry 4483 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.jurisdiction_ps; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2981,7 +2981,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.jurisdiction_ps IS 'Police station 
 
 
 --
--- TOC entry 4479 (class 0 OID 0)
+-- TOC entry 4484 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.crime_num; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2990,7 +2990,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.crime_num IS 'Associated crime numb
 
 
 --
--- TOC entry 4480 (class 0 OID 0)
+-- TOC entry 4485 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.executed_by; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -2999,7 +2999,7 @@ COMMENT ON COLUMN public.ir_execution_of_nbw.executed_by IS 'Name of officer who
 
 
 --
--- TOC entry 4481 (class 0 OID 0)
+-- TOC entry 4486 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN ir_execution_of_nbw.place_of_execution; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3064,7 +3064,7 @@ CREATE TABLE public.ir_indulgance_before_offence (
 ALTER TABLE public.ir_indulgance_before_offence OWNER TO dev_dopamas;
 
 --
--- TOC entry 4482 (class 0 OID 0)
+-- TOC entry 4487 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: TABLE ir_indulgance_before_offence; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3073,7 +3073,7 @@ COMMENT ON TABLE public.ir_indulgance_before_offence IS 'Substances/habits indul
 
 
 --
--- TOC entry 4483 (class 0 OID 0)
+-- TOC entry 4488 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: COLUMN ir_indulgance_before_offence.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3082,7 +3082,7 @@ COMMENT ON COLUMN public.ir_indulgance_before_offence.interrogation_report_id IS
 
 
 --
--- TOC entry 4484 (class 0 OID 0)
+-- TOC entry 4489 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: COLUMN ir_indulgance_before_offence.indulgance; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3131,7 +3131,7 @@ CREATE TABLE public.ir_jail_sentence (
 ALTER TABLE public.ir_jail_sentence OWNER TO dev_dopamas;
 
 --
--- TOC entry 4485 (class 0 OID 0)
+-- TOC entry 4490 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: TABLE ir_jail_sentence; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3140,7 +3140,7 @@ COMMENT ON TABLE public.ir_jail_sentence IS 'Jail sentence details for each IR r
 
 
 --
--- TOC entry 4486 (class 0 OID 0)
+-- TOC entry 4491 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3149,7 +3149,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.interrogation_report_id IS 'Foreign ke
 
 
 --
--- TOC entry 4487 (class 0 OID 0)
+-- TOC entry 4492 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.crime_num; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3158,7 +3158,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.crime_num IS 'Associated crime number'
 
 
 --
--- TOC entry 4488 (class 0 OID 0)
+-- TOC entry 4493 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.sentence_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3167,7 +3167,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.sentence_type IS 'Type of sentence (RI
 
 
 --
--- TOC entry 4489 (class 0 OID 0)
+-- TOC entry 4494 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.sentence_duration_in_months; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3176,7 +3176,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.sentence_duration_in_months IS 'Durati
 
 
 --
--- TOC entry 4490 (class 0 OID 0)
+-- TOC entry 4495 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.sentence_start_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3185,7 +3185,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.sentence_start_date IS 'When sentence 
 
 
 --
--- TOC entry 4491 (class 0 OID 0)
+-- TOC entry 4496 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.sentence_end_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3194,7 +3194,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.sentence_end_date IS 'When sentence en
 
 
 --
--- TOC entry 4492 (class 0 OID 0)
+-- TOC entry 4497 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.sentence_amount_in_inr; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3203,7 +3203,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.sentence_amount_in_inr IS 'Fine amount
 
 
 --
--- TOC entry 4493 (class 0 OID 0)
+-- TOC entry 4498 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.jail_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3212,7 +3212,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.jail_name IS 'Name of jail where serve
 
 
 --
--- TOC entry 4494 (class 0 OID 0)
+-- TOC entry 4499 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.date_of_jail_entry; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3221,7 +3221,7 @@ COMMENT ON COLUMN public.ir_jail_sentence.date_of_jail_entry IS 'When admitted t
 
 
 --
--- TOC entry 4495 (class 0 OID 0)
+-- TOC entry 4500 (class 0 OID 0)
 -- Dependencies: 283
 -- Name: COLUMN ir_jail_sentence.date_of_jail_release; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3301,7 +3301,7 @@ CREATE TABLE public.ir_new_gang_formation (
 ALTER TABLE public.ir_new_gang_formation OWNER TO dev_dopamas;
 
 --
--- TOC entry 4496 (class 0 OID 0)
+-- TOC entry 4501 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: TABLE ir_new_gang_formation; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3310,7 +3310,7 @@ COMMENT ON TABLE public.ir_new_gang_formation IS 'New gang formation details for
 
 
 --
--- TOC entry 4497 (class 0 OID 0)
+-- TOC entry 4502 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3319,7 +3319,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.interrogation_report_id IS 'Forei
 
 
 --
--- TOC entry 4498 (class 0 OID 0)
+-- TOC entry 4503 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.gang_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3328,7 +3328,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.gang_name IS 'Name of the gang';
 
 
 --
--- TOC entry 4499 (class 0 OID 0)
+-- TOC entry 4504 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.gang_formation_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3337,7 +3337,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.gang_formation_date IS 'When gang
 
 
 --
--- TOC entry 4500 (class 0 OID 0)
+-- TOC entry 4505 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.number_of_members; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3346,7 +3346,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.number_of_members IS 'Number of m
 
 
 --
--- TOC entry 4501 (class 0 OID 0)
+-- TOC entry 4506 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.leader_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3355,7 +3355,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.leader_name IS 'Name of gang lead
 
 
 --
--- TOC entry 4502 (class 0 OID 0)
+-- TOC entry 4507 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.leader_person_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3364,7 +3364,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.leader_person_id IS 'Reference to
 
 
 --
--- TOC entry 4503 (class 0 OID 0)
+-- TOC entry 4508 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.gang_objective; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3373,7 +3373,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.gang_objective IS 'Stated objecti
 
 
 --
--- TOC entry 4504 (class 0 OID 0)
+-- TOC entry 4509 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.criminal_history; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3382,7 +3382,7 @@ COMMENT ON COLUMN public.ir_new_gang_formation.criminal_history IS 'Known crimin
 
 
 --
--- TOC entry 4505 (class 0 OID 0)
+-- TOC entry 4510 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: COLUMN ir_new_gang_formation.active; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3412,7 +3412,7 @@ CREATE TABLE public.ir_pending_nbw (
 ALTER TABLE public.ir_pending_nbw OWNER TO dev_dopamas;
 
 --
--- TOC entry 4506 (class 0 OID 0)
+-- TOC entry 4511 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: TABLE ir_pending_nbw; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3421,7 +3421,7 @@ COMMENT ON TABLE public.ir_pending_nbw IS 'Pending NBW (Non-Bailable Warrant) fo
 
 
 --
--- TOC entry 4507 (class 0 OID 0)
+-- TOC entry 4512 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3430,7 +3430,7 @@ COMMENT ON COLUMN public.ir_pending_nbw.interrogation_report_id IS 'Foreign key 
 
 
 --
--- TOC entry 4508 (class 0 OID 0)
+-- TOC entry 4513 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.nbw_number; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3439,7 +3439,7 @@ COMMENT ON COLUMN public.ir_pending_nbw.nbw_number IS 'NBW number/reference';
 
 
 --
--- TOC entry 4509 (class 0 OID 0)
+-- TOC entry 4514 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.issued_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3448,7 +3448,7 @@ COMMENT ON COLUMN public.ir_pending_nbw.issued_date IS 'Date NBW was issued';
 
 
 --
--- TOC entry 4510 (class 0 OID 0)
+-- TOC entry 4515 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.jurisdiction_ps; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3457,7 +3457,7 @@ COMMENT ON COLUMN public.ir_pending_nbw.jurisdiction_ps IS 'Police station where
 
 
 --
--- TOC entry 4511 (class 0 OID 0)
+-- TOC entry 4516 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.crime_num; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3466,7 +3466,7 @@ COMMENT ON COLUMN public.ir_pending_nbw.crime_num IS 'Associated crime number';
 
 
 --
--- TOC entry 4512 (class 0 OID 0)
+-- TOC entry 4517 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.reason_for_pending; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3475,7 +3475,7 @@ COMMENT ON COLUMN public.ir_pending_nbw.reason_for_pending IS 'Reason why NBW is
 
 
 --
--- TOC entry 4513 (class 0 OID 0)
+-- TOC entry 4518 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: COLUMN ir_pending_nbw.expected_execution_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3514,7 +3514,7 @@ CREATE TABLE public.ir_previous_offences_confessed (
 ALTER TABLE public.ir_previous_offences_confessed OWNER TO dev_dopamas;
 
 --
--- TOC entry 4514 (class 0 OID 0)
+-- TOC entry 4519 (class 0 OID 0)
 -- Dependencies: 290
 -- Name: COLUMN ir_previous_offences_confessed.conviction_status; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3523,7 +3523,7 @@ COMMENT ON COLUMN public.ir_previous_offences_confessed.conviction_status IS 'St
 
 
 --
--- TOC entry 4515 (class 0 OID 0)
+-- TOC entry 4520 (class 0 OID 0)
 -- Dependencies: 290
 -- Name: COLUMN ir_previous_offences_confessed.bail_status; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3532,7 +3532,7 @@ COMMENT ON COLUMN public.ir_previous_offences_confessed.bail_status IS 'Bail sta
 
 
 --
--- TOC entry 4516 (class 0 OID 0)
+-- TOC entry 4521 (class 0 OID 0)
 -- Dependencies: 290
 -- Name: COLUMN ir_previous_offences_confessed.court_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3541,7 +3541,7 @@ COMMENT ON COLUMN public.ir_previous_offences_confessed.court_name IS 'Court han
 
 
 --
--- TOC entry 4517 (class 0 OID 0)
+-- TOC entry 4522 (class 0 OID 0)
 -- Dependencies: 290
 -- Name: COLUMN ir_previous_offences_confessed.judge_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3570,7 +3570,7 @@ CREATE TABLE public.ir_property_disposal (
 ALTER TABLE public.ir_property_disposal OWNER TO dev_dopamas;
 
 --
--- TOC entry 4518 (class 0 OID 0)
+-- TOC entry 4523 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: TABLE ir_property_disposal; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3579,7 +3579,7 @@ COMMENT ON TABLE public.ir_property_disposal IS 'Property disposal details for e
 
 
 --
--- TOC entry 4519 (class 0 OID 0)
+-- TOC entry 4524 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: COLUMN ir_property_disposal.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3588,7 +3588,7 @@ COMMENT ON COLUMN public.ir_property_disposal.interrogation_report_id IS 'Foreig
 
 
 --
--- TOC entry 4520 (class 0 OID 0)
+-- TOC entry 4525 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: COLUMN ir_property_disposal.mode_of_disposal; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3597,7 +3597,7 @@ COMMENT ON COLUMN public.ir_property_disposal.mode_of_disposal IS 'How property 
 
 
 --
--- TOC entry 4521 (class 0 OID 0)
+-- TOC entry 4526 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: COLUMN ir_property_disposal.buyer_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3606,7 +3606,7 @@ COMMENT ON COLUMN public.ir_property_disposal.buyer_name IS 'Name of buyer or re
 
 
 --
--- TOC entry 4522 (class 0 OID 0)
+-- TOC entry 4527 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: COLUMN ir_property_disposal.sold_amount_in_inr; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3615,7 +3615,7 @@ COMMENT ON COLUMN public.ir_property_disposal.sold_amount_in_inr IS 'Amount in I
 
 
 --
--- TOC entry 4523 (class 0 OID 0)
+-- TOC entry 4528 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: COLUMN ir_property_disposal.location_of_disposal; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3624,7 +3624,7 @@ COMMENT ON COLUMN public.ir_property_disposal.location_of_disposal IS 'Location 
 
 
 --
--- TOC entry 4524 (class 0 OID 0)
+-- TOC entry 4529 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: COLUMN ir_property_disposal.date_of_disposal; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3668,7 +3668,7 @@ CREATE TABLE public.ir_regularization_transit_warrants (
 ALTER TABLE public.ir_regularization_transit_warrants OWNER TO dev_dopamas;
 
 --
--- TOC entry 4525 (class 0 OID 0)
+-- TOC entry 4530 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: TABLE ir_regularization_transit_warrants; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3677,7 +3677,7 @@ COMMENT ON TABLE public.ir_regularization_transit_warrants IS 'Regularization of
 
 
 --
--- TOC entry 4526 (class 0 OID 0)
+-- TOC entry 4531 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3686,7 +3686,7 @@ COMMENT ON COLUMN public.ir_regularization_transit_warrants.interrogation_report
 
 
 --
--- TOC entry 4527 (class 0 OID 0)
+-- TOC entry 4532 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.warrant_number; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3695,7 +3695,7 @@ COMMENT ON COLUMN public.ir_regularization_transit_warrants.warrant_number IS 'W
 
 
 --
--- TOC entry 4528 (class 0 OID 0)
+-- TOC entry 4533 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.warrant_type; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3704,7 +3704,7 @@ COMMENT ON COLUMN public.ir_regularization_transit_warrants.warrant_type IS 'Typ
 
 
 --
--- TOC entry 4529 (class 0 OID 0)
+-- TOC entry 4534 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.issued_date; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3713,7 +3713,7 @@ COMMENT ON COLUMN public.ir_regularization_transit_warrants.issued_date IS 'Date
 
 
 --
--- TOC entry 4530 (class 0 OID 0)
+-- TOC entry 4535 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.jurisdiction_ps; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3722,7 +3722,7 @@ COMMENT ON COLUMN public.ir_regularization_transit_warrants.jurisdiction_ps IS '
 
 
 --
--- TOC entry 4531 (class 0 OID 0)
+-- TOC entry 4536 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.crime_num; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3731,7 +3731,7 @@ COMMENT ON COLUMN public.ir_regularization_transit_warrants.crime_num IS 'Associ
 
 
 --
--- TOC entry 4532 (class 0 OID 0)
+-- TOC entry 4537 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: COLUMN ir_regularization_transit_warrants.status; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3807,7 +3807,7 @@ CREATE TABLE public.ir_sureties (
 ALTER TABLE public.ir_sureties OWNER TO dev_dopamas;
 
 --
--- TOC entry 4533 (class 0 OID 0)
+-- TOC entry 4538 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: TABLE ir_sureties; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3816,7 +3816,7 @@ COMMENT ON TABLE public.ir_sureties IS 'Surety information for bail for each IR 
 
 
 --
--- TOC entry 4534 (class 0 OID 0)
+-- TOC entry 4539 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.interrogation_report_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3825,7 +3825,7 @@ COMMENT ON COLUMN public.ir_sureties.interrogation_report_id IS 'Foreign key to 
 
 
 --
--- TOC entry 4535 (class 0 OID 0)
+-- TOC entry 4540 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.surety_person_id; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3834,7 +3834,7 @@ COMMENT ON COLUMN public.ir_sureties.surety_person_id IS 'Reference to person_id
 
 
 --
--- TOC entry 4536 (class 0 OID 0)
+-- TOC entry 4541 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.surety_name; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3843,7 +3843,7 @@ COMMENT ON COLUMN public.ir_sureties.surety_name IS 'Name of surety';
 
 
 --
--- TOC entry 4537 (class 0 OID 0)
+-- TOC entry 4542 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.relation_to_accused; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3852,7 +3852,7 @@ COMMENT ON COLUMN public.ir_sureties.relation_to_accused IS 'Relationship to acc
 
 
 --
--- TOC entry 4538 (class 0 OID 0)
+-- TOC entry 4543 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.occupation; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3861,7 +3861,7 @@ COMMENT ON COLUMN public.ir_sureties.occupation IS 'Occupation of surety';
 
 
 --
--- TOC entry 4539 (class 0 OID 0)
+-- TOC entry 4544 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.surety_amount_in_inr; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -3870,7 +3870,7 @@ COMMENT ON COLUMN public.ir_sureties.surety_amount_in_inr IS 'Amount of surety i
 
 
 --
--- TOC entry 4540 (class 0 OID 0)
+-- TOC entry 4545 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN ir_sureties.date_of_surety; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -4029,7 +4029,7 @@ UNION ALL
 ALTER VIEW public.ir_child_table_coverage OWNER TO dev_dopamas;
 
 --
--- TOC entry 4541 (class 0 OID 0)
+-- TOC entry 4546 (class 0 OID 0)
 -- Dependencies: 317
 -- Name: VIEW ir_child_table_coverage; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -4119,7 +4119,7 @@ UNION ALL
 ALTER VIEW public.ir_field_persistence_check OWNER TO dev_dopamas;
 
 --
--- TOC entry 4542 (class 0 OID 0)
+-- TOC entry 4547 (class 0 OID 0)
 -- Dependencies: 316
 -- Name: VIEW ir_field_persistence_check; Type: COMMENT; Schema: public; Owner: dev_dopamas
 --
@@ -4143,7 +4143,7 @@ CREATE SEQUENCE public.ir_indulgance_before_offence_id_seq
 ALTER SEQUENCE public.ir_indulgance_before_offence_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4543 (class 0 OID 0)
+-- TOC entry 4548 (class 0 OID 0)
 -- Dependencies: 321
 -- Name: ir_indulgance_before_offence_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -4167,7 +4167,7 @@ CREATE SEQUENCE public.ir_interrogation_report_refs_id_seq
 ALTER SEQUENCE public.ir_interrogation_report_refs_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4544 (class 0 OID 0)
+-- TOC entry 4549 (class 0 OID 0)
 -- Dependencies: 320
 -- Name: ir_interrogation_report_refs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -4191,7 +4191,7 @@ CREATE SEQUENCE public.ir_media_id_seq
 ALTER SEQUENCE public.ir_media_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4545 (class 0 OID 0)
+-- TOC entry 4550 (class 0 OID 0)
 -- Dependencies: 319
 -- Name: ir_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -4235,7 +4235,7 @@ CREATE SEQUENCE public.ir_pending_fk_id_seq
 ALTER SEQUENCE public.ir_pending_fk_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4546 (class 0 OID 0)
+-- TOC entry 4551 (class 0 OID 0)
 -- Dependencies: 322
 -- Name: ir_pending_fk_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -4259,7 +4259,7 @@ CREATE SEQUENCE public.ir_regular_habits_id_seq
 ALTER SEQUENCE public.ir_regular_habits_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4547 (class 0 OID 0)
+-- TOC entry 4552 (class 0 OID 0)
 -- Dependencies: 318
 -- Name: ir_regular_habits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -4302,7 +4302,7 @@ CREATE SEQUENCE public.mo_seizure_media_id_seq
 ALTER SEQUENCE public.mo_seizure_media_id_seq OWNER TO dev_dopamas;
 
 --
--- TOC entry 4548 (class 0 OID 0)
+-- TOC entry 4553 (class 0 OID 0)
 -- Dependencies: 325
 -- Name: mo_seizure_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: dev_dopamas
 --
@@ -4649,7 +4649,7 @@ ALTER TABLE ONLY public.brief_facts_ai
 
 
 --
--- TOC entry 4223 (class 2606 OID 40225418)
+-- TOC entry 4228 (class 2606 OID 40225418)
 -- Name: charge_sheet_updates charge_sheet_updates_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4658,7 +4658,7 @@ ALTER TABLE ONLY public.charge_sheet_updates
 
 
 --
--- TOC entry 4225 (class 2606 OID 40225420)
+-- TOC entry 4230 (class 2606 OID 40225420)
 -- Name: charge_sheet_updates charge_sheet_updates_update_charge_sheet_id_key; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4667,7 +4667,7 @@ ALTER TABLE ONLY public.charge_sheet_updates
 
 
 --
--- TOC entry 4238 (class 2606 OID 40940063)
+-- TOC entry 4243 (class 2606 OID 40940063)
 -- Name: etl_address_failures etl_address_failures_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4676,7 +4676,7 @@ ALTER TABLE ONLY public.etl_address_failures
 
 
 --
--- TOC entry 4229 (class 2606 OID 40939962)
+-- TOC entry 4234 (class 2606 OID 40939962)
 -- Name: etl_api_date_control etl_api_date_control_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4685,7 +4685,7 @@ ALTER TABLE ONLY public.etl_api_date_control
 
 
 --
--- TOC entry 4236 (class 2606 OID 40940054)
+-- TOC entry 4241 (class 2606 OID 40940054)
 -- Name: etl_checkpoint etl_checkpoint_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4694,7 +4694,7 @@ ALTER TABLE ONLY public.etl_checkpoint
 
 
 --
--- TOC entry 4218 (class 2606 OID 39606151)
+-- TOC entry 4223 (class 2606 OID 39606151)
 -- Name: etl_fk_retry_queue etl_fk_retry_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4703,7 +4703,7 @@ ALTER TABLE ONLY public.etl_fk_retry_queue
 
 
 --
--- TOC entry 4231 (class 2606 OID 40939972)
+-- TOC entry 4236 (class 2606 OID 40939972)
 -- Name: etl_linked_id_queue etl_linked_id_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4712,7 +4712,7 @@ ALTER TABLE ONLY public.etl_linked_id_queue
 
 
 --
--- TOC entry 4233 (class 2606 OID 40939974)
+-- TOC entry 4238 (class 2606 OID 40939974)
 -- Name: etl_linked_id_queue etl_linked_id_queue_uniq; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4721,7 +4721,7 @@ ALTER TABLE ONLY public.etl_linked_id_queue
 
 
 --
--- TOC entry 4221 (class 2606 OID 39606158)
+-- TOC entry 4226 (class 2606 OID 39606158)
 -- Name: etl_run_state etl_run_state_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4730,7 +4730,7 @@ ALTER TABLE ONLY public.etl_run_state
 
 
 --
--- TOC entry 4227 (class 2606 OID 40225617)
+-- TOC entry 4232 (class 2606 OID 40225617)
 -- Name: mo_seizure_media mo_seizure_media_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
@@ -4775,12 +4775,30 @@ ALTER TABLE ONLY public.persons
 
 
 --
--- TOC entry 4211 (class 2606 OID 39850232)
+-- TOC entry 4212 (class 2606 OID 39850232)
 -- Name: properties pk_properties_id; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
 --
 
 ALTER TABLE ONLY public.properties
     ADD CONSTRAINT pk_properties_id PRIMARY KEY (property_id);
+
+
+--
+-- TOC entry 4215 (class 2606 OID 41210291)
+-- Name: property_additional_details property_additional_details_pkey; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
+--
+
+ALTER TABLE ONLY public.property_additional_details
+    ADD CONSTRAINT property_additional_details_pkey PRIMARY KEY (property_id);
+
+
+--
+-- TOC entry 4217 (class 2606 OID 41210293)
+-- Name: property_media property_media_unique_entry; Type: CONSTRAINT; Schema: public; Owner: dev_dopamas
+--
+
+ALTER TABLE ONLY public.property_media
+    ADD CONSTRAINT property_media_unique_entry UNIQUE (property_id, media_index);
 
 
 --
@@ -4793,7 +4811,7 @@ ALTER TABLE ONLY public.disposal
 
 
 --
--- TOC entry 4219 (class 1259 OID 39606152)
+-- TOC entry 4224 (class 1259 OID 39606152)
 -- Name: etl_fk_retry_queue_source_unresolved; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4841,7 +4859,7 @@ CREATE INDEX geo_reference_mandal_trgm ON public.geo_reference USING gin (sub_di
 
 
 --
--- TOC entry 4213 (class 1259 OID 39852079)
+-- TOC entry 4218 (class 1259 OID 39852079)
 -- Name: idx_accuseds_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4849,7 +4867,7 @@ CREATE UNIQUE INDEX idx_accuseds_mv_id ON public.accuseds_mv USING btree (id);
 
 
 --
--- TOC entry 4214 (class 1259 OID 39852080)
+-- TOC entry 4219 (class 1259 OID 39852080)
 -- Name: idx_advanced_search_accuseds_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4857,7 +4875,7 @@ CREATE UNIQUE INDEX idx_advanced_search_accuseds_mv_id ON public.advanced_search
 
 
 --
--- TOC entry 4215 (class 1259 OID 39852081)
+-- TOC entry 4220 (class 1259 OID 39852081)
 -- Name: idx_advanced_search_firs_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4937,7 +4955,7 @@ CREATE INDEX idx_crimes_date_modified_created ON public.crimes USING btree (date
 
 
 --
--- TOC entry 4216 (class 1259 OID 39852082)
+-- TOC entry 4221 (class 1259 OID 39852082)
 -- Name: idx_criminal_profiles_mv_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4945,7 +4963,7 @@ CREATE UNIQUE INDEX idx_criminal_profiles_mv_id ON public.criminal_profiles_mv U
 
 
 --
--- TOC entry 4239 (class 1259 OID 40940065)
+-- TOC entry 4244 (class 1259 OID 40940065)
 -- Name: idx_etl_address_failures_attempted; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -4953,7 +4971,7 @@ CREATE INDEX idx_etl_address_failures_attempted ON public.etl_address_failures U
 
 
 --
--- TOC entry 4240 (class 1259 OID 40940064)
+-- TOC entry 4245 (class 1259 OID 40940064)
 -- Name: idx_etl_address_failures_reason; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5041,6 +5059,14 @@ CREATE INDEX idx_geo_reference_subdistrict_trgm ON public.geo_reference USING gi
 
 
 --
+-- TOC entry 4182 (class 1259 OID 41202284)
+-- Name: idx_geo_reference_village_trgm; Type: INDEX; Schema: public; Owner: dev_dopamas
+--
+
+CREATE INDEX idx_geo_reference_village_trgm ON public.geo_reference USING gin (lower((village_name_english)::text) public.gin_trgm_ops) WHERE (village_name_english IS NOT NULL);
+
+
+--
 -- TOC entry 4167 (class 1259 OID 39852064)
 -- Name: idx_ir_associate_details_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
@@ -5049,7 +5075,7 @@ CREATE INDEX idx_ir_associate_details_ir_id ON public.ir_associate_details USING
 
 
 --
--- TOC entry 4186 (class 1259 OID 39852065)
+-- TOC entry 4187 (class 1259 OID 39852065)
 -- Name: idx_ir_consumer_details_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5057,7 +5083,7 @@ CREATE INDEX idx_ir_consumer_details_ir_id ON public.ir_consumer_details USING b
 
 
 --
--- TOC entry 4187 (class 1259 OID 39606172)
+-- TOC entry 4188 (class 1259 OID 39606172)
 -- Name: idx_ir_conviction_acquittal_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5065,7 +5091,7 @@ CREATE INDEX idx_ir_conviction_acquittal_ir_id ON public.ir_conviction_acquittal
 
 
 --
--- TOC entry 4188 (class 1259 OID 39852066)
+-- TOC entry 4189 (class 1259 OID 39852066)
 -- Name: idx_ir_defence_counsel_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5073,7 +5099,7 @@ CREATE INDEX idx_ir_defence_counsel_ir_id ON public.ir_defence_counsel USING btr
 
 
 --
--- TOC entry 4189 (class 1259 OID 39852067)
+-- TOC entry 4190 (class 1259 OID 39852067)
 -- Name: idx_ir_dopams_links_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5081,7 +5107,7 @@ CREATE INDEX idx_ir_dopams_links_ir_id ON public.ir_dopams_links USING btree (in
 
 
 --
--- TOC entry 4190 (class 1259 OID 39606167)
+-- TOC entry 4191 (class 1259 OID 39606167)
 -- Name: idx_ir_execution_of_nbw_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5089,7 +5115,7 @@ CREATE INDEX idx_ir_execution_of_nbw_ir_id ON public.ir_execution_of_nbw USING b
 
 
 --
--- TOC entry 4191 (class 1259 OID 39852068)
+-- TOC entry 4192 (class 1259 OID 39852068)
 -- Name: idx_ir_family_history_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5097,7 +5123,7 @@ CREATE INDEX idx_ir_family_history_ir_id ON public.ir_family_history USING btree
 
 
 --
--- TOC entry 4192 (class 1259 OID 39852069)
+-- TOC entry 4193 (class 1259 OID 39852069)
 -- Name: idx_ir_financial_history_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5105,7 +5131,7 @@ CREATE INDEX idx_ir_financial_history_ir_id ON public.ir_financial_history USING
 
 
 --
--- TOC entry 4193 (class 1259 OID 39606164)
+-- TOC entry 4194 (class 1259 OID 39606164)
 -- Name: idx_ir_indulgance_before_offence_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5113,7 +5139,7 @@ CREATE INDEX idx_ir_indulgance_before_offence_ir_id ON public.ir_indulgance_befo
 
 
 --
--- TOC entry 4194 (class 1259 OID 39852070)
+-- TOC entry 4195 (class 1259 OID 39852070)
 -- Name: idx_ir_interrogation_report_refs_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5121,7 +5147,7 @@ CREATE INDEX idx_ir_interrogation_report_refs_ir_id ON public.ir_interrogation_r
 
 
 --
--- TOC entry 4195 (class 1259 OID 39606170)
+-- TOC entry 4196 (class 1259 OID 39606170)
 -- Name: idx_ir_jail_sentence_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5129,7 +5155,7 @@ CREATE INDEX idx_ir_jail_sentence_ir_id ON public.ir_jail_sentence USING btree (
 
 
 --
--- TOC entry 4196 (class 1259 OID 39852071)
+-- TOC entry 4197 (class 1259 OID 39852071)
 -- Name: idx_ir_local_contacts_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5137,7 +5163,7 @@ CREATE INDEX idx_ir_local_contacts_ir_id ON public.ir_local_contacts USING btree
 
 
 --
--- TOC entry 4197 (class 1259 OID 39852072)
+-- TOC entry 4198 (class 1259 OID 39852072)
 -- Name: idx_ir_media_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5145,7 +5171,7 @@ CREATE INDEX idx_ir_media_ir_id ON public.ir_media USING btree (interrogation_re
 
 
 --
--- TOC entry 4198 (class 1259 OID 39852073)
+-- TOC entry 4199 (class 1259 OID 39852073)
 -- Name: idx_ir_modus_operandi_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5153,7 +5179,7 @@ CREATE INDEX idx_ir_modus_operandi_ir_id ON public.ir_modus_operandi USING btree
 
 
 --
--- TOC entry 4199 (class 1259 OID 39606171)
+-- TOC entry 4200 (class 1259 OID 39606171)
 -- Name: idx_ir_new_gang_formation_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5161,7 +5187,7 @@ CREATE INDEX idx_ir_new_gang_formation_ir_id ON public.ir_new_gang_formation USI
 
 
 --
--- TOC entry 4201 (class 1259 OID 39606168)
+-- TOC entry 4202 (class 1259 OID 39606168)
 -- Name: idx_ir_pending_nbw_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5169,7 +5195,7 @@ CREATE INDEX idx_ir_pending_nbw_ir_id ON public.ir_pending_nbw USING btree (inte
 
 
 --
--- TOC entry 4202 (class 1259 OID 39852074)
+-- TOC entry 4203 (class 1259 OID 39852074)
 -- Name: idx_ir_previous_offences_confessed_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5177,7 +5203,7 @@ CREATE INDEX idx_ir_previous_offences_confessed_ir_id ON public.ir_previous_offe
 
 
 --
--- TOC entry 4203 (class 1259 OID 39606165)
+-- TOC entry 4204 (class 1259 OID 39606165)
 -- Name: idx_ir_property_disposal_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5185,7 +5211,7 @@ CREATE INDEX idx_ir_property_disposal_ir_id ON public.ir_property_disposal USING
 
 
 --
--- TOC entry 4204 (class 1259 OID 39852075)
+-- TOC entry 4205 (class 1259 OID 39852075)
 -- Name: idx_ir_regular_habits_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5193,7 +5219,7 @@ CREATE INDEX idx_ir_regular_habits_ir_id ON public.ir_regular_habits USING btree
 
 
 --
--- TOC entry 4205 (class 1259 OID 39606166)
+-- TOC entry 4206 (class 1259 OID 39606166)
 -- Name: idx_ir_regularization_transit_warrants_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5217,7 +5243,7 @@ CREATE INDEX idx_ir_reports_crime_person ON public.interrogation_reports USING b
 
 
 --
--- TOC entry 4206 (class 1259 OID 39852076)
+-- TOC entry 4207 (class 1259 OID 39852076)
 -- Name: idx_ir_shelter_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5225,7 +5251,7 @@ CREATE INDEX idx_ir_shelter_ir_id ON public.ir_shelter USING btree (interrogatio
 
 
 --
--- TOC entry 4207 (class 1259 OID 39852077)
+-- TOC entry 4208 (class 1259 OID 39852077)
 -- Name: idx_ir_sim_details_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5233,7 +5259,7 @@ CREATE INDEX idx_ir_sim_details_ir_id ON public.ir_sim_details USING btree (inte
 
 
 --
--- TOC entry 4208 (class 1259 OID 39606169)
+-- TOC entry 4209 (class 1259 OID 39606169)
 -- Name: idx_ir_sureties_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5241,7 +5267,7 @@ CREATE INDEX idx_ir_sureties_ir_id ON public.ir_sureties USING btree (interrogat
 
 
 --
--- TOC entry 4209 (class 1259 OID 39852078)
+-- TOC entry 4210 (class 1259 OID 39852078)
 -- Name: idx_ir_types_of_drugs_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5249,7 +5275,7 @@ CREATE INDEX idx_ir_types_of_drugs_ir_id ON public.ir_types_of_drugs USING btree
 
 
 --
--- TOC entry 4234 (class 1259 OID 40939975)
+-- TOC entry 4239 (class 1259 OID 40939975)
 -- Name: idx_linked_queue_pending; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5257,7 +5283,7 @@ CREATE INDEX idx_linked_queue_pending ON public.etl_linked_id_queue USING btree 
 
 
 --
--- TOC entry 4200 (class 1259 OID 39606163)
+-- TOC entry 4201 (class 1259 OID 39606163)
 -- Name: idx_pending_fk_ir_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5265,7 +5291,7 @@ CREATE UNIQUE INDEX idx_pending_fk_ir_id ON public.ir_pending_fk USING btree (ir
 
 
 --
--- TOC entry 4212 (class 1259 OID 39606162)
+-- TOC entry 4213 (class 1259 OID 39606162)
 -- Name: idx_pending_fk_property_id; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5281,7 +5307,7 @@ CREATE INDEX idx_persons_address_pending ON public.persons USING btree (person_i
 
 
 --
--- TOC entry 4182 (class 1259 OID 39133102)
+-- TOC entry 4183 (class 1259 OID 39133102)
 -- Name: trgm_idx_geo_district; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5289,7 +5315,7 @@ CREATE INDEX trgm_idx_geo_district ON public.geo_reference USING gin (district_n
 
 
 --
--- TOC entry 4183 (class 1259 OID 39133103)
+-- TOC entry 4184 (class 1259 OID 39133103)
 -- Name: trgm_idx_geo_state; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5297,7 +5323,7 @@ CREATE INDEX trgm_idx_geo_state ON public.geo_reference USING gin (state_name pu
 
 
 --
--- TOC entry 4184 (class 1259 OID 39133104)
+-- TOC entry 4185 (class 1259 OID 39133104)
 -- Name: trgm_idx_geo_sub_district; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5305,7 +5331,7 @@ CREATE INDEX trgm_idx_geo_sub_district ON public.geo_reference USING gin (sub_di
 
 
 --
--- TOC entry 4185 (class 1259 OID 39133105)
+-- TOC entry 4186 (class 1259 OID 39133105)
 -- Name: trgm_idx_geo_village; Type: INDEX; Schema: public; Owner: dev_dopamas
 --
 
@@ -5313,7 +5339,7 @@ CREATE INDEX trgm_idx_geo_village ON public.geo_reference USING gin (village_nam
 
 
 --
--- TOC entry 4400 (class 0 OID 0)
+-- TOC entry 4405 (class 0 OID 0)
 -- Dependencies: 24
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: dev_dopamas
 --
@@ -5322,11 +5348,11 @@ REVOKE USAGE ON SCHEMA public FROM PUBLIC;
 GRANT ALL ON SCHEMA public TO PUBLIC;
 
 
--- Completed on 2026-04-21 13:01:57
+-- Completed on 2026-04-21 16:33:54
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict cbisX5Wtwa3UpIxxIYnlMv7CurRRdtvaUlsfB8YLTT04GUYkWDKwOBn2e3Ky5h8
+\unrestrict DAyb9UFreQItLALYrjovQJtyLYFi7kaaBMj3AeR7tm5UwCoJea6EKGjBT9WylGk
 
