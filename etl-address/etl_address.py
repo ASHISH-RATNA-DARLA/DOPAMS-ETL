@@ -8,8 +8,8 @@ Replaces legacy:
 Single pass per record:
   read → normalize → kb_resolve → (llm_resolve if partial) → validate → idempotent write.
 
-Pagination: keyset on (person_id::text, ctid).
-Checkpointing: etl_checkpoint table.
+Pagination: stable keyset on person_id::text.
+Checkpointing: crash-only etl_checkpoint row, cleared after a clean run.
 Failures: etl_address_failures table (no silent drops).
 LLM: Ollama (primary + fallback) via core.llm_service settings.
 """
@@ -44,8 +44,8 @@ from resolver.types import PersonRow, ResolvedAddress  # noqa: E402
 
 from io_layer.reader import count_pending, fetch_batch  # noqa: E402
 from io_layer.writer import apply_resolution  # noqa: E402
-from io_layer.checkpoint import read_checkpoint, write_checkpoint  # noqa: E402
-from io_layer.failures import record_failure  # noqa: E402
+from io_layer.checkpoint import clear_checkpoint, read_checkpoint, write_checkpoint  # noqa: E402
+from io_layer.failures import clear_stale_failures, record_failure  # noqa: E402
 
 from obs.logger import setup_logger, run_id  # noqa: E402
 from obs.heartbeat import Heartbeat  # noqa: E402
@@ -69,6 +69,8 @@ MAX_RETRIES_ROW   = int(os.environ.get("ADDRESS_ROW_RETRIES", "3"))
 DRY_RUN           = os.environ.get("ADDRESS_DRY_RUN", "0") == "1"
 RESUME            = os.environ.get("ADDRESS_RESUME", "1") == "1"
 LIMIT             = int(os.environ.get("ADDRESS_LIMIT", "0")) or None
+FAILURE_STALE_DAYS = int(os.environ.get("ADDRESS_FAILURE_STALE_DAYS", "30"))
+RESET_CHECKPOINT  = os.environ.get("ADDRESS_RESET_CHECKPOINT", "0") == "1"
 
 
 # --------------------------------------------------------------------
@@ -110,6 +112,94 @@ def _pick_best(a: Optional[ResolvedAddress], b: Optional[ResolvedAddress]) -> Op
     return a if a.confidence >= b.confidence else b
 
 
+def _mirror_resolved(source: ResolvedAddress, slot: str) -> ResolvedAddress:
+    return ResolvedAddress(
+        slot=slot,
+        country=source.country,
+        state=source.state,
+        district=source.district,
+        mandal=source.mandal,
+        path=source.path + "+mirror",
+        confidence=source.confidence,
+    )
+
+
+def _country_from_nationality(nationality: Optional[str]) -> Optional[str]:
+    if not nationality:
+        return None
+    token = nationality.strip().lower()
+    known = {
+        "indian": "India",
+        "india": "India",
+        "hindu": "India",
+        "pakistani": "Pakistan",
+        "nepali": "Nepal",
+        "nepalese": "Nepal",
+        "bangladeshi": "Bangladesh",
+        "sri lankan": "Sri Lanka",
+        "muslim": None,
+    }
+    return known.get(token)
+
+
+def _propagate_country(
+    row: PersonRow,
+    perm_out: Optional[ResolvedAddress],
+    pres_out: Optional[ResolvedAddress],
+) -> tuple[Optional[ResolvedAddress], Optional[ResolvedAddress], bool, bool, list[str]]:
+    # Prefer resolved country from either slot, then raw country fields, then nationality fallback.
+    kb = GeoKB.instance()
+    nat_country = None
+    if row.nationality:
+        nat_country = kb.canon_country(row.nationality) or _country_from_nationality(row.nationality)
+    country = (
+        (perm_out.country if perm_out else None)
+        or (pres_out.country if pres_out else None)
+        or row.perm_country
+        or row.pres_country
+        or nat_country
+    )
+    if not country:
+        return perm_out, pres_out, False, False, []
+
+    changed = False
+    used_nat = False
+    mode = "cross"
+    if not ((perm_out and perm_out.country) or (pres_out and pres_out.country)):
+        if row.perm_country or row.pres_country:
+            mode = "raw"
+        elif nat_country:
+            mode = "nat"
+            used_nat = True
+
+    if not row.perm_country and perm_out is None:
+        perm_out = ResolvedAddress(slot="permanent", country=country, path="country-propagation", confidence=0.5)
+        changed = True
+    elif perm_out is not None and not perm_out.country and not row.perm_country:
+        perm_out.country = country
+        perm_out.path = (perm_out.path + "+country-propagation") if perm_out.path else "country-propagation"
+        changed = True
+
+    if not row.pres_country and pres_out is None:
+        pres_out = ResolvedAddress(slot="present", country=country, path="country-propagation", confidence=0.5)
+        changed = True
+    elif pres_out is not None and not pres_out.country and not row.pres_country:
+        pres_out.country = country
+        pres_out.path = (pres_out.path + "+country-propagation") if pres_out.path else "country-propagation"
+        changed = True
+
+    markers = []
+    if changed:
+        if mode == "nat":
+            markers.append("M:country_nat")
+        elif mode == "raw":
+            markers.append("M:country_raw")
+        else:
+            markers.append("M:country_cross")
+
+    return perm_out, pres_out, changed, used_nat, markers
+
+
 def resolve_one(pool, row: PersonRow, llm: Optional[LLMAddressResolver]) -> tuple[
     Optional[ResolvedAddress], Optional[ResolvedAddress], str
 ]:
@@ -121,39 +211,111 @@ def resolve_one(pool, row: PersonRow, llm: Optional[LLMAddressResolver]) -> tupl
     paths = []
 
     if perm_cand.has_any_signal:
+        if perm_cand.enriched_locality_hit:
+            paths.append("P:enriched-locality")
         kb_p = resolve_kb(pool, perm_cand)
         if not kb_p.is_complete and llm is not None:
-            kb_p = llm.resolve(perm_cand, kb_p)
+            if _can_use_llm(perm_cand):
+                kb_p = llm.resolve(perm_cand, kb_p)
+            else:
+                paths.append("P:llm-skip-no-signal")
         perm_out = kb_p
         paths.append("P:" + kb_p.path)
 
     if pres_cand.has_any_signal:
+        if pres_cand.enriched_locality_hit:
+            paths.append("R:enriched-locality")
         kb_r = resolve_kb(pool, pres_cand)
         if not kb_r.is_complete and llm is not None:
-            kb_r = llm.resolve(pres_cand, kb_r)
+            if _can_use_llm(pres_cand):
+                kb_r = llm.resolve(pres_cand, kb_r)
+            else:
+                paths.append("R:llm-skip-no-signal")
         pres_out = kb_r
         paths.append("R:" + kb_r.path)
 
-    # If permanent has nothing but present has something, mirror present → permanent
-    # so the primary slot is always resolved when any data exists. This mirrors legacy
-    # Phase-1B intent without re-queuing the record.
-    if (perm_out is None or not perm_out.has_any) and pres_out is not None and pres_out.has_any:
-        mirror = ResolvedAddress(
-            slot="permanent",
-            country=pres_out.country,
-            state=pres_out.state,
-            district=pres_out.district,
-            mandal=pres_out.mandal,
-            path=pres_out.path + "+mirror",
-            confidence=pres_out.confidence,
-        )
-        perm_out = _pick_best(perm_out, mirror)
+    # Keep both address slots in sync when one side has usable geo data but the
+    # other side is still incomplete. apply_resolution() only fills NULL fields.
+    if pres_out is not None and pres_out.has_any and (perm_out is None or not perm_out.is_complete):
+        perm_out = _pick_best(perm_out, _mirror_resolved(pres_out, "permanent"))
+        paths.append("M:P<-R")
+
+    if perm_out is not None and perm_out.has_any and (pres_out is None or not pres_out.is_complete):
+        pres_out = _pick_best(pres_out, _mirror_resolved(perm_out, "present"))
+        paths.append("M:R<-P")
+
+    perm_out, pres_out, country_propagated, used_nat, country_markers = _propagate_country(row, perm_out, pres_out)
+    if country_propagated:
+        paths.append("C:propagated")
+    if used_nat:
+        paths.append("C:from-nat")
+    paths.extend(country_markers)
 
     return perm_out, pres_out, "|".join(paths) or "none"
 
 
 def _is_worth_writing(r: Optional[ResolvedAddress]) -> bool:
     return r is not None and r.has_any
+
+
+def _is_partial_resolution(r: Optional[ResolvedAddress]) -> bool:
+    return r is not None and r.has_any and not r.is_complete
+
+
+def _can_use_llm(cand) -> bool:
+    return bool(
+        cand.district or cand.mandal or cand.locality or cand.landmark or
+        cand.ward or cand.street or cand.pin
+    )
+
+
+def _classify_failure_reason(perm_cand, pres_cand, perm_out, pres_out) -> str:
+    has_actionable_signal = bool(
+        perm_cand.state or perm_cand.district or perm_cand.mandal or
+        perm_cand.locality or perm_cand.landmark or perm_cand.ward or perm_cand.street or
+        pres_cand.state or pres_cand.district or pres_cand.mandal or
+        pres_cand.locality or pres_cand.landmark or pres_cand.ward or pres_cand.street
+    )
+
+    has_state = bool((perm_out and perm_out.state) or (pres_out and pres_out.state))
+    has_district = bool((perm_out and perm_out.district) or (pres_out and pres_out.district))
+    has_mandal = bool((perm_out and perm_out.mandal) or (pres_out and pres_out.mandal))
+
+    if not has_actionable_signal:
+        return "insufficient_geo_signal"
+    if has_state and has_district and not has_mandal:
+        return "partial_no_mandal_signal"
+    if has_state and not has_district:
+        return "state_only_no_locality"
+    return "kb_and_llm_rejected"
+
+
+def _inc_failure_metric(stats: Stats, reason: str) -> None:
+    key_map = {
+        "partial_no_mandal_signal": "failed_partial_no_mandal",
+        "insufficient_geo_signal": "failed_insufficient_geo",
+        "state_only_no_locality": "failed_state_only_no_locality",
+        "kb_and_llm_rejected": "failed_kb_llm_rejected",
+    }
+    stats.inc(key_map.get(reason, "failed_no_resolution"))
+
+
+def _record_classified_failure(
+    pool,
+    row: PersonRow,
+    stats: Stats,
+    perm: Optional[ResolvedAddress],
+    pres: Optional[ResolvedAddress],
+    path: str,
+    extra_details: Optional[dict] = None,
+) -> None:
+    perm_cand, pres_cand = build_candidates(row)
+    reason = _classify_failure_reason(perm_cand, pres_cand, perm, pres)
+    details = {"path": path}
+    if extra_details:
+        details.update(extra_details)
+    record_failure(pool, row.person_id, reason, details)
+    _inc_failure_metric(stats, reason)
 
 
 # --------------------------------------------------------------------
@@ -171,9 +333,19 @@ def process_record(
         try:
             perm, pres, path = resolve_one(pool, row, llm)
 
+            if "llm-skip-no-signal" in path:
+                stats.inc("llm_skipped_no_signal")
+            if "enriched-locality" in path:
+                stats.inc("enriched_locality")
+            if "+village" in path:
+                stats.inc("enriched_village")
+            if "C:propagated" in path:
+                stats.inc("country_propagated")
+            if "C:from-nat" in path:
+                stats.inc("country_from_nat")
+
             if not _is_worth_writing(perm) and not _is_worth_writing(pres):
-                record_failure(pool, row.person_id, "no_resolution", {"path": path})
-                stats.inc("failed_no_resolution")
+                _record_classified_failure(pool, row, stats, perm, pres, path)
                 return
 
             if DRY_RUN:
@@ -196,6 +368,17 @@ def process_record(
                 stats.inc("updated")
             else:
                 stats.inc("unchanged")
+                if _is_partial_resolution(perm) or _is_partial_resolution(pres):
+                    _record_classified_failure(
+                        pool,
+                        row,
+                        stats,
+                        perm,
+                        pres,
+                        path,
+                        {"partial": True, "unchanged": True},
+                    )
+                    return
 
             if "llm" in path:
                 stats.inc("llm_used")
@@ -223,11 +406,23 @@ def process_record(
 
 def _emit_heartbeat(state: dict) -> str:
     st = state["stats"].snapshot()
+    failed_total = (
+        st.get("failed_no_resolution", 0)
+        + st.get("failed_unexpected", 0)
+        + st.get("failed_partial_no_mandal", 0)
+        + st.get("failed_insufficient_geo", 0)
+        + st.get("failed_state_only_no_locality", 0)
+        + st.get("failed_kb_llm_rejected", 0)
+    )
     return (
         f"processed={state['processed']}/{state['total']} "
         f"updated={st.get('updated',0)} unchanged={st.get('unchanged',0)} "
-        f"llm={st.get('llm_used',0)} "
-        f"failed={st.get('failed_no_resolution',0)+st.get('failed_unexpected',0)} "
+        f"llm={st.get('llm_used',0)} llm_skip={st.get('llm_skipped_no_signal',0)} "
+        f"enriched_locality={st.get('enriched_locality',0)} "
+        f"enriched_village={st.get('enriched_village',0)} "
+        f"country_propagated={st.get('country_propagated',0)} "
+        f"country_from_nat={st.get('country_from_nat',0)} "
+        f"failed={failed_total} "
         f"last_seen={state.get('last_seen_id') or '-'}"
     )
 
@@ -243,6 +438,18 @@ def run() -> int:
         minconn=POOL_MINCONN,
         maxconn=REQ_WORKERS + POOL_RESERVED,
     )
+
+    if RESET_CHECKPOINT:
+        clear_checkpoint(pool)
+        logger.info("checkpoint cleared via ADDRESS_RESET_CHECKPOINT/--reset-checkpoint")
+
+    cleared_failures = clear_stale_failures(pool, FAILURE_STALE_DAYS)
+    if cleared_failures:
+        logger.info(
+            "cleared %d stale failure rows older than %d days",
+            cleared_failures,
+            FAILURE_STALE_DAYS,
+        )
 
     # build KB once
     t0 = time.time()
@@ -267,6 +474,7 @@ def run() -> int:
         total = min(total, LIMIT)
     logger.info("Pending: %d (limit=%s)", total, LIMIT or "none")
     if total == 0:
+        clear_checkpoint(pool)
         logger.info("Nothing to process.")
         return 0
 
@@ -285,6 +493,7 @@ def run() -> int:
     hb = Heartbeat(HEARTBEAT_SEC, lambda: _emit_heartbeat(state))
     hb.start()
     t_start = time.time()
+    completed_successfully = False
 
     try:
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="addr") as ex:
@@ -292,6 +501,11 @@ def run() -> int:
                 take = min(BATCH_SIZE, total - processed)
                 batch = fetch_batch(pool, last_seen_id, take)
                 if not batch:
+                    if processed < total:
+                        logger.info(
+                            "batch scan exhausted before the initial pending count; "
+                            "a clean completion will clear the checkpoint so the next run sweeps from the start"
+                        )
                     break
 
                 batch_ix += 1
@@ -319,14 +533,24 @@ def run() -> int:
 
                 # abort if fail rate too high
                 snap = stats.snapshot()
-                failed = snap.get("failed_no_resolution", 0) + snap.get("failed_unexpected", 0)
+                failed = (
+                    snap.get("failed_no_resolution", 0)
+                    + snap.get("failed_unexpected", 0)
+                    + snap.get("failed_partial_no_mandal", 0)
+                    + snap.get("failed_insufficient_geo", 0)
+                    + snap.get("failed_state_only_no_locality", 0)
+                    + snap.get("failed_kb_llm_rejected", 0)
+                )
                 if processed > 200 and (failed / max(1, processed)) > FAIL_RATE_ABORT:
                     logger.error("aborting: fail_rate %.2f > %.2f", failed / processed, FAIL_RATE_ABORT)
                     return 2
+        completed_successfully = True
     finally:
         hb.stop()
         try:
-            if last_seen_id:
+            if completed_successfully:
+                clear_checkpoint(pool)
+            elif last_seen_id:
                 write_checkpoint(pool, last_seen_id, rid)
         except Exception:
             pass
@@ -339,8 +563,21 @@ def run() -> int:
     logger.info("  updated               : %d", snap.get("updated", 0))
     logger.info("  unchanged (idempotent): %d", snap.get("unchanged", 0))
     logger.info("  llm_used              : %d", snap.get("llm_used", 0))
+    logger.info("  llm_skipped_no_signal : %d", snap.get("llm_skipped_no_signal", 0))
+    logger.info("  enriched_locality     : %d", snap.get("enriched_locality", 0))
+    logger.info("  enriched_village      : %d", snap.get("enriched_village", 0))
+    logger.info("  enriched_by_locality  : %d", snap.get("enriched_locality", 0))
+    logger.info("  enriched_by_village   : %d", snap.get("enriched_village", 0))
+    logger.info("  country_propagated    : %d", snap.get("country_propagated", 0))
+    logger.info("  country_from_nat      : %d", snap.get("country_from_nat", 0))
     logger.info("  dry_run_resolved      : %d", snap.get("dry_run_resolved", 0))
     logger.info("  failed_no_resolution  : %d", snap.get("failed_no_resolution", 0))
+    logger.info("  failed_partial_mandal : %d", snap.get("failed_partial_no_mandal", 0))
+    logger.info("  failed_insufficient   : %d", snap.get("failed_insufficient_geo", 0))
+    logger.info("  failure_partial       : %d", snap.get("failed_partial_no_mandal", 0))
+    logger.info("  failure_insufficient  : %d", snap.get("failed_insufficient_geo", 0))
+    logger.info("  failed_state_only     : %d", snap.get("failed_state_only_no_locality", 0))
+    logger.info("  failed_kb_llm_reject  : %d", snap.get("failed_kb_llm_rejected", 0))
     logger.info("  failed_unexpected     : %d", snap.get("failed_unexpected", 0))
     logger.info("=" * 80)
     return 0
@@ -350,6 +587,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="etl-address: unified address ETL")
     parser.add_argument("--dry-run", action="store_true", help="Resolve but do not write")
     parser.add_argument("--no-resume", action="store_true", help="Ignore existing checkpoint")
+    parser.add_argument("--reset-checkpoint", action="store_true", help="Delete the saved checkpoint before starting")
     parser.add_argument("--limit", type=int, default=None, help="Max records this run")
     parser.add_argument("--disable-llm", action="store_true", help="KB-only mode")
     args = parser.parse_args()
@@ -358,16 +596,19 @@ def main() -> None:
         os.environ["ADDRESS_DRY_RUN"] = "1"
     if args.no_resume:
         os.environ["ADDRESS_RESUME"] = "0"
+    if args.reset_checkpoint:
+        os.environ["ADDRESS_RESET_CHECKPOINT"] = "1"
     if args.limit is not None:
         os.environ["ADDRESS_LIMIT"] = str(args.limit)
     if args.disable_llm:
         os.environ["ADDRESS_DISABLE_LLM"] = "1"
 
     # reload module-level constants after env override
-    global DRY_RUN, RESUME, LIMIT
+    global DRY_RUN, RESUME, LIMIT, RESET_CHECKPOINT
     DRY_RUN = os.environ.get("ADDRESS_DRY_RUN", "0") == "1"
     RESUME = os.environ.get("ADDRESS_RESUME", "1") == "1"
     LIMIT = int(os.environ.get("ADDRESS_LIMIT", "0")) or None
+    RESET_CHECKPOINT = os.environ.get("ADDRESS_RESET_CHECKPOINT", "0") == "1"
 
     rc = run()
     sys.exit(rc)

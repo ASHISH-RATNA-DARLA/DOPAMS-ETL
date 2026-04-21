@@ -135,7 +135,7 @@ class LLMAddressResolver:
 
 _SYSTEM = (
     "You are an expert in Indian and global administrative geography. "
-    "Given partial address fields, return strict JSON: "
+    "Given partial address fields including ward_colony and street text, return strict JSON: "
     '{"country": string|null, "state": string|null, "district": string|null, '
     '"mandal": string|null, "confidence": number between 0 and 1, "reason": string}. '
     "Use canonical English names. Prefer Indian official names "
@@ -152,6 +152,9 @@ def _build_prompt(cand: AddressCandidate, partial: ResolvedAddress) -> str:
             "district": cand.raw_district,
             "mandal": cand.raw_mandal,
             "country": cand.raw_country,
+            "ward_colony": cand.raw_ward,
+            "street": cand.raw_street,
+            "pin_code": cand.raw_pin,
             "locality": cand.raw_locality,
             "landmark": cand.raw_landmark,
             "nationality": cand.raw_nationality,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from .kb_cache import GeoKB
@@ -9,11 +10,12 @@ from .types import AddressCandidate, ResolvedAddress
 logger = logging.getLogger(__name__)
 
 # Similarity thresholds for pg_trgm parent-bounded fallback
-SIM_STATE = 0.85
-SIM_DISTRICT = 0.80
-SIM_MANDAL = 0.65
-SIM_COUNTRY_STATE = 0.80
-SIM_COUNTRY = 0.70
+SIM_STATE = float(os.environ.get("ADDRESS_SIM_STATE", "0.80"))
+SIM_DISTRICT = float(os.environ.get("ADDRESS_SIM_DISTRICT", "0.75"))
+SIM_MANDAL = float(os.environ.get("ADDRESS_SIM_MANDAL", "0.65"))
+SIM_VILLAGE = float(os.environ.get("ADDRESS_SIM_VILLAGE", "0.55"))
+SIM_COUNTRY_STATE = float(os.environ.get("ADDRESS_SIM_COUNTRY_STATE", "0.80"))
+SIM_COUNTRY = float(os.environ.get("ADDRESS_SIM_COUNTRY", "0.70"))
 
 
 def resolve_kb(pool, cand: AddressCandidate) -> ResolvedAddress:
@@ -48,16 +50,26 @@ def resolve_kb(pool, cand: AddressCandidate) -> ResolvedAddress:
         mandal = kb.canon_mandal(out.state, out.district, cand.mandal)
         if mandal is None:
             mandal = _trgm_mandal(pool, out.state, out.district, cand.mandal)
-    # mandal-from-locality (best-effort; only with state+district known)
+    # mandal-from-locality / village / street tokens (best-effort; only with state+district known)
+    village_hit = False
     if mandal is None and out.state and out.district:
-        for tok in (cand.locality, cand.landmark):
+        for tok in (cand.locality, cand.landmark, cand.ward, cand.street):
             if not tok:
                 continue
-            m = _trgm_mandal(pool, out.state, out.district, tok)
+            village_m = kb.canon_village(out.state, out.district, tok)
+            if village_m is None:
+                village_m = _trgm_village(pool, out.state, out.district, tok)
+            m = village_m
+            if village_m:
+                village_hit = True
+            if not m:
+                m = _trgm_mandal(pool, out.state, out.district, tok)
             if m:
                 mandal = m
                 break
     out.mandal = mandal
+    if village_hit:
+        out.path += "+village"
 
     # --- country ---
     country = kb.canon_country(cand.country)
@@ -151,6 +163,27 @@ def _trgm_mandal(pool, state: str, district: str, token: str) -> Optional[str]:
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (token, state, district, token, token, SIM_MANDAL))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+def _trgm_village(pool, state: str, district: str, token: str) -> Optional[str]:
+    sql = """
+        SELECT DISTINCT sub_district_name,
+               similarity(lower(village_name_english), lower(%s)) AS sim
+        FROM geo_reference
+        WHERE lower(state_name) = lower(%s)
+          AND lower(district_name) = lower(%s)
+          AND village_name_english IS NOT NULL
+          AND sub_district_name IS NOT NULL
+          AND lower(village_name_english) %% lower(%s)
+          AND similarity(lower(village_name_english), lower(%s)) >= %s
+        ORDER BY sim DESC
+        LIMIT 1
+    """
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (token, state, district, token, token, SIM_VILLAGE))
             row = cur.fetchone()
             return row[0] if row else None
 

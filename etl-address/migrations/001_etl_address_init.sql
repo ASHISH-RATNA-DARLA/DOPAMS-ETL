@@ -39,6 +39,10 @@ CREATE INDEX IF NOT EXISTS idx_geo_reference_subdistrict_trgm
     ON geo_reference USING gin (lower(sub_district_name) gin_trgm_ops)
     WHERE sub_district_name IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_geo_reference_village_trgm
+    ON geo_reference USING gin (lower(village_name_english) gin_trgm_ops)
+    WHERE village_name_english IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_geo_countries_country_trgm
     ON geo_countries USING gin (lower(country_name) gin_trgm_ops);
 
@@ -100,12 +104,27 @@ CREATE INDEX IF NOT EXISTS idx_persons_address_pending
        OR TRIM(COALESCE(present_locality_village,''))     <> ''
        OR TRIM(COALESCE(permanent_landmark_milestone,'')) <> ''
        OR TRIM(COALESCE(present_landmark_milestone,''))   <> ''
-       OR TRIM(COALESCE(nationality,''))                  <> ''
+       OR TRIM(COALESCE(permanent_ward_colony,''))        <> ''
+       OR TRIM(COALESCE(present_ward_colony,''))          <> ''
+       OR TRIM(COALESCE(permanent_street_road_no,''))     <> ''
+       OR TRIM(COALESCE(present_street_road_no,''))       <> ''
+       OR TRIM(COALESCE(permanent_pin_code,''))           <> ''
+       OR TRIM(COALESCE(present_pin_code,''))             <> ''
+       OR (
+             TRIM(COALESCE(nationality,'')) <> ''
+         AND (
+                TRIM(COALESCE(permanent_country,'')) = ''
+             OR TRIM(COALESCE(present_country,''))   = ''
+         )
+       )
     )
     AND NOT (
            TRIM(COALESCE(permanent_country,''))   <> ''
        AND TRIM(COALESCE(permanent_state_ut,''))  <> ''
        AND TRIM(COALESCE(permanent_district,''))  <> ''
+         AND TRIM(COALESCE(present_country,''))     <> ''
+         AND TRIM(COALESCE(present_state_ut,''))    <> ''
+         AND TRIM(COALESCE(present_district,''))    <> ''
     );
 
 
@@ -159,6 +178,7 @@ SELECT indexname
         'idx_geo_reference_state_trgm',
         'idx_geo_reference_district_trgm',
         'idx_geo_reference_subdistrict_trgm',
+        'idx_geo_reference_village_trgm',
         'idx_geo_countries_country_trgm',
         'idx_geo_countries_state_trgm',
         'idx_geo_reference_state_lower',
@@ -185,12 +205,27 @@ SELECT COUNT(*) AS pending_rows
        OR TRIM(COALESCE(present_locality_village,''))     <> ''
        OR TRIM(COALESCE(permanent_landmark_milestone,'')) <> ''
        OR TRIM(COALESCE(present_landmark_milestone,''))   <> ''
-       OR TRIM(COALESCE(nationality,''))                  <> ''
+             OR TRIM(COALESCE(permanent_ward_colony,''))        <> ''
+             OR TRIM(COALESCE(present_ward_colony,''))          <> ''
+             OR TRIM(COALESCE(permanent_street_road_no,''))     <> ''
+             OR TRIM(COALESCE(present_street_road_no,''))       <> ''
+             OR TRIM(COALESCE(permanent_pin_code,''))           <> ''
+             OR TRIM(COALESCE(present_pin_code,''))             <> ''
+             OR (
+                         TRIM(COALESCE(nationality,'')) <> ''
+                 AND (
+                                TRIM(COALESCE(permanent_country,'')) = ''
+                         OR TRIM(COALESCE(present_country,''))   = ''
+                 )
+             )
    )
    AND NOT (
            TRIM(COALESCE(permanent_country,''))   <> ''
        AND TRIM(COALESCE(permanent_state_ut,''))  <> ''
        AND TRIM(COALESCE(permanent_district,''))  <> ''
+       AND TRIM(COALESCE(present_country,''))     <> ''
+       AND TRIM(COALESCE(present_state_ut,''))    <> ''
+       AND TRIM(COALESCE(present_district,''))    <> ''
    );
 
 -- =====================================================================

@@ -24,24 +24,56 @@ def apply_resolution(
 
     sql = f"""
         UPDATE {table} SET
-            permanent_country     = COALESCE(%(p_country)s,  permanent_country),
-            permanent_state_ut    = COALESCE(%(p_state)s,    permanent_state_ut),
-            permanent_district    = COALESCE(%(p_district)s, permanent_district),
-            permanent_area_mandal = COALESCE(%(p_mandal)s,   permanent_area_mandal),
-            present_country       = COALESCE(%(r_country)s,  present_country),
-            present_state_ut      = COALESCE(%(r_state)s,    present_state_ut),
-            present_district      = COALESCE(%(r_district)s, present_district),
-            present_area_mandal   = COALESCE(%(r_mandal)s,   present_area_mandal)
+            permanent_country = CASE
+                WHEN NULLIF(BTRIM(permanent_country), '') IS NULL
+                    THEN COALESCE(%(p_country)s, permanent_country)
+                ELSE permanent_country
+            END,
+            permanent_state_ut = CASE
+                WHEN NULLIF(BTRIM(permanent_state_ut), '') IS NULL
+                    THEN COALESCE(%(p_state)s, permanent_state_ut)
+                ELSE permanent_state_ut
+            END,
+            permanent_district = CASE
+                WHEN NULLIF(BTRIM(permanent_district), '') IS NULL
+                    THEN COALESCE(%(p_district)s, permanent_district)
+                ELSE permanent_district
+            END,
+            permanent_area_mandal = CASE
+                WHEN NULLIF(BTRIM(permanent_area_mandal), '') IS NULL
+                    THEN COALESCE(%(p_mandal)s, permanent_area_mandal)
+                ELSE permanent_area_mandal
+            END,
+            present_country = CASE
+                WHEN NULLIF(BTRIM(present_country), '') IS NULL
+                    THEN COALESCE(%(r_country)s, present_country)
+                ELSE present_country
+            END,
+            present_state_ut = CASE
+                WHEN NULLIF(BTRIM(present_state_ut), '') IS NULL
+                    THEN COALESCE(%(r_state)s, present_state_ut)
+                ELSE present_state_ut
+            END,
+            present_district = CASE
+                WHEN NULLIF(BTRIM(present_district), '') IS NULL
+                    THEN COALESCE(%(r_district)s, present_district)
+                ELSE present_district
+            END,
+            present_area_mandal = CASE
+                WHEN NULLIF(BTRIM(present_area_mandal), '') IS NULL
+                    THEN COALESCE(%(r_mandal)s, present_area_mandal)
+                ELSE present_area_mandal
+            END
         WHERE {id_col}::text = %(pid)s
           AND (
-               permanent_country     IS DISTINCT FROM COALESCE(%(p_country)s,  permanent_country)
-            OR permanent_state_ut    IS DISTINCT FROM COALESCE(%(p_state)s,    permanent_state_ut)
-            OR permanent_district    IS DISTINCT FROM COALESCE(%(p_district)s, permanent_district)
-            OR permanent_area_mandal IS DISTINCT FROM COALESCE(%(p_mandal)s,   permanent_area_mandal)
-            OR present_country       IS DISTINCT FROM COALESCE(%(r_country)s,  present_country)
-            OR present_state_ut      IS DISTINCT FROM COALESCE(%(r_state)s,    present_state_ut)
-            OR present_district      IS DISTINCT FROM COALESCE(%(r_district)s, present_district)
-            OR present_area_mandal   IS DISTINCT FROM COALESCE(%(r_mandal)s,   present_area_mandal)
+               (NULLIF(BTRIM(permanent_country), '') IS NULL AND %(p_country)s IS NOT NULL)
+            OR (NULLIF(BTRIM(permanent_state_ut), '') IS NULL AND %(p_state)s IS NOT NULL)
+            OR (NULLIF(BTRIM(permanent_district), '') IS NULL AND %(p_district)s IS NOT NULL)
+            OR (NULLIF(BTRIM(permanent_area_mandal), '') IS NULL AND %(p_mandal)s IS NOT NULL)
+            OR (NULLIF(BTRIM(present_country), '') IS NULL AND %(r_country)s IS NOT NULL)
+            OR (NULLIF(BTRIM(present_state_ut), '') IS NULL AND %(r_state)s IS NOT NULL)
+            OR (NULLIF(BTRIM(present_district), '') IS NULL AND %(r_district)s IS NOT NULL)
+            OR (NULLIF(BTRIM(present_area_mandal), '') IS NULL AND %(r_mandal)s IS NOT NULL)
           )
     """
 

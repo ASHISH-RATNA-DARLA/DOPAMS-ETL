@@ -23,6 +23,8 @@ class GeoKB:
         self.district_canon: Dict[Tuple[str, str], str] = {}   # (state_lower, district_lower) -> canonical
         self.mandals_by_district: Dict[Tuple[str, str], Set[str]] = {}
         self.mandal_canon: Dict[Tuple[str, str, str], str] = {}  # (state_l, district_l, mandal_l) -> canonical
+        self.villages_by_district: Dict[Tuple[str, str], Set[str]] = {}
+        self.village_canon: Dict[Tuple[str, str, str], str] = {}
         self.countries: Set[str] = set()
         self.country_canon: Dict[str, str] = {}
         self.state_to_country: Dict[str, str] = {}       # state_lower -> country (for foreign)
@@ -61,11 +63,12 @@ class GeoKB:
                     SELECT DISTINCT
                         TRIM(state_name),
                         TRIM(district_name),
-                        TRIM(COALESCE(sub_district_name,''))
+                        TRIM(COALESCE(sub_district_name,'')),
+                        TRIM(COALESCE(village_name_english,''))
                     FROM geo_reference
                     WHERE state_name IS NOT NULL
                 """)
-                for state, district, mandal in cur.fetchall():
+                for state, district, mandal, village in cur.fetchall():
                     if not state:
                         continue
                     sl = state.lower()
@@ -81,6 +84,11 @@ class GeoKB:
                             ml = mandal.lower()
                             self.mandals_by_district.setdefault((sl, dl), set()).add(mandal)
                             self.mandal_canon.setdefault((sl, dl, ml), mandal)
+
+                        if village:
+                            vl = village.lower()
+                            self.villages_by_district.setdefault((sl, dl), set()).add(village)
+                            self.village_canon.setdefault((sl, dl, vl), village)
 
     def _load_geo_countries(self, pool) -> None:
         with pool.get_connection_context() as conn:
@@ -123,6 +131,13 @@ class GeoKB:
             return None
         return self.mandal_canon.get((state.lower(), district.lower(), mandal.lower()))
 
+    def canon_village(
+        self, state: Optional[str], district: Optional[str], village: Optional[str]
+    ) -> Optional[str]:
+        if not state or not district or not village:
+            return None
+        return self.village_canon.get((state.lower(), district.lower(), village.lower()))
+
     def canon_country(self, name: Optional[str]) -> Optional[str]:
         if not name:
             return None
@@ -147,3 +162,8 @@ class GeoKB:
         if not state or not district:
             return set()
         return self.mandals_by_district.get((state.lower(), district.lower()), set())
+
+    def villages_in_district(self, state: Optional[str], district: Optional[str]) -> Set[str]:
+        if not state or not district:
+            return set()
+        return self.villages_by_district.get((state.lower(), district.lower()), set())

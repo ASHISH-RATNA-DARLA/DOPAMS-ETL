@@ -11,10 +11,16 @@ class PersonRow:
     perm_district: Optional[str]
     perm_mandal: Optional[str]
     perm_country: Optional[str]
+    perm_ward: Optional[str]
+    perm_street: Optional[str]
+    perm_pin: Optional[str]
     pres_state: Optional[str]
     pres_district: Optional[str]
     pres_mandal: Optional[str]
     pres_country: Optional[str]
+    pres_ward: Optional[str]
+    pres_street: Optional[str]
+    pres_pin: Optional[str]
     perm_locality: Optional[str]
     perm_landmark: Optional[str]
     pres_locality: Optional[str]
@@ -28,6 +34,9 @@ class AddressCandidate:
     raw_district: Optional[str] = None
     raw_mandal: Optional[str] = None
     raw_country: Optional[str] = None
+    raw_ward: Optional[str] = None
+    raw_street: Optional[str] = None
+    raw_pin: Optional[str] = None
     raw_locality: Optional[str] = None
     raw_landmark: Optional[str] = None
     raw_nationality: Optional[str] = None
@@ -36,18 +45,27 @@ class AddressCandidate:
     district: Optional[str] = None
     mandal: Optional[str] = None
     country: Optional[str] = None
+    ward: Optional[str] = None
+    street: Optional[str] = None
+    pin: Optional[str] = None
     locality: Optional[str] = None
     landmark: Optional[str] = None
     nationality: Optional[str] = None
     # bookkeeping
     slot: str = "permanent"  # "permanent" | "present"
+    enriched_locality_hit: bool = False
 
     @property
     def has_any_signal(self) -> bool:
         return any([
             self.state, self.district, self.mandal, self.country,
-            self.locality, self.landmark, self.nationality,
+            self.ward, self.street, self.pin, self.locality,
+            self.landmark, self.nationality,
         ])
+
+    @property
+    def is_fully_resolvable(self) -> bool:
+        return bool(self.state and self.district and self.mandal and self.country)
 
 
 @dataclass

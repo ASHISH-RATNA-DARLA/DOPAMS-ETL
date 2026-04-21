@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import Optional
 
@@ -37,3 +36,29 @@ def clear_failure(pool, person_id: str) -> None:
         with conn.cursor() as cur:
             cur.execute(sql, (person_id,))
         conn.commit()
+
+
+def clear_failures_by_reason(pool, reason: str) -> int:
+    sql = "DELETE FROM etl_address_failures WHERE reason = %s"
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (reason,))
+            rowcount = cur.rowcount
+        conn.commit()
+    return rowcount
+
+
+def clear_stale_failures(pool, stale_days: int) -> int:
+    if stale_days <= 0:
+        return 0
+
+    sql = """
+        DELETE FROM etl_address_failures
+         WHERE last_try < now() - (%s * INTERVAL '1 day')
+    """
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (stale_days,))
+            rowcount = cur.rowcount
+        conn.commit()
+    return rowcount
