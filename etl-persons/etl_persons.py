@@ -1123,7 +1123,7 @@ class PersonsETL:
 
         return corrected
 
-
+    def get_last_processed_date(self) -> Optional[datetime]:
         """
         Get the last processed date from persons table.
         Returns max(date_created, date_modified) or None if table is empty.
