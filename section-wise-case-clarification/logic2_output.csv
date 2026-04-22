@@ -1,5 +1,4 @@
 crime_id,entities,entity_count,class_classification
-680886204cef0e2efd1f7bcc,"8c, 20biia, 20, 27b, 27",5,Small
 68089e176c09314dea8fb3b8,"8c, 20biia, 20, 27b, 27",5,Small
 6808b842b5db4a83ea84a818,"8c, 20biia, 20, 27b, 27",5,Small
 6808ba504cef0e2b3c304399,"8c, 20biia, 20",3,Small
@@ -79,7 +78,7 @@ crime_id,entities,entity_count,class_classification
 68144f93b006f901bf6d1b77,"8c, 20biia, 20, 27b, 27",5,Small
 681477902b206a044bdd9f7e,"20biib, 20, 106",3,Intermediate
 6814adc5bf5809594fe2bc0d,"8c, 20biia, 20",3,Small
-6814d95be7ba36285b1eedcf,"8c, 20biic, 20, 29",4,Commercial
+6814d95be7ba36285b1eedcf,"8c, 20biic, 20, 29, 8b, 8, 20ai",7,Cultivation
 681501756b5cd8164f07e206,"8c, 20biia, 20, 27b, 27",5,Small
 6815090583ecc77cce1ed3aa,"8c, 20biia, 20, 29",4,Small
 68151a23484029c405120ca5,"8c, 20biib, 20",3,Intermediate
@@ -1314,7 +1313,7 @@ crime_id,entities,entity_count,class_classification
 68dea67ff6711b25f2cf0fc6,"20biia, 20, 27b, 27",4,Small
 68dfc66e683a08656f3724e7,"8c, 20biia, 20",3,Small
 68dff3f2683a087a783ae515,"8c, 20biib, 20",3,Intermediate
-68dfff3c68465841562d036e,"8c, 20biib, 20, 29",4,Intermediate
+68dfff3c68465841562d036e,"20biib, 20",2,Intermediate
 68e02a6f683a086dcb3ca8e6,"8b, 8, 20ai, 20",4,Cultivation
 68e04566df15552480d3ad20,"20biia, 20",2,Small
 68e06789df155587fcd6dc4d,"8c, 20biia, 20, 27b, 27",5,Small
@@ -2680,14 +2679,22 @@ crime_id,entities,entity_count,class_classification
 69de384c399f380b80fe3af6,27,1,Small
 69de41f6a8881ac6dba165ab,"27b, 27",2,Small
 69de4e00b854728385f82953,"20biia, 20, 27, 29",4,Small
-69de57ae10ec725000f3cb14,"8c, 20biib, 20, 29",4,Intermediate
+69de57ae10ec725000f3cb14,"8c, 20biia, 20, 29",4,Small
 69de57be3e2d5252b64c9ffd,"27b, 27",2,Small
 69de75fcafbfd578faa9df0f,"20biia, 20, 8c, 27",4,Small
 69de81572ac0891efd8f7050,"8c, 20biia, 20",3,Small
 69de83e210ec72b804f54f18,"8c, 20biib, 20",3,Intermediate
 69de96faa8881af8dfa51598,"27b, 27",2,Small
 69de9e2fad6ddb42d1b273b4,"20biia, 20, 27, 8c",4,Small
+69df1a653e2d526471537682,"8c, 20biia, 20, 27b, 27",5,Small
+69df2b239200959a9d126564,27,1,Small
 69df457a12a8aacb022c8e17,"8c, 20biib, 20, 27a, 27",5,Intermediate
+69df686f2ac0899c62a96942,"8c, 27b, 27",3,Small
+69df77c0b85472324f1ef2b1,"8c, 20ai, 20, 27b, 27",5,Cultivation
+69df8c022ac0897457af7522,"8c, 27b, 27",3,Small
+69dfa401b85472559d2667eb,"8c, 27b, 27",3,Small
+69dfa94ebf9ddd05bdc0f509,"8c, 20biia, 20, 27b, 27",5,Small
+69dfb1d8ad6ddb3ccfdc77a2,"8c, 20biib, 20, 27",4,Intermediate
 69dfca432ac0893c3db2a3a3,"8c, 20biia, 20, 27b, 27",5,Small
 69dfd6abad6ddb998fdd8ed5,"20biia, 20",2,Small
 69e039a5bf9ddd04c2c70444,"8c, 17b, 17, 29",4,Intermediate
@@ -2723,6 +2730,16 @@ crime_id,entities,entity_count,class_classification
 69e39be7115bc32f873bbc63,"8c, 20biia, 20, 27b, 27",5,Small
 69e3d4caa72b686060aa43ff,"20biia, 20",2,Small
 69e3dddfa72b68114daa751c,"27a, 27, 8c",3,Small
+69e436af9d8b16190b375563,"20biia, 20, 27b, 27",4,Small
+69e442c34be50e808a7ec6cb,"8c, 20biia, 20",3,Small
+69e469a93bc8c979f97acf38,"8c, 20biia, 20",3,Small
+69e4731d80aaec5babeeea5f,"8c, 20biia, 20",3,Small
+69e4adeb115bc3419b4b7c8b,27,1,Small
+69e4f0938c133e6e6bba8b81,"20biia, 20",2,Small
+69e4f28d9f8dba84405d793a,"8c, 20biia, 20, 27b, 27",5,Small
+69e4fc104be50eb9aa8d3dc3,"8c, 27b, 27",3,Small
+69e4fc8a5910a7100af9a55b,"8c, 20biia, 20, 27b, 27",5,Small
+69e5342d115bc3161652d3a5,"8c, 27, 61b, 61",4,Intermediate
 629f70c6699c333d21fbaa5d,"20biic, 20, 8c",3,Commercial
 62a006d9e32fb48e4b9f288e,"22b, 22",2,Intermediate
 62a0b38fe32fb443129faa96,"8c, 20biia, 20",3,Small
@@ -4495,7 +4512,6 @@ crime_id,entities,entity_count,class_classification
 6553b4123193bdf418b73c84,"272, 34a, 34, 8c, 22a, 22",6,Small
 6553bb6b6591375e9ebaea0d,"272, 37a, 37, 8c, 21b, 21",6,Intermediate
 6553ca25f0ce380708572a07,"8c, 22b, 22",3,Intermediate
-65541a2d3f00b429a94eef04,"272, 37a, 37, 8c, 20bc, 20",6,Commercial
 6554a037b2948ef7216ba8bc,"8c, 20biib, 20",3,Intermediate
 6554e9b13f00b456e5558bec,"272, 37a, 37, 8c, 22b, 22",6,Intermediate
 6554edad0bf132b7efb6b0cc,"272, 37a, 37, 8c, 22a, 22",6,Small
@@ -7723,3 +7739,4 @@ crime_id,entities,entity_count,class_classification
 6807eb8ccfee6d68e89669cf,"8c, 20biia, 20, 27a, 27",5,Small
 68080a1cb5db4a323564ee0a,"8c, 20biia, 20, 27b, 27",5,Small
 6808396721bcf8bcfbf9ec8a,"8c, 20biia, 20, 27b, 27",5,Small
+680886204cef0e2efd1f7bcc,"8c, 20biia, 20, 27b, 27",5,Small

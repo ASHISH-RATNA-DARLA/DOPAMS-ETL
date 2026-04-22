@@ -57,10 +57,24 @@ LOG_CONFIG = {
 
 # Person gender standardization/inference rollout controls.
 PERSON_GENDER_CONFIG = {
-    'infer_on_unknown': get_bool_env('PERSON_GENDER_INFER_ON_UNKNOWN', False),
-    'inference_threshold': float(resolve_api_base_url('PERSON_GENDER_INFERENCE_THRESHOLD', default='0.8') or '0.8'),
+    'infer_on_unknown': get_bool_env('PERSON_GENDER_INFER_ON_UNKNOWN', True),
     'dry_run': get_bool_env('PERSON_GENDER_DRY_RUN', False),
     'preserve_valid_api': get_bool_env('PERSON_GENDER_PRESERVE_VALID_API', True),
+    # Minimum qualifying confidence per inference pass.
+    # Each pass must meet its own threshold; if it fails the next pass is tried.
+    'threshold_prefix':  float(resolve_api_base_url('GENDER_THRESHOLD_PREFIX',  default='0.85') or '0.85'),
+    'threshold_rule':    float(resolve_api_base_url('GENDER_THRESHOLD_RULE',    default='0.80') or '0.80'),
+    'threshold_suffix':  float(resolve_api_base_url('GENDER_THRESHOLD_SUFFIX',  default='0.65') or '0.65'),
+    'threshold_llm':     float(resolve_api_base_url('GENDER_THRESHOLD_LLM',     default='0.70') or '0.70'),
+}
+
+# LLM fallback for gender inference (Ollama-based, fires only when rule-based engine returns Unknown).
+PERSON_GENDER_LLM_CONFIG = {
+    'enabled': get_bool_env('PERSON_GENDER_LLM_ENABLED', True),
+    'url': resolve_api_base_url('LLM_API_URL', default='http://192.168.103.106:11434'),
+    'model': resolve_api_base_url('LLM_MODEL_CLASSIFICATION', default='llama3.1:8b'),
+    'timeout': get_int_env('ADDRESS_LLM_TIMEOUT', 20),
+    'batch_size': get_int_env('PERSON_GENDER_LLM_BATCH_SIZE', 20),
 }
 
 

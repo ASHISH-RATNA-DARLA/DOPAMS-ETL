@@ -23,7 +23,7 @@ from typing import Dict, Optional, List, Set, Tuple, Any
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 
-from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDER_CONFIG
+from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDER_CONFIG, PERSON_GENDER_LLM_CONFIG
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -68,10 +68,21 @@ logger.setLevel(LOG_CONFIG['level'])
 class PersonsETL:
     def __init__(self):
         self.db_pool = None
-        self.person_gender_infer_on_unknown = bool(PERSON_GENDER_CONFIG.get('infer_on_unknown', False))
-        self.person_gender_inference_threshold = float(PERSON_GENDER_CONFIG.get('inference_threshold', 0.8))
+        self.person_gender_infer_on_unknown = bool(PERSON_GENDER_CONFIG.get('infer_on_unknown', True))
         self.person_gender_dry_run = bool(PERSON_GENDER_CONFIG.get('dry_run', False))
         self.person_gender_preserve_valid_api = bool(PERSON_GENDER_CONFIG.get('preserve_valid_api', True))
+        # Per-pass minimum qualifying confidence — a pass must meet its own bar
+        # or the cascade continues to the next pass.
+        self.threshold_prefix = float(PERSON_GENDER_CONFIG.get('threshold_prefix', 0.85))
+        self.threshold_rule   = float(PERSON_GENDER_CONFIG.get('threshold_rule',   0.80))
+        self.threshold_suffix = float(PERSON_GENDER_CONFIG.get('threshold_suffix', 0.65))
+        self.threshold_llm    = float(PERSON_GENDER_CONFIG.get('threshold_llm',    0.70))
+        self.llm_gender_enabled = bool(PERSON_GENDER_LLM_CONFIG.get('enabled', True))
+        self.llm_gender_url = str(PERSON_GENDER_LLM_CONFIG.get('url', 'http://192.168.103.106:11434')).rstrip('/')
+        self.llm_gender_model = str(PERSON_GENDER_LLM_CONFIG.get('model', 'llama3.1:8b'))
+        self.llm_gender_timeout = int(PERSON_GENDER_LLM_CONFIG.get('timeout', 20))
+        self.llm_gender_batch_size = int(PERSON_GENDER_LLM_CONFIG.get('batch_size', 20))
+        self._llm_gender_cache: Dict[str, Tuple[str, float]] = {}
         self.stats = {
             'person_ids': 0,
             'api_calls': 0,
@@ -196,6 +207,8 @@ class PersonsETL:
             'rajashekar': 'Male', 'rajashekhar': 'Male', 'ramulu': 'Male',
             'tuntun': 'Male', 'abilash': 'Male', 'hemanth': 'Male', 'hemant': 'Male',
             'vamshi': 'Male', 'nitish': 'Male', 'pawan': 'Male', 'aman': 'Male',
+            # --- Muslim/Urdu male names (additional) ---
+            'abbu': 'Male',
             # --- Female Indian names ---
             'sita': 'Female', 'laxmi': 'Female', 'lakshmi': 'Female', 'kavitha': 'Female',
             'kavita': 'Female', 'sunita': 'Female', 'anjali': 'Female', 'pooja': 'Female',
@@ -266,54 +279,30 @@ class PersonsETL:
 
     def _build_inference_name(self, personal: Dict) -> Optional[str]:
         """
-        Build the richest possible name string for gender inference.
+        Return the best single name string for gender inference.
 
-        The DB stores full_name = FULL_NAME (or NAME+SURNAME fallback), but
-        FULL_NAME alone is often just a bare given name or surname from the API,
-        making inference unreliable.  This method assembles every useful name
-        field — FULL_NAME, NAME, SURNAME, ALIAS — into a single de-duplicated
-        string so the inference engine sees the most complete picture, e.g.:
+        Uses FULL_NAME as the canonical, complete source.  Falls back to NAME
+        only when FULL_NAME is absent.
 
-            API: FULL_NAME="Ravela", NAME="Ravela", SURNAME="", ALIAS=""
-            DB full_name = "Ravela"          ← only surname, triggers -a → Female
-
-            API: FULL_NAME="Ravela Sanjay Kumar", NAME="Ravela", SURNAME="", ...
-            inference_name = "Ravela Sanjay Kumar"  ← Kumar/Sanjay → Male ✅
+        We deliberately do NOT concatenate NAME + SURNAME because treating a
+        surname as if it were a given name is the primary source of false-gender
+        assignments (e.g. NAME="Ravela" + SURNAME="Sanjay Kumar" should infer
+        from the full string "Ravela Sanjay Kumar", not a fabricated concatenation
+        that might put the surname first).
 
         Does NOT affect what is written to the DB — only used as input to
         _resolve_gender().
         """
-        parts: List[str] = []
-        seen_tokens: Set[str] = set()
-
-        def add(value: Optional[Any]) -> None:
-            if not value:
-                return
-            text = self._normalize_space(str(value).strip())
-            if not text:
-                return
-            # Strip alias markers like "@DJ Rahul" — keep real name segments only
-            segments = [seg.strip() for seg in re.split(r'@', text) if seg.strip()]
-            for seg in segments:
-                low = seg.lower()
-                if low and low not in seen_tokens:
-                    seen_tokens.add(low)
-                    parts.append(seg)
-
-        # Priority order: FULL_NAME first (most complete), then NAME, SURNAME, ALIAS
-        add(personal.get('FULL_NAME'))
-        add(personal.get('NAME'))
-        add(personal.get('SURNAME'))
-        # Include alias but only the non-@ real-name portion (add() already strips @)
-        add(personal.get('ALIAS'))
-
-        if not parts:
-            return None
-
-        # Join unique segments; the resulting string preserves "Ravela Sanjay Kumar"
-        # even when NAME="Ravela" and FULL_NAME="Ravela Sanjay Kumar" (deduped)
-        combined = ' '.join(parts)
-        return self._normalize_space(combined) or None
+        for field in ('FULL_NAME', 'NAME'):
+            raw = personal.get(field)
+            if not raw:
+                continue
+            text = self._normalize_space(str(raw).strip())
+            # Strip alias markers like "@DJ Rahul"
+            text = self._normalize_space(re.split(r'@', text)[0].strip())
+            if text:
+                return text
+        return None
 
     def _is_valid_person_name(self, clean_name: Optional[str]) -> bool:
         if clean_name is None:
@@ -353,69 +342,234 @@ class PersonsETL:
             return mapped
         return None
 
-    def _infer_gender_from_name(self, clean_name: Optional[str]) -> Tuple[Optional[str], float, str]:
+    def _load_learned_gender_rules(self) -> None:
         """
-        Infer gender from a person name using a multi-stage strategy:
+        Mine the persons table for rows where the API provided a validated gender
+        (Male or Female, gender_source='api') and extend the static rule_map and
+        male_prefix_tokens with patterns observed in those full_name values.
 
-        Stage 1 — male prefix/honorific detection (highest priority).
-            Tokens like 'mirza', 'syed', 'md' short-circuit to Male immediately.
-
-        Stage 2 — rule_map lookup on EVERY meaningful token (not just tokens[0]).
-            South Indian names follow Surname GivenName order, so we check all
-            tokens and prefer the last one (given name) over earlier tokens
-            (surname/clan prefix).  First unambiguous rule_map hit wins.
-
-        Stage 3 — suffix heuristic on the LAST token only, with suppression for
-            known neutral Telugu/Kannada surname suffixes and a reduced confidence
-            of 0.65 (below the default threshold of 0.8) so suffix-only guesses
-            do not commit unless the caller lowers the threshold explicitly.
-
-        Returns (gender | None, confidence 0.0-1.0, source label).
+        Design rules:
+        • Only 'Male' / 'Female' are learned — Transgender is intentionally excluded
+          because it cannot be reliably inferred from name tokens alone.
+        • Learned entries AUGMENT the static maps; they never override existing entries.
+        • A token is added to rule_map only when it appears in ≥ MIN_COUNT names AND
+          ≥ MIN_CONFIDENCE fraction of those names share the same gender.
+        • A token is added to male_prefix_tokens (first-position only) with a stricter
+          threshold of 0.95.
+        • Uses full_name exclusively — no NAME/SURNAME concatenation.
         """
+        min_count = int(os.environ.get('GENDER_LEARN_MIN_COUNT', '3'))
+        min_conf = float(os.environ.get('GENDER_LEARN_MIN_CONFIDENCE', '0.90'))
+        prefix_min_conf = 0.95
+
+        try:
+            with self.db_pool.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    SELECT full_name, gender
+                    FROM {PERSONS_TABLE}
+                    WHERE gender IN ('Male', 'Female')
+                      AND gender_source = 'api'
+                      AND full_name IS NOT NULL
+                      AND TRIM(full_name) != ''
+                """)
+                rows = cursor.fetchall()
+        except Exception as exc:
+            logger.warning(f'⚠️  Could not load learned gender rules from DB: {exc}')
+            return
+
+        logger.info(f'🎓 Learning name patterns from {len(rows)} API-validated records …')
+
+        # token → {'Male': N, 'Female': N}
+        token_counts: Dict[str, Dict[str, int]] = {}
+        # first-position token → {'Male': N, 'Female': N}
+        first_token_counts: Dict[str, Dict[str, int]] = {}
+
+        for full_name, gender in rows:
+            tokens = self._tokenize_name_for_inference(full_name)
+            if not tokens:
+                continue
+            first_token_counts.setdefault(tokens[0], {'Male': 0, 'Female': 0})
+            first_token_counts[tokens[0]][gender] = first_token_counts[tokens[0]].get(gender, 0) + 1
+            for token in tokens:
+                token_counts.setdefault(token, {'Male': 0, 'Female': 0})
+                token_counts[token][gender] = token_counts[token].get(gender, 0) + 1
+
+        new_rules = new_prefixes = 0
+
+        for token, counts in token_counts.items():
+            if token in self.name_gender_rule_map:
+                continue  # static rule wins
+            total = counts.get('Male', 0) + counts.get('Female', 0)
+            if total < min_count:
+                continue
+            for gender_label in ('Male', 'Female'):
+                if counts.get(gender_label, 0) / total >= min_conf:
+                    self.name_gender_rule_map[token] = gender_label
+                    new_rules += 1
+                    break
+
+        for token, counts in first_token_counts.items():
+            if token in self.male_prefix_tokens:
+                continue  # static prefix wins
+            if token in self.name_gender_rule_map:
+                continue  # already covered by rule_map
+            total = counts.get('Male', 0) + counts.get('Female', 0)
+            if total < min_count:
+                continue
+            if counts.get('Male', 0) / total >= prefix_min_conf:
+                self.male_prefix_tokens.add(token)
+                new_prefixes += 1
+
+        logger.info(
+            f'   ✅ Learned {new_rules} rule-map entries, {new_prefixes} prefix tokens '
+            f'from {len(rows)} API records (min_count={min_count}, min_conf={min_conf:.0%})'
+        )
+
+    def _tokenize_name_for_inference(self, clean_name: Optional[str]) -> List[str]:
+        """Tokenize a name string into lowercase alpha tokens (len > 1), stripping alias markers."""
         if not clean_name:
-            return None, 0.0, 'heuristic'
-
-        # Strip alias markers like "@DJ Rahul", keep only real name parts
+            return []
         name_part = re.split(r'@', clean_name)[0].strip()
-        tokens = [t for t in re.findall(r"[A-Za-z]+", name_part.lower()) if len(t) > 1]
-        if not tokens:
-            return None, 0.0, 'heuristic'
+        return [t for t in re.findall(r'[A-Za-z]+', name_part.lower()) if len(t) > 1]
 
-        # ── Stage 1: male honorific / prefix detection ──────────────────────────
+    # ── Pass 1: Male honorific / prefix detection ────────────────────────────────
+    # Confidence: 0.95  |  Min qualifying: threshold_prefix (default 0.85)
+    def _infer_pass_prefix(self, tokens: List[str]) -> Tuple[Optional[str], float, str]:
+        """Return Male at 0.95 if any token is a recognised male honorific prefix."""
         for token in tokens:
             if token in self.male_prefix_tokens:
                 return 'Male', 0.95, 'prefix'
+        return None, 0.0, 'prefix'
 
-        # ── Stage 2: rule_map lookup — prefer last token (given name) ───────────
-        # Scan from the last token backwards so the given name wins over surnames.
+    # ── Pass 2: Rule-map lookup ───────────────────────────────────────────────────
+    # Confidence: 0.90  |  Min qualifying: threshold_rule (default 0.80)
+    def _infer_pass_rule(self, tokens: List[str]) -> Tuple[Optional[str], float, str]:
+        """
+        Scan tokens in reverse (given-name-last order for South Indian names).
+        Returns the first unambiguous rule_map hit.
+        """
         for token in reversed(tokens):
             match = self.name_gender_rule_map.get(token)
             if match:
-                return match, 0.9, 'rule'
+                return match, 0.90, 'rule'
+        return None, 0.0, 'rule'
 
-        # ── Stage 3: suffix heuristic — LAST token only, suppressed for surnames ─
+    # ── Pass 3: Suffix heuristic ─────────────────────────────────────────────────
+    # Confidence: 0.65  |  Min qualifying: threshold_suffix (default 0.65)
+    def _infer_pass_suffix(self, tokens: List[str]) -> Tuple[Optional[str], float, str]:
+        """
+        Check the last token against known gender-indicating suffixes.
+        Suppressed for neutral South Indian surname suffixes (Reddy, Raju, etc.)
+        to reduce false positives.
+        """
+        if not tokens:
+            return None, 0.0, 'heuristic'
         last = tokens[-1]
-
-        # Suppress if last token looks like a neutral South Indian surname suffix
         if any(last.endswith(sfx) for sfx in self.neutral_surname_suffixes):
             return None, 0.0, 'heuristic'
-
-        # Male-specific suffixes (stronger signal)
         male_suffixes = ('esh', 'endra', 'kumar', 'raj', 'veer', 'wanth', 'kanth',
                          'nath', 'deep', 'jeet', 'preet', 'arth')
         if last.endswith(male_suffixes):
             return 'Male', 0.65, 'heuristic'
-
-        # Female suffixes — reduced confidence to avoid false positives on surnames
         female_suffixes = ('ya', 'ika', 'itha', 'ita', 'ini', 'avani', 'avathi',
-                           'avani', 'aveni', 'rani', 'devi', 'veni', 'vathi')
+                           'aveni', 'rani', 'devi', 'veni', 'vathi')
         if last.endswith(female_suffixes):
             return 'Female', 0.65, 'heuristic'
-
-        # Broad single-character suffix (-a, -i): only fire if first token is
-        # also a rule_map hit or a prefix, to reduce false positives on surnames.
-        # Standalone broad suffix is too unreliable — return no inference.
         return None, 0.0, 'heuristic'
+
+    def _infer_gender_from_name(self, clean_name: Optional[str]) -> Tuple[Optional[str], float, str]:
+        """
+        Convenience wrapper — runs all 3 rule-based passes in order and returns
+        the first non-None result.  Callers that need threshold-gated cascading
+        should call _resolve_gender instead.
+        """
+        tokens = self._tokenize_name_for_inference(clean_name)
+        if not tokens:
+            return None, 0.0, 'heuristic'
+        for pass_fn in (self._infer_pass_prefix, self._infer_pass_rule, self._infer_pass_suffix):
+            gender, conf, source = pass_fn(tokens)
+            if gender:
+                return gender, conf, source
+        return None, 0.0, 'heuristic'
+
+    def _infer_gender_llm_batch(self, names: List[str]) -> Dict[str, Tuple[str, float]]:
+        """
+        Call Ollama LLM to infer gender for a batch of Indian person names.
+        Used only when rule-based inference returns Unknown with confidence=0.
+        Returns {name: (gender, confidence)} — missing entries mean LLM also failed.
+        Results are cached to avoid duplicate API calls within a run.
+        """
+        if not self.llm_gender_enabled or not names:
+            return {}
+
+        uncached = [n for n in names if n not in self._llm_gender_cache]
+        if not uncached:
+            return {n: self._llm_gender_cache[n] for n in names if n in self._llm_gender_cache}
+
+        numbered = '\n'.join(f'{i+1}. {name}' for i, name in enumerate(uncached))
+        prompt = (
+            'You classify gender of Indian person names (Telugu, Kannada, Hindi, Urdu, Muslim).\n'
+            'Rules: Shaik/Syed/Md/Mohammad/Khan/Mirza prefix → Male. '
+            '"Bai" alone is ambiguous — check full name context.\n'
+            'IMPORTANT: only return "Male" or "Female" or "Unknown". Never return "Transgender".\n'
+            'Return ONLY a valid JSON object with key "results" containing an array.\n'
+            'Each element: {"name": "<original>", "gender": "Male"|"Female"|"Unknown", "confidence": 0.0-1.0}\n\n'
+            f'Names:\n{numbered}\n\n'
+            f'Expected: {{"results": [{{"name": "{uncached[0]}", "gender": "Male", "confidence": 0.9}}, ...]}}\n\nJSON:'
+        )
+
+        try:
+            resp = requests.post(
+                f'{self.llm_gender_url}/api/generate',
+                json={
+                    'model': self.llm_gender_model,
+                    'prompt': prompt,
+                    'stream': False,
+                    'format': 'json',
+                    'options': {'temperature': 0.0, 'num_predict': 600},
+                },
+                timeout=self.llm_gender_timeout,
+            )
+            if resp.status_code != 200:
+                logger.warning(f'LLM gender inference: HTTP {resp.status_code}')
+                return {}
+
+            raw = resp.json().get('response', '')
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            # Unwrap {"results": [...]} or accept bare list
+            if isinstance(parsed, dict):
+                parsed = next((v for v in parsed.values() if isinstance(v, list)), [])
+            if not isinstance(parsed, list):
+                logger.warning('LLM gender inference: unexpected response format')
+                return {}
+
+            results: Dict[str, Tuple[str, float]] = {}
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get('name', '').strip()
+                gender = item.get('gender', 'Unknown')
+                confidence = min(1.0, float(item.get('confidence', 0.75)))
+                # Transgender is never inferred — API source only
+                if gender in ('Male', 'Female') and name:
+                    results[name] = (gender, confidence)
+                    self._llm_gender_cache[name] = (gender, confidence)
+
+            # Fuzzy match for names the model slightly reformatted
+            for orig in uncached:
+                if orig not in results:
+                    for k, v in results.items():
+                        if orig.lower().strip() == k.lower().strip():
+                            self._llm_gender_cache[orig] = v
+                            break
+
+            logger.debug(f'LLM gender: resolved {len(results)}/{len(uncached)} names')
+            return {n: self._llm_gender_cache[n] for n in names if n in self._llm_gender_cache}
+
+        except Exception as exc:
+            logger.warning(f'LLM gender inference failed: {exc}')
+            return {}
 
     def _normalize_phone_numbers(self, raw_phone: Any) -> List[str]:
         """Normalize phone payloads into a de-duplicated list preserving source order."""
@@ -457,43 +611,67 @@ class PersonsETL:
         return deduped
 
     def _resolve_gender(self, clean_name: Optional[str], api_gender_raw: Optional[str]) -> Tuple[str, float, str]:
-        normalized_api = self._normalize_api_gender(api_gender_raw)
+        """
+        Multi-pass gender resolution with per-pass minimum qualifying confidence (MQC).
 
-        # Source-priority protection: never override a valid API gender when enabled.
+        Cascade order:
+          Pass 0  API          — conf 1.0  — always accepted when valid
+          Pass 1  Prefix       — conf 0.95 — MQC: threshold_prefix  (default 0.85)
+          Pass 2  Rule-map     — conf 0.90 — MQC: threshold_rule    (default 0.80)
+          Pass 3  Suffix       — conf 0.65 — MQC: threshold_suffix  (default 0.65)
+          Pass 4  LLM          — conf varies — MQC: threshold_llm   (default 0.70)
+          Fallback → 'Unknown'
+
+        A pass is skipped entirely when its result is None OR its confidence falls
+        below the pass-specific MQC; control then falls to the next pass.
+        If every pass fails (or returns below its MQC), the result is 'Unknown'.
+        """
+        # ── Pass 0: API-provided gender ──────────────────────────────────────────
+        normalized_api = self._normalize_api_gender(api_gender_raw)
         if self.person_gender_preserve_valid_api and normalized_api in ('Male', 'Female', 'Transgender'):
             return normalized_api, 1.0, 'api'
 
-        is_name_valid = self._is_valid_person_name(clean_name)
-        if not is_name_valid:
+        if not self._is_valid_person_name(clean_name):
             return 'Unknown', 0.0, 'invalid_name'
 
         if normalized_api in ('Male', 'Female', 'Transgender'):
             return normalized_api, 1.0, 'api'
 
-        if normalized_api == 'Unknown':
-            if not self.person_gender_infer_on_unknown:
-                return 'Unknown', 1.0, 'api'
-            inferred_gender, confidence, source = self._infer_gender_from_name(clean_name)
-            # Suffix-only heuristics get a stricter threshold to prevent false positives.
-            effective_threshold = (
-                self.person_gender_inference_threshold
-                if source in ('rule', 'prefix', 'api')
-                else max(self.person_gender_inference_threshold, 0.75)
-            )
-            if inferred_gender and confidence >= effective_threshold:
-                return inferred_gender, confidence, source
-            return 'Unknown', confidence, source
+        # API is Unknown/null — skip inference passes if caller opted out
+        if normalized_api == 'Unknown' and not self.person_gender_infer_on_unknown:
+            return 'Unknown', 1.0, 'api'
 
-        # Invalid raw gender value from API.
-        inferred_gender, confidence, source = self._infer_gender_from_name(clean_name)
-        effective_threshold = (
-            self.person_gender_inference_threshold
-            if source in ('rule', 'prefix', 'api')
-            else max(self.person_gender_inference_threshold, 0.75)
-        )
-        if inferred_gender and confidence >= effective_threshold:
-            return inferred_gender, confidence, source
-        return 'Unknown', confidence, source
+        # ── Tokenise once for all rule-based passes ──────────────────────────────
+        tokens = self._tokenize_name_for_inference(clean_name)
+        if not tokens:
+            return 'Unknown', 0.0, 'invalid_name'
+
+        # ── Pass 1: Male honorific prefix ────────────────────────────────────────
+        gender, conf, source = self._infer_pass_prefix(tokens)
+        if gender and conf >= self.threshold_prefix:
+            return gender, conf, source
+
+        # ── Pass 2: Rule-map lookup ───────────────────────────────────────────────
+        gender, conf, source = self._infer_pass_rule(tokens)
+        if gender and conf >= self.threshold_rule:
+            return gender, conf, source
+
+        # ── Pass 3: Suffix heuristic ─────────────────────────────────────────────
+        gender, conf, source = self._infer_pass_suffix(tokens)
+        if gender and conf >= self.threshold_suffix:
+            return gender, conf, source
+
+        # ── Pass 4: LLM fallback ─────────────────────────────────────────────────
+        if self.llm_gender_enabled:
+            llm_result = self._infer_gender_llm_batch([clean_name])
+            if clean_name in llm_result:
+                llm_gender, llm_conf = llm_result[clean_name]
+                # Transgender is never assigned by inference — API source only.
+                if llm_gender in ('Male', 'Female') and llm_conf >= self.threshold_llm:
+                    return llm_gender, llm_conf, 'llm'
+
+        # ── All passes failed ────────────────────────────────────────────────────
+        return 'Unknown', 0.0, 'unknown'
 
     def connect_db(self):
         try:
@@ -1055,71 +1233,114 @@ class PersonsETL:
         if effective_dry_run:
             logger.warning("⚠️  Dry-run mode — no DB writes will be made")
 
-        with self.db_pool.get_connection_context() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT person_id, full_name, raw_full_name, name, surname, alias,
-                       gender, gender_confidence, gender_source
-                FROM {PERSONS_TABLE}
-                WHERE gender_source IN ('heuristic', 'rule', 'prefix')
-                  AND gender IN ('Male', 'Female', 'Transgender')
-            """)
-            rows = cursor.fetchall()
+        # Force inference on during this pass regardless of the runtime flag —
+        # we explicitly want to re-evaluate every row that was previously guessed.
+        old_infer_flag = self.person_gender_infer_on_unknown
+        self.person_gender_infer_on_unknown = True
 
-        logger.info(f"   Found {len(rows)} heuristic-gender rows to re-evaluate")
-
-        fix_batch: List[Tuple[str, str, float, str, str]] = []
-
-        for person_id, full_name, raw_full_name, db_name, db_surname, db_alias, old_gender, old_conf, old_source in rows:
-            # Build the same enriched inference name the upsert path now uses,
-            # reconstructing it from the DB columns that mirror the API fields.
-            personal_mirror = {
-                'FULL_NAME': full_name or raw_full_name,
-                'NAME': db_name,
-                'SURNAME': db_surname,
-                'ALIAS': db_alias,
-            }
-            inference_name = self._build_inference_name(personal_mirror)
-            new_gender, new_conf, new_source = self._resolve_gender(
-                clean_name=inference_name,
-                api_gender_raw=None  # treat as Unknown — re-infer from name only
-            )
-            # Skip if nothing changed or inference returned Unknown (ambiguous)
-            if new_gender == old_gender or new_gender == 'Unknown':
-                continue
-
-            corrected += 1
-            logger.info(
-                f"   ✏️  {person_id} | {full_name!r} → "
-                f"{old_gender} ({old_source} {old_conf}) → {new_gender} ({new_source} {new_conf:.3f})"
-            )
-
-            if not effective_dry_run:
-                fix_batch.append((new_gender, new_conf, new_source, person_id, old_gender))
-
-        if fix_batch and not effective_dry_run:
+        try:
             with self.db_pool.get_connection_context() as conn:
                 cursor = conn.cursor()
-                execute_batch(
-                    cursor,
-                    f"""
-                    UPDATE {PERSONS_TABLE}
-                    SET gender = %s,
-                        gender_confidence = %s,
-                        gender_source = %s
-                    WHERE person_id = %s
-                      AND gender = %s
-                      AND gender_source IN ('heuristic', 'rule', 'prefix')
-                    """,
-                    fix_batch,
-                    page_size=500,
+                # Fetch both wrong-gender rows AND previously-Unknown rows that may now resolve
+                cursor.execute(f"""
+                    SELECT person_id, full_name, raw_full_name, name, surname, alias,
+                           gender, gender_confidence, gender_source
+                    FROM {PERSONS_TABLE}
+                    WHERE (
+                        -- Re-evaluate rows written by old heuristic/rule logic
+                        (gender_source IN ('heuristic', 'rule', 'prefix')
+                         AND gender IN ('Male', 'Female', 'Transgender'))
+                        OR
+                        -- Also attempt to resolve previously-Unknown rows (source not api)
+                        (gender = 'Unknown'
+                         AND (gender_source IS NULL OR gender_source NOT IN ('api', 'invalid_name')))
+                    )
+                """)
+                rows = cursor.fetchall()
+
+            logger.info(f"   Found {len(rows)} rows to re-evaluate (heuristic corrections + Unknown backfill)")
+
+            fix_batch: List[Tuple[str, str, float, str, str]] = []
+
+            # Collect names that may need LLM batch processing (confidence=0 after rule pass)
+            pending_llm: List[Tuple[str, str, str]] = []  # (person_id, inference_name, old_gender)
+
+            for person_id, full_name, raw_full_name, db_name, db_surname, db_alias, old_gender, old_conf, old_source in rows:
+                personal_mirror = {
+                    'FULL_NAME': full_name or raw_full_name,
+                    'NAME': db_name,
+                    'SURNAME': db_surname,
+                    'ALIAS': db_alias,
+                }
+                inference_name = self._build_inference_name(personal_mirror)
+                new_gender, new_conf, new_source = self._resolve_gender(
+                    clean_name=inference_name,
+                    api_gender_raw=None,
                 )
-                conn.commit()
-            logger.info(f"✅ Corrected {corrected} heuristic-gender records in DB")
-        elif effective_dry_run:
-            logger.info(f"🧪 Dry-run: would correct {corrected} records")
-        else:
-            logger.info("✅ No corrections needed — all heuristic records look correct")
+
+                if new_gender == old_gender or new_gender == 'Unknown':
+                    # If still Unknown after rules, queue for LLM batch
+                    if new_gender == 'Unknown' and new_conf == 0.0 and inference_name and self.llm_gender_enabled:
+                        pending_llm.append((person_id, inference_name, old_gender))
+                    continue
+
+                corrected += 1
+                logger.info(
+                    f"   ✏️  {person_id} | {full_name!r} → "
+                    f"{old_gender} ({old_source} {old_conf}) → {new_gender} ({new_source} {new_conf:.3f})"
+                )
+                if not effective_dry_run:
+                    fix_batch.append((new_gender, new_conf, new_source, person_id, old_gender))
+
+            # LLM batch pass for names that rule engine could not resolve
+            if pending_llm:
+                logger.info(f"   🤖 LLM batch pass for {len(pending_llm)} unresolved names …")
+                bs = self.llm_gender_batch_size
+                for chunk_start in range(0, len(pending_llm), bs):
+                    chunk = pending_llm[chunk_start: chunk_start + bs]
+                    name_list = [inf_name for _, inf_name, _ in chunk]
+                    llm_results = self._infer_gender_llm_batch(name_list)
+                    for person_id, inf_name, old_gender in chunk:
+                        if inf_name not in llm_results:
+                            continue
+                        llm_gender, llm_conf = llm_results[inf_name]
+                        if llm_gender == old_gender or llm_gender == 'Unknown':
+                            continue
+                        corrected += 1
+                        logger.info(
+                            f"   🤖 {person_id} | {inf_name!r} → "
+                            f"{old_gender} → {llm_gender} (llm {llm_conf:.3f})"
+                        )
+                        if not effective_dry_run:
+                            fix_batch.append((llm_gender, llm_conf, 'llm', person_id, old_gender))
+
+            if fix_batch and not effective_dry_run:
+                with self.db_pool.get_connection_context() as conn:
+                    cursor = conn.cursor()
+                    execute_batch(
+                        cursor,
+                        f"""
+                        UPDATE {PERSONS_TABLE}
+                        SET gender = %s,
+                            gender_confidence = %s,
+                            gender_source = %s
+                        WHERE person_id = %s
+                          AND gender = %s
+                          AND (gender_source IS NULL
+                               OR gender_source NOT IN ('api', 'invalid_name'))
+                        """,
+                        fix_batch,
+                        page_size=500,
+                    )
+                    conn.commit()
+                logger.info(f"✅ Corrected {corrected} records in DB")
+            elif effective_dry_run:
+                logger.info(f"🧪 Dry-run: would correct {corrected} records")
+            else:
+                logger.info("✅ No corrections needed")
+
+        finally:
+            self.person_gender_infer_on_unknown = old_infer_flag
 
         return corrected
 
@@ -1714,12 +1935,16 @@ class PersonsETL:
                 table_columns = self.ensure_person_enrichment_columns(table_columns)
             logger.debug(f"Existing table columns: {sorted(table_columns)}")
 
+            # ── Learn from existing API-validated data ─────────────────────────
+            # Extends rule_map and prefix_tokens with patterns mined from names
+            # that the API already resolved.  Must run BEFORE the correction pass
+            # so the learned patterns are available during re-evaluation.
+            self._load_learned_gender_rules()
+            # ──────────────────────────────────────────────────────────────────
+
             # ── One-time remediation pass ──────────────────────────────────────
             # Re-evaluate any rows previously written with the old heuristic and
-            # correct gender misclassifications caused by the surname-token bug.
-            # This is idempotent and safe to run every time; it only touches rows
-            # whose gender_source is 'heuristic', 'rule', or 'prefix' AND whose
-            # inferred gender now differs under the fixed logic.
+            # correct gender misclassifications. Idempotent — safe every run.
             if not self.person_gender_dry_run:
                 self.correct_heuristic_gender_records()
             else:
