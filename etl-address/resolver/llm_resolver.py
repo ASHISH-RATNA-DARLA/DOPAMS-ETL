@@ -63,11 +63,18 @@ class LLMAddressResolver:
         self.model = _env("LLM_MODEL_ADDRESS", DEFAULT_MODEL)
         self.fallback = _env("LLM_MODEL_ADDRESS_FALLBACK", DEFAULT_FALLBACK)
         self.timeout = int(_env("ADDRESS_LLM_TIMEOUT", "20"))
+        self.primary_timeout = int(_env("ADDRESS_LLM_TIMEOUT_PRIMARY", str(self.timeout)))
+        self.fallback_timeout = int(_env("ADDRESS_LLM_TIMEOUT_FALLBACK", str(self.timeout)))
         inflight = int(_env("ADDRESS_LLM_MAX_INFLIGHT", "2"))
         self.sem = threading.Semaphore(max(1, inflight))
         self.budget = LLMCallBudget(int(_env("ADDRESS_LLM_MAX_CALLS_PER_RUN", "50000")))
         self.keep_alive = os.environ.get("OLLAMA_KEEP_ALIVE", "60m")
         self.host = _ollama_host()
+        self._primary_failures = 0
+        self._primary_failures_to_cooldown = int(_env("ADDRESS_LLM_PRIMARY_FAILS_TO_COOLDOWN", "4"))
+        self._primary_cooldown_sec = int(_env("ADDRESS_LLM_PRIMARY_COOLDOWN_SEC", "180"))
+        self._primary_cooldown_until = 0.0
+        self._primary_state_lock = threading.Lock()
 
     @classmethod
     def instance(cls) -> "LLMAddressResolver":
@@ -99,17 +106,28 @@ class LLMAddressResolver:
 
     def _call_with_fallback(self, cand: AddressCandidate, kb_partial: ResolvedAddress) -> Optional[str]:
         prompt = _build_prompt(cand, kb_partial)
-        for attempt, model in enumerate((self.model, self.fallback), start=1):
+
+        model_chain = (self.model, self.fallback)
+        with self._primary_state_lock:
+            if time.time() < self._primary_cooldown_until:
+                model_chain = (self.fallback,)
+
+        for attempt, model in enumerate(model_chain, start=1):
             try:
-                out = self._call(model, prompt)
+                timeout = self.primary_timeout if model == self.model else self.fallback_timeout
+                out = self._call(model, prompt, timeout=timeout)
                 if out:
+                    if model == self.model:
+                        self._note_primary_success()
                     return out
             except Exception as exc:
                 logger.warning("LLM call attempt %d model=%s failed: %s", attempt, model, exc)
+                if model == self.model:
+                    self._note_primary_failure(exc)
                 time.sleep(min(2 ** (attempt - 1), 3))
         return None
 
-    def _call(self, model: str, prompt: str) -> Optional[str]:
+    def _call(self, model: str, prompt: str, timeout: Optional[int] = None) -> Optional[str]:
         url = f"{self.host}/api/generate"
         payload = {
             "model": model,
@@ -123,10 +141,31 @@ class LLMAddressResolver:
                 "num_predict": 256,
             },
         }
-        r = requests.post(url, json=payload, timeout=self.timeout)
+        r = requests.post(url, json=payload, timeout=timeout or self.timeout)
         r.raise_for_status()
         data = r.json()
         return (data.get("response") or "").strip() or None
+
+    def _note_primary_success(self) -> None:
+        with self._primary_state_lock:
+            self._primary_failures = 0
+            self._primary_cooldown_until = 0.0
+
+    def _note_primary_failure(self, exc: Exception) -> None:
+        if not isinstance(exc, requests.exceptions.Timeout):
+            return
+        with self._primary_state_lock:
+            self._primary_failures += 1
+            if self._primary_failures < self._primary_failures_to_cooldown:
+                return
+            self._primary_cooldown_until = time.time() + self._primary_cooldown_sec
+            self._primary_failures = 0
+            logger.warning(
+                "Primary model %s timed out repeatedly; using fallback %s for %ds",
+                self.model,
+                self.fallback,
+                self._primary_cooldown_sec,
+            )
 
 
 # -----------------------------------------------------------------
