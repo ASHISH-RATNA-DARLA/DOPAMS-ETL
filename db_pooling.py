@@ -201,7 +201,13 @@ class PostgreSQLConnectionPool:
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             # Connection is dead, get a fresh one
             logger.warning("Stale connection detected, fetching fresh one")
-            conn.close()
+            try:
+                self.pool.putconn(conn, close=True)
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             return self.pool.getconn()
     
     def return_connection(self, conn: psycopg2.extensions.connection, close_conn: bool = False):
