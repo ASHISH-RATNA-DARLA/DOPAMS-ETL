@@ -312,7 +312,14 @@ def run_process_once(process):
         return
 
     for idx, command in enumerate(commands, start=1):
-        logger.info("[Order %s: %s] command %d start: %s", order, name, idx, command)
+        logger.info(
+            "[Order %s: %s] command %d start: %s | execution_log=%s",
+            order,
+            name,
+            idx,
+            command,
+            execution_log_path,
+        )
         try:
             run_command(command, cwd, env, execution_log_path)
         except Exception as exc:
