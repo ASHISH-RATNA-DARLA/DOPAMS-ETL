@@ -14,6 +14,9 @@ def record_failure(
     reason: str,
     details: Optional[dict] = None,
 ) -> None:
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("record_failure person_id=%s reason=%s details=%s", person_id, reason, details or {})
+
     sql = """
         INSERT INTO etl_address_failures (person_id, reason, details, attempted, last_try)
         VALUES (%s, %s, %s, 1, now())

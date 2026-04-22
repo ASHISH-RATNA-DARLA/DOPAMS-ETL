@@ -16,6 +16,7 @@ LLM: Ollama (primary + fallback) via core.llm_service settings.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -52,6 +53,7 @@ from obs.heartbeat import Heartbeat  # noqa: E402
 
 
 logger = setup_logger("etl-address")
+DETAIL_LOGGING = logger.isEnabledFor(logging.DEBUG)
 
 
 # --------------------------------------------------------------------
@@ -206,6 +208,14 @@ def resolve_one(pool, row: PersonRow, llm: Optional[LLMAddressResolver]) -> tupl
     """Return (perm_resolved, pres_resolved, path_summary)."""
     perm_cand, pres_cand = build_candidates(row)
 
+    if DETAIL_LOGGING:
+        logger.debug(
+            "row %s candidates perm={%s} pres={%s}",
+            row.person_id,
+            _candidate_summary(perm_cand),
+            _candidate_summary(pres_cand),
+        )
+
     perm_out: Optional[ResolvedAddress] = None
     pres_out: Optional[ResolvedAddress] = None
     paths = []
@@ -214,9 +224,15 @@ def resolve_one(pool, row: PersonRow, llm: Optional[LLMAddressResolver]) -> tupl
         if perm_cand.enriched_locality_hit:
             paths.append("P:enriched-locality")
         kb_p = resolve_kb(pool, perm_cand)
+        if DETAIL_LOGGING:
+            logger.debug("row %s permanent kb={%s}", row.person_id, _resolved_summary(kb_p))
         if not kb_p.is_complete and llm is not None:
             if _can_use_llm(perm_cand):
+                if DETAIL_LOGGING:
+                    logger.debug("row %s permanent invoking LLM", row.person_id)
                 kb_p = llm.resolve(perm_cand, kb_p)
+                if DETAIL_LOGGING:
+                    logger.debug("row %s permanent llm={%s}", row.person_id, _resolved_summary(kb_p))
             else:
                 paths.append("P:llm-skip-no-signal")
         perm_out = kb_p
@@ -226,9 +242,15 @@ def resolve_one(pool, row: PersonRow, llm: Optional[LLMAddressResolver]) -> tupl
         if pres_cand.enriched_locality_hit:
             paths.append("R:enriched-locality")
         kb_r = resolve_kb(pool, pres_cand)
+        if DETAIL_LOGGING:
+            logger.debug("row %s present kb={%s}", row.person_id, _resolved_summary(kb_r))
         if not kb_r.is_complete and llm is not None:
             if _can_use_llm(pres_cand):
+                if DETAIL_LOGGING:
+                    logger.debug("row %s present invoking LLM", row.person_id)
                 kb_r = llm.resolve(pres_cand, kb_r)
+                if DETAIL_LOGGING:
+                    logger.debug("row %s present llm={%s}", row.person_id, _resolved_summary(kb_r))
             else:
                 paths.append("R:llm-skip-no-signal")
         pres_out = kb_r
@@ -251,6 +273,15 @@ def resolve_one(pool, row: PersonRow, llm: Optional[LLMAddressResolver]) -> tupl
         paths.append("C:from-nat")
     paths.extend(country_markers)
 
+    if DETAIL_LOGGING:
+        logger.debug(
+            "row %s resolved path=%s perm={%s} pres={%s}",
+            row.person_id,
+            "|".join(paths) or "none",
+            _resolved_summary(perm_out),
+            _resolved_summary(pres_out),
+        )
+
     return perm_out, pres_out, "|".join(paths) or "none"
 
 
@@ -260,6 +291,33 @@ def _is_worth_writing(r: Optional[ResolvedAddress]) -> bool:
 
 def _is_partial_resolution(r: Optional[ResolvedAddress]) -> bool:
     return r is not None and r.has_any and not r.is_complete
+
+
+def _summary_value(value: Optional[str]) -> str:
+    return value if value else "-"
+
+
+def _candidate_summary(cand) -> str:
+    return (
+        f"slot={cand.slot} "
+        f"raw[state={_summary_value(cand.raw_state)},district={_summary_value(cand.raw_district)},"
+        f"mandal={_summary_value(cand.raw_mandal)},country={_summary_value(cand.raw_country)}] "
+        f"norm[state={_summary_value(cand.state)},district={_summary_value(cand.district)},"
+        f"mandal={_summary_value(cand.mandal)},country={_summary_value(cand.country)}] "
+        f"locality={_summary_value(cand.locality)} pin={_summary_value(cand.pin)} "
+        f"signal={cand.has_any_signal} enriched_locality={cand.enriched_locality_hit}"
+    )
+
+
+def _resolved_summary(resolved: Optional[ResolvedAddress]) -> str:
+    if resolved is None:
+        return "none"
+    return (
+        f"slot={resolved.slot} country={_summary_value(resolved.country)} "
+        f"state={_summary_value(resolved.state)} district={_summary_value(resolved.district)} "
+        f"mandal={_summary_value(resolved.mandal)} path={resolved.path or '-'} "
+        f"confidence={resolved.confidence:.2f} notes={resolved.notes or '-'}"
+    )
 
 
 def _can_use_llm(cand) -> bool:
@@ -331,6 +389,8 @@ def process_record(
     last_exc: Optional[BaseException] = None
     for attempt in range(1, MAX_RETRIES_ROW + 1):
         try:
+            if DETAIL_LOGGING:
+                logger.debug("row %s attempt=%d/%d start", row.person_id, attempt, MAX_RETRIES_ROW)
             perm, pres, path = resolve_one(pool, row, llm)
 
             if "llm-skip-no-signal" in path:
@@ -345,6 +405,14 @@ def process_record(
                 stats.inc("country_from_nat")
 
             if not _is_worth_writing(perm) and not _is_worth_writing(pres):
+                if DETAIL_LOGGING:
+                    logger.debug(
+                        "row %s classified as failure path=%s perm={%s} pres={%s}",
+                        row.person_id,
+                        path,
+                        _resolved_summary(perm),
+                        _resolved_summary(pres),
+                    )
                 _record_classified_failure(pool, row, stats, perm, pres, path)
                 return
 
@@ -358,6 +426,14 @@ def process_record(
                             getattr(pres, "district", None), getattr(pres, "mandal", None))
                 return
 
+            if DETAIL_LOGGING:
+                logger.debug(
+                    "row %s writing perm={%s} pres={%s} path=%s",
+                    row.person_id,
+                    _resolved_summary(perm),
+                    _resolved_summary(pres),
+                    path,
+                )
             wrote, unchanged = apply_resolution(
                 pool, row.person_id,
                 perm if _is_worth_writing(perm) else None,
@@ -380,6 +456,15 @@ def process_record(
                     )
                     return
 
+            if DETAIL_LOGGING:
+                logger.debug(
+                    "row %s write_result wrote=%s unchanged=%s path=%s",
+                    row.person_id,
+                    wrote,
+                    unchanged,
+                    path,
+                )
+
             if "llm" in path:
                 stats.inc("llm_used")
             return
@@ -389,6 +474,13 @@ def process_record(
             backoff = min(2 ** (attempt - 1), 5)
             logger.warning("row %s attempt %d/%d failed: %s (sleep %ds)",
                             row.person_id, attempt, MAX_RETRIES_ROW, exc, backoff)
+            if DETAIL_LOGGING:
+                logger.debug(
+                    "row %s retry_context perm=%s pres=%s",
+                    row.person_id,
+                    _summary_value(row.perm_state),
+                    _summary_value(row.pres_state),
+                )
             time.sleep(backoff)
 
     # all retries exhausted
@@ -431,6 +523,7 @@ def run() -> int:
     rid = run_id()
     logger.info("=" * 80)
     logger.info("etl-address starting run_id=%s dry_run=%s resume=%s", rid, DRY_RUN, RESUME)
+    logger.info("logging level=%s detailed=%s", logging.getLevelName(logger.level), DETAIL_LOGGING)
     logger.info("=" * 80)
 
     # pool: reuse master's singleton; do NOT reset here

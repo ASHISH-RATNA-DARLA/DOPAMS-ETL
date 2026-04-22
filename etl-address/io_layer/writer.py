@@ -19,6 +19,16 @@ def apply_resolution(
     """Single idempotent UPDATE for both address slots.
     Returns (wrote, unchanged). wrote=True if at least one field changed.
     """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "apply_resolution person_id=%s perm=%s/%s/%s/%s pres=%s/%s/%s/%s",
+            person_id,
+            getattr(perm, "country", None), getattr(perm, "state", None),
+            getattr(perm, "district", None), getattr(perm, "mandal", None),
+            getattr(pres, "country", None), getattr(pres, "state", None),
+            getattr(pres, "district", None), getattr(pres, "mandal", None),
+        )
+
     perm = perm or ResolvedAddress(slot="permanent")
     pres = pres or ResolvedAddress(slot="present")
 
@@ -96,4 +106,6 @@ def apply_resolution(
         conn.commit()
 
     wrote = rowcount > 0
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("apply_resolution person_id=%s wrote=%s rowcount=%s", person_id, wrote, rowcount)
     return wrote, not wrote

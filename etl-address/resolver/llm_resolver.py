@@ -33,6 +33,10 @@ def _ollama_host() -> str:
     ).rstrip("/")
 
 
+def _summary(value: Optional[str]) -> str:
+    return value if value else "-"
+
+
 class LLMCallBudget:
     def __init__(self, limit: int) -> None:
         self._limit = max(0, int(limit))
@@ -91,6 +95,20 @@ class LLMAddressResolver:
             logger.warning("LLM call budget exhausted (%d). Skipping LLM.", self.budget.limit)
             return kb_partial
 
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "LLM resolve slot=%s model=%s fallback=%s timeout=%s partial=%s/%s/%s/%s signal=%s",
+                cand.slot,
+                self.model,
+                self.fallback,
+                self.timeout,
+                _summary(kb_partial.country),
+                _summary(kb_partial.state),
+                _summary(kb_partial.district),
+                _summary(kb_partial.mandal),
+                cand.has_any_signal,
+            )
+
         with self.sem:
             raw = self._call_with_fallback(cand, kb_partial)
 
@@ -111,14 +129,18 @@ class LLMAddressResolver:
         with self._primary_state_lock:
             if time.time() < self._primary_cooldown_until:
                 model_chain = (self.fallback,)
+                remaining = max(0, int(self._primary_cooldown_until - time.time()))
+                logger.debug("Primary model cooldown active; using fallback only for %ds", remaining)
 
         for attempt, model in enumerate(model_chain, start=1):
             try:
                 timeout = self.primary_timeout if model == self.model else self.fallback_timeout
+                logger.debug("LLM call attempt %d model=%s timeout=%s", attempt, model, timeout)
                 out = self._call(model, prompt, timeout=timeout)
                 if out:
                     if model == self.model:
                         self._note_primary_success()
+                    logger.debug("LLM call attempt %d model=%s returned %d chars", attempt, model, len(out))
                     return out
             except Exception as exc:
                 logger.warning("LLM call attempt %d model=%s failed: %s", attempt, model, exc)
@@ -150,6 +172,7 @@ class LLMAddressResolver:
         with self._primary_state_lock:
             self._primary_failures = 0
             self._primary_cooldown_until = 0.0
+        logger.debug("Primary model succeeded; cooldown cleared")
 
     def _note_primary_failure(self, exc: Exception) -> None:
         if not isinstance(exc, requests.exceptions.Timeout):
