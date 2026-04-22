@@ -2740,6 +2740,12 @@ crime_id,acts_sections,entities,entity_count
 69e4fc104be50eb9aa8d3dc3,"8c NDPSA, r/w 27(b) NDPSA","8c, 27b, 27",3
 69e4fc8a5910a7100af9a55b,"8c NDPSA, r/w 20(b)(ii)(A) NDPSA, 27(b) NDPSA","8c, 20biia, 20, 27b, 27",5
 69e5342d115bc3161652d3a5,"8c NDPSA, r/w 27 NDPSA, 61-B CPA","8c, 27, 61b, 61",4
+69e5aabe5910a762f3ff446a,"8c NDPSA, r/w 20(b)(ii)(A) NDPSA, 27(b) NDPSA","8c, 20biia, 20, 27b, 27",5
+69e5d1579f8dba4f0a706c31,"8c NDPSA, r/w 22(b) NDPSA, 27(a) NDPSA","8c, 22b, 22, 27a, 27",5
+69e5f24e9f8dba99b9757b2b,"8c NDPSA, r/w 20(b)(ii)(A) NDPSA","8c, 20biia, 20",3
+69e62e7b13facf947c4e419d,"8c NDPSA, r/w 20(b)(ii)(A) NDPSA, 27(b) NDPSA","8c, 20biia, 20, 27b, 27",5
+69e63350a72b68757fe769b1,"8c NDPSA, r/w 20(b)(ii)(B) NDPSA, 27 NDPSA","8c, 20biib, 20, 27",4
+69e686551cac955ac7150f31,27(b) NDPSA,"27b, 27",2
 629f70c6699c333d21fbaa5d,"20(b)(ii)(C) NDPSA, r/w 8c NDPSA","20biic, 20, 8c",3
 62a006d9e32fb48e4b9f288e,22(b) NDPSA,"22b, 22",2
 62a0b38fe32fb443129faa96,"8c NDPSA, r/w 20(b)(ii)(A) NDPSA","8c, 20biia, 20",3

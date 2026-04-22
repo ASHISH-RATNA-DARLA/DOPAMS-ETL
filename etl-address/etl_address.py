@@ -21,9 +21,9 @@ import os
 import sys
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Optional, Deque
 
 # Resolve project root on sys.path so we can import repo-wide modules.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +41,7 @@ from resolver.kb_cache import GeoKB  # noqa: E402
 from resolver.kb_resolver import resolve_kb  # noqa: E402
 from resolver.llm_resolver import LLMAddressResolver  # noqa: E402
 from resolver.normalize import build_candidates  # noqa: E402
-from resolver.types import PersonRow, ResolvedAddress  # noqa: E402
+from resolver.types import PersonRow, ResolvedAddress, AddressCandidate  # noqa: E402
 
 from io_layer.reader import count_pending, fetch_batch  # noqa: E402
 from io_layer.writer import apply_resolution  # noqa: E402
@@ -73,6 +73,8 @@ RESUME            = os.environ.get("ADDRESS_RESUME", "1") == "1"
 LIMIT             = int(os.environ.get("ADDRESS_LIMIT", "0")) or None
 FAILURE_STALE_DAYS = int(os.environ.get("ADDRESS_FAILURE_STALE_DAYS", "30"))
 RESET_CHECKPOINT  = os.environ.get("ADDRESS_RESET_CHECKPOINT", "0") == "1"
+LLM_WORKER_COUNT  = int(os.environ.get("ADDRESS_LLM_WORKER_COUNT", "1"))
+LLM_QUEUE_MAX     = int(os.environ.get("ADDRESS_LLM_QUEUE_MAX", "100"))
 
 
 # --------------------------------------------------------------------
@@ -91,6 +93,41 @@ class Stats:
     def snapshot(self) -> dict:
         with self.lock:
             return dict(self.c)
+
+
+class LLMQueueManager:
+    """Manages queueing for LLM-needing records.
+
+    Only allows LLM_WORKER_COUNT concurrent LLM calls.
+    Other workers skip records needing LLM and process KB-only records instead.
+    """
+    def __init__(self, worker_count: int) -> None:
+        self.sem = threading.Semaphore(max(1, worker_count))
+        self.queue: Deque = deque()
+        self.queue_lock = threading.Lock()
+
+    def can_acquire(self) -> bool:
+        return self.sem.acquire(blocking=False)
+
+    def release(self) -> None:
+        self.sem.release()
+
+    def queue_record(self, row) -> bool:
+        with self.queue_lock:
+            if len(self.queue) < LLM_QUEUE_MAX:
+                self.queue.append(row)
+                return True
+        return False
+
+    def dequeue_record(self):
+        with self.queue_lock:
+            if self.queue:
+                return self.queue.popleft()
+        return None
+
+    def queue_size(self) -> int:
+        with self.queue_lock:
+            return len(self.queue)
 
 
 # --------------------------------------------------------------------
@@ -327,6 +364,26 @@ def _can_use_llm(cand) -> bool:
     )
 
 
+def _will_need_llm(pool, row: PersonRow) -> bool:
+    """Quick check: will this record likely need LLM based on KB resolution.
+
+    Returns True if KB resolution is incomplete and LLM might help.
+    """
+    perm_cand, pres_cand = build_candidates(row)
+
+    if perm_cand.has_any_signal:
+        kb_p = resolve_kb(pool, perm_cand)
+        if not kb_p.is_complete and _can_use_llm(perm_cand):
+            return True
+
+    if pres_cand.has_any_signal:
+        kb_r = resolve_kb(pool, pres_cand)
+        if not kb_r.is_complete and _can_use_llm(pres_cand):
+            return True
+
+    return False
+
+
 def _classify_failure_reason(perm_cand, pres_cand, perm_out, pres_out) -> str:
     has_actionable_signal = bool(
         perm_cand.state or perm_cand.district or perm_cand.mandal or
@@ -385,111 +442,137 @@ def process_record(
     row: PersonRow,
     llm: Optional[LLMAddressResolver],
     stats: Stats,
-) -> None:
-    last_exc: Optional[BaseException] = None
-    for attempt in range(1, MAX_RETRIES_ROW + 1):
+    llm_queue: Optional[LLMQueueManager] = None,
+) -> bool:
+    # Smart routing: if LLM might be needed but no capacity, queue it
+    if llm_queue and llm:
         try:
-            if DETAIL_LOGGING:
-                logger.debug("row %s attempt=%d/%d start", row.person_id, attempt, MAX_RETRIES_ROW)
-            perm, pres, path = resolve_one(pool, row, llm)
+            if _will_need_llm(pool, row):
+                if not llm_queue.can_acquire():
+                    if llm_queue.queue_record(row):
+                        stats.inc("llm_queued_for_later")
+                        return True
+                    else:
+                        stats.inc("llm_queue_full_skipped")
+                        return True
+                else:
+                    llm_queue.release()
+        except Exception:
+            pass
 
-            if "llm-skip-no-signal" in path:
-                stats.inc("llm_skipped_no_signal")
-            if "enriched-locality" in path:
-                stats.inc("enriched_locality")
-            if "+village" in path:
-                stats.inc("enriched_village")
-            if "C:propagated" in path:
-                stats.inc("country_propagated")
-            if "C:from-nat" in path:
-                stats.inc("country_from_nat")
+    last_exc: Optional[BaseException] = None
+    has_llm_capacity = False
+    if llm_queue and llm:
+        has_llm_capacity = llm_queue.can_acquire()
 
-            if not _is_worth_writing(perm) and not _is_worth_writing(pres):
+    try:
+        for attempt in range(1, MAX_RETRIES_ROW + 1):
+            try:
+                if DETAIL_LOGGING:
+                    logger.debug("row %s attempt=%d/%d start", row.person_id, attempt, MAX_RETRIES_ROW)
+                perm, pres, path = resolve_one(pool, row, llm)
+
+                if "llm-skip-no-signal" in path:
+                    stats.inc("llm_skipped_no_signal")
+                if "enriched-locality" in path:
+                    stats.inc("enriched_locality")
+                if "+village" in path:
+                    stats.inc("enriched_village")
+                if "C:propagated" in path:
+                    stats.inc("country_propagated")
+                if "C:from-nat" in path:
+                    stats.inc("country_from_nat")
+
+                if not _is_worth_writing(perm) and not _is_worth_writing(pres):
+                    if DETAIL_LOGGING:
+                        logger.debug(
+                            "row %s classified as failure path=%s perm={%s} pres={%s}",
+                            row.person_id,
+                            path,
+                            _resolved_summary(perm),
+                            _resolved_summary(pres),
+                        )
+                    _record_classified_failure(pool, row, stats, perm, pres, path)
+                    return True
+
+                if DRY_RUN:
+                    stats.inc("dry_run_resolved")
+                    logger.info("[DRY] %s path=%s perm=%s/%s/%s/%s pres=%s/%s/%s/%s",
+                                row.person_id, path,
+                                getattr(perm, "country", None), getattr(perm, "state", None),
+                                getattr(perm, "district", None), getattr(perm, "mandal", None),
+                                getattr(pres, "country", None), getattr(pres, "state", None),
+                                getattr(pres, "district", None), getattr(pres, "mandal", None))
+                    return True
+
                 if DETAIL_LOGGING:
                     logger.debug(
-                        "row %s classified as failure path=%s perm={%s} pres={%s}",
+                        "row %s writing perm={%s} pres={%s} path=%s",
                         row.person_id,
-                        path,
                         _resolved_summary(perm),
                         _resolved_summary(pres),
-                    )
-                _record_classified_failure(pool, row, stats, perm, pres, path)
-                return
-
-            if DRY_RUN:
-                stats.inc("dry_run_resolved")
-                logger.info("[DRY] %s path=%s perm=%s/%s/%s/%s pres=%s/%s/%s/%s",
-                            row.person_id, path,
-                            getattr(perm, "country", None), getattr(perm, "state", None),
-                            getattr(perm, "district", None), getattr(perm, "mandal", None),
-                            getattr(pres, "country", None), getattr(pres, "state", None),
-                            getattr(pres, "district", None), getattr(pres, "mandal", None))
-                return
-
-            if DETAIL_LOGGING:
-                logger.debug(
-                    "row %s writing perm={%s} pres={%s} path=%s",
-                    row.person_id,
-                    _resolved_summary(perm),
-                    _resolved_summary(pres),
-                    path,
-                )
-            wrote, unchanged = apply_resolution(
-                pool, row.person_id,
-                perm if _is_worth_writing(perm) else None,
-                pres if _is_worth_writing(pres) else None,
-            )
-
-            if wrote:
-                stats.inc("updated")
-            else:
-                stats.inc("unchanged")
-                if _is_partial_resolution(perm) or _is_partial_resolution(pres):
-                    _record_classified_failure(
-                        pool,
-                        row,
-                        stats,
-                        perm,
-                        pres,
                         path,
-                        {"partial": True, "unchanged": True},
                     )
-                    return
-
-            if DETAIL_LOGGING:
-                logger.debug(
-                    "row %s write_result wrote=%s unchanged=%s path=%s",
-                    row.person_id,
-                    wrote,
-                    unchanged,
-                    path,
+                wrote, unchanged = apply_resolution(
+                    pool, row.person_id,
+                    perm if _is_worth_writing(perm) else None,
+                    pres if _is_worth_writing(pres) else None,
                 )
 
-            if "llm" in path:
-                stats.inc("llm_used")
-            return
+                if wrote:
+                    stats.inc("updated")
+                else:
+                    stats.inc("unchanged")
+                    if _is_partial_resolution(perm) or _is_partial_resolution(pres):
+                        _record_classified_failure(
+                            pool,
+                            row,
+                            stats,
+                            perm,
+                            pres,
+                            path,
+                            {"partial": True, "unchanged": True},
+                        )
+                        return True
 
+                if DETAIL_LOGGING:
+                    logger.debug(
+                        "row %s write_result wrote=%s unchanged=%s path=%s",
+                        row.person_id,
+                        wrote,
+                        unchanged,
+                        path,
+                    )
+
+                if "llm" in path:
+                    stats.inc("llm_used")
+                return True
+
+            except Exception as exc:
+                last_exc = exc
+                backoff = min(2 ** (attempt - 1), 5)
+                logger.warning("row %s attempt %d/%d failed: %s (sleep %ds)",
+                                row.person_id, attempt, MAX_RETRIES_ROW, exc, backoff)
+                if DETAIL_LOGGING:
+                    logger.debug(
+                        "row %s retry_context perm=%s pres=%s",
+                        row.person_id,
+                        _summary_value(row.perm_state),
+                        _summary_value(row.pres_state),
+                    )
+                time.sleep(backoff)
+
+        # all retries exhausted
+        try:
+            record_failure(pool, row.person_id, "unexpected",
+                           {"error": str(last_exc) if last_exc else "unknown"})
         except Exception as exc:
-            last_exc = exc
-            backoff = min(2 ** (attempt - 1), 5)
-            logger.warning("row %s attempt %d/%d failed: %s (sleep %ds)",
-                            row.person_id, attempt, MAX_RETRIES_ROW, exc, backoff)
-            if DETAIL_LOGGING:
-                logger.debug(
-                    "row %s retry_context perm=%s pres=%s",
-                    row.person_id,
-                    _summary_value(row.perm_state),
-                    _summary_value(row.pres_state),
-                )
-            time.sleep(backoff)
-
-    # all retries exhausted
-    try:
-        record_failure(pool, row.person_id, "unexpected",
-                       {"error": str(last_exc) if last_exc else "unknown"})
-    except Exception as exc:
-        logger.error("failed to record_failure for %s: %s", row.person_id, exc)
-    stats.inc("failed_unexpected")
+            logger.error("failed to record_failure for %s: %s", row.person_id, exc)
+        stats.inc("failed_unexpected")
+        return True
+    finally:
+        if has_llm_capacity and llm_queue:
+            llm_queue.release()
 
 
 # --------------------------------------------------------------------
@@ -572,7 +655,7 @@ def run() -> int:
         return 0
 
     workers = compute_safe_workers(pool, REQ_WORKERS, reserved=POOL_RESERVED)
-    logger.info("workers=%d batch_size=%d pool_max=%d", workers, BATCH_SIZE, pool.maxconn)
+    logger.info("workers=%d batch_size=%d pool_max=%d llm_workers=%d", workers, BATCH_SIZE, pool.maxconn, LLM_WORKER_COUNT)
 
     last_seen_id: Optional[str] = read_checkpoint(pool) if RESUME else None
     if last_seen_id:
@@ -582,6 +665,10 @@ def run() -> int:
     batch_ix = 0
     stats = Stats()
     state = {"processed": 0, "total": total, "stats": stats, "last_seen_id": last_seen_id}
+
+    llm_queue = LLMQueueManager(LLM_WORKER_COUNT) if llm else None
+    if llm_queue:
+        logger.info("LLM queue initialized: worker_count=%d queue_max=%d", LLM_WORKER_COUNT, LLM_QUEUE_MAX)
 
     hb = Heartbeat(HEARTBEAT_SEC, lambda: _emit_heartbeat(state))
     hb.start()
@@ -604,7 +691,7 @@ def run() -> int:
                 batch_ix += 1
                 logger.info("Batch #%d after_id=%s size=%d", batch_ix, last_seen_id or "<start>", len(batch))
 
-                futures = [ex.submit(process_record, pool, row, llm, stats) for row in batch]
+                futures = [ex.submit(process_record, pool, row, llm, stats, llm_queue) for row in batch]
                 for f in as_completed(futures):
                     try:
                         f.result()
@@ -637,6 +724,22 @@ def run() -> int:
                 if processed > 200 and (failed / max(1, processed)) > FAIL_RATE_ABORT:
                     logger.error("aborting: fail_rate %.2f > %.2f", failed / processed, FAIL_RATE_ABORT)
                     return 2
+
+            # Process queued LLM records with dedicated workers
+            if llm_queue:
+                queued_count = llm_queue.queue_size()
+                if queued_count > 0:
+                    logger.info("Processing %d queued LLM records", queued_count)
+                    while True:
+                        row = llm_queue.dequeue_record()
+                        if not row:
+                            break
+                        try:
+                            process_record(pool, row, llm, stats, llm_queue)
+                        except Exception as exc:
+                            logger.error("queued record processing failed: %s", exc)
+                            stats.inc("failed_unexpected")
+
         completed_successfully = True
     finally:
         hb.stop()
@@ -672,6 +775,8 @@ def run() -> int:
     logger.info("  failed_state_only     : %d", snap.get("failed_state_only_no_locality", 0))
     logger.info("  failed_kb_llm_reject  : %d", snap.get("failed_kb_llm_rejected", 0))
     logger.info("  failed_unexpected     : %d", snap.get("failed_unexpected", 0))
+    logger.info("  llm_queued_for_later  : %d", snap.get("llm_queued_for_later", 0))
+    logger.info("  llm_queue_full_skip   : %d", snap.get("llm_queue_full_skipped", 0))
     logger.info("=" * 80)
     return 0
 
