@@ -65,6 +65,71 @@ def count_pending(pool, table: str = "persons") -> int:
             return cur.fetchone()[0]
 
 
+def fetch_one_by_id(
+    pool,
+    person_id: str,
+    table: str = "persons",
+    id_col: str = "person_id",
+) -> Optional[PersonRow]:
+    """Fetch a single person by ID, regardless of pending status."""
+    sql = f"""
+        SELECT
+            {id_col}::text,
+            TRIM(COALESCE(permanent_state_ut,          '')),
+            TRIM(COALESCE(permanent_district,          '')),
+            TRIM(COALESCE(permanent_area_mandal,       '')),
+            TRIM(COALESCE(permanent_country,           '')),
+            TRIM(COALESCE(permanent_ward_colony,       '')),
+            TRIM(COALESCE(permanent_street_road_no,    '')),
+            TRIM(COALESCE(permanent_pin_code,          '')),
+            TRIM(COALESCE(present_state_ut,            '')),
+            TRIM(COALESCE(present_district,            '')),
+            TRIM(COALESCE(present_area_mandal,         '')),
+            TRIM(COALESCE(present_country,             '')),
+            TRIM(COALESCE(present_ward_colony,         '')),
+            TRIM(COALESCE(present_street_road_no,      '')),
+            TRIM(COALESCE(present_pin_code,            '')),
+            TRIM(COALESCE(permanent_locality_village,  '')),
+            TRIM(COALESCE(permanent_landmark_milestone,'')),
+            TRIM(COALESCE(present_locality_village,    '')),
+            TRIM(COALESCE(present_landmark_milestone,  '')),
+            TRIM(COALESCE(nationality,                 ''))
+        FROM {table}
+        WHERE {id_col}::text = %s
+        LIMIT 1
+    """
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (person_id,))
+            row = cur.fetchone()
+
+    if not row:
+        return None
+
+    return PersonRow(
+        person_id    = row[0],
+        perm_state   = row[1] or None,
+        perm_district= row[2] or None,
+        perm_mandal  = row[3] or None,
+        perm_country = row[4] or None,
+        perm_ward    = row[5] or None,
+        perm_street  = row[6] or None,
+        perm_pin     = row[7] or None,
+        pres_state   = row[8] or None,
+        pres_district= row[9] or None,
+        pres_mandal  = row[10] or None,
+        pres_country = row[11] or None,
+        pres_ward    = row[12] or None,
+        pres_street  = row[13] or None,
+        pres_pin     = row[14] or None,
+        perm_locality= row[15] or None,
+        perm_landmark= row[16] or None,
+        pres_locality= row[17] or None,
+        pres_landmark= row[18] or None,
+        nationality  = row[19] or None,
+    )
+
+
 def fetch_batch(
     pool,
     last_seen_id: Optional[str],

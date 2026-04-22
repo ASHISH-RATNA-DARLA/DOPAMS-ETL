@@ -43,10 +43,10 @@ from resolver.llm_resolver import LLMAddressResolver  # noqa: E402
 from resolver.normalize import build_candidates  # noqa: E402
 from resolver.types import PersonRow, ResolvedAddress, AddressCandidate  # noqa: E402
 
-from io_layer.reader import count_pending, fetch_batch  # noqa: E402
+from io_layer.reader import count_pending, fetch_batch, fetch_one_by_id  # noqa: E402
 from io_layer.writer import apply_resolution  # noqa: E402
 from io_layer.checkpoint import clear_checkpoint, read_checkpoint, write_checkpoint  # noqa: E402
-from io_layer.failures import clear_stale_failures, record_failure  # noqa: E402
+from io_layer.failures import clear_stale_failures, record_failure, fetch_deferred_records, clear_failure  # noqa: E402
 
 from obs.logger import setup_logger, run_id  # noqa: E402
 from obs.heartbeat import Heartbeat  # noqa: E402
@@ -443,12 +443,24 @@ def process_record(
     llm: Optional[LLMAddressResolver],
     stats: Stats,
     llm_queue: Optional[LLMQueueManager] = None,
+    final_draining: bool = False,
 ) -> bool:
     # Smart routing: if LLM might be needed but no capacity, queue it
     if llm_queue and llm:
         try:
             if _will_need_llm(pool, row):
                 if not llm_queue.can_acquire():
+                    # During final draining, don't requeue—mark as deferred instead
+                    if final_draining:
+                        stats.inc("llm_deferred_capacity_exhausted")
+                        record_failure(
+                            pool,
+                            row.person_id,
+                            "llm_deferred_capacity_exhausted",
+                            {"reason": "LLM capacity exhausted in final draining phase; will retry next run"},
+                        )
+                        return True
+                    # During normal batch processing, queue if possible
                     if llm_queue.queue_record(row):
                         stats.inc("llm_queued_for_later")
                         return True
@@ -676,6 +688,56 @@ def run() -> int:
     completed_successfully = False
 
     try:
+        # Process deferred records from previous runs before main batch
+        deferred_ids = fetch_deferred_records(pool, limit=1000)
+        if deferred_ids:
+            logger.info("Processing %d deferred LLM records from previous run", len(deferred_ids))
+            deferred_processed = 0
+            deferred_successful = 0
+            for person_id in deferred_ids:
+                deferred_processed += 1
+                try:
+                    row = fetch_one_by_id(pool, person_id)
+                    if not row:
+                        logger.warning("Deferred record not found: %s", person_id)
+                        clear_failure(pool, person_id)
+                        stats.inc("deferred_not_found")
+                        continue
+
+                    # Record pre-retry state
+                    snap_before = stats.snapshot()
+                    process_record(pool, row, llm, stats, llm_queue)
+                    snap_after = stats.snapshot()
+
+                    # Check if any failure counter was incremented during processing
+                    failure_keys = [
+                        "failed_no_resolution",
+                        "failed_unexpected",
+                        "failed_partial_no_mandal",
+                        "failed_insufficient_geo",
+                        "failed_state_only_no_locality",
+                        "failed_kb_llm_rejected",
+                        "llm_deferred_capacity_exhausted",
+                    ]
+                    was_failure = any(snap_after.get(k, 0) > snap_before.get(k, 0) for k in failure_keys)
+
+                    if not was_failure:
+                        # No failure recorded, assume success
+                        clear_failure(pool, person_id)
+                        deferred_successful += 1
+                        stats.inc("deferred_retried_success")
+                    else:
+                        stats.inc("deferred_retry_failed")
+                except Exception as exc:
+                    logger.error("Failed to retry deferred record %s: %s", person_id, exc)
+                    stats.inc("deferred_retry_failed")
+
+            logger.info(
+                "Deferred record processing complete: %d processed, %d successful",
+                deferred_processed,
+                deferred_successful,
+            )
+
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="addr") as ex:
             while processed < total:
                 take = min(BATCH_SIZE, total - processed)
@@ -730,15 +792,26 @@ def run() -> int:
                 queued_count = llm_queue.queue_size()
                 if queued_count > 0:
                     logger.info("Processing %d queued LLM records", queued_count)
-                    while True:
+                    max_drain_iterations = queued_count * 3  # Allow 3 passes max
+                    drain_iterations = 0
+                    while drain_iterations < max_drain_iterations:
+                        drain_iterations += 1
                         row = llm_queue.dequeue_record()
                         if not row:
+                            logger.info("Queue fully drained after %d iterations", drain_iterations)
                             break
                         try:
-                            process_record(pool, row, llm, stats, llm_queue)
+                            process_record(pool, row, llm, stats, llm_queue, final_draining=True)
                         except Exception as exc:
                             logger.error("queued record processing failed: %s", exc)
                             stats.inc("failed_unexpected")
+                    # If queue still has records after max iterations, log warning
+                    remaining = llm_queue.queue_size()
+                    if remaining > 0:
+                        logger.warning(
+                            "Queue draining hit iteration limit: %d records remain after %d iterations",
+                            remaining, drain_iterations
+                        )
 
         completed_successfully = True
     finally:
@@ -777,6 +850,10 @@ def run() -> int:
     logger.info("  failed_unexpected     : %d", snap.get("failed_unexpected", 0))
     logger.info("  llm_queued_for_later  : %d", snap.get("llm_queued_for_later", 0))
     logger.info("  llm_queue_full_skip   : %d", snap.get("llm_queue_full_skipped", 0))
+    logger.info("  llm_deferred_capacity : %d", snap.get("llm_deferred_capacity_exhausted", 0))
+    logger.info("  deferred_retried_succ : %d", snap.get("deferred_retried_success", 0))
+    logger.info("  deferred_retry_failed : %d", snap.get("deferred_retry_failed", 0))
+    logger.info("  deferred_not_found    : %d", snap.get("deferred_not_found", 0))
     logger.info("=" * 80)
     return 0
 

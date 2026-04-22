@@ -65,3 +65,22 @@ def clear_stale_failures(pool, stale_days: int) -> int:
             rowcount = cur.rowcount
         conn.commit()
     return rowcount
+
+
+def fetch_deferred_records(pool, limit: int = 1000) -> list[str]:
+    """Fetch person_ids of records deferred due to LLM capacity exhaustion.
+
+    Returns list of person_ids to retry.
+    """
+    sql = """
+        SELECT person_id
+        FROM etl_address_failures
+        WHERE reason = 'llm_deferred_capacity_exhausted'
+        ORDER BY last_try ASC
+        LIMIT %s
+    """
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (limit,))
+            rows = cur.fetchall()
+    return [row[0] for row in rows]
