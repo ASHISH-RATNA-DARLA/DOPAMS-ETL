@@ -932,16 +932,16 @@ class InterrogationReportsETL:
                 for fh in family_history:
                     fh_person_id = normalize_person_id(fh.get('PERSON_ID'))
                     family_values.append((
-                        str(uuid.uuid4()), ir_id, fh_person_id, fh.get('RELATION'),
+                        ir_id, fh_person_id, fh.get('RELATION'),
                         fh.get('FAMILY_MEMBER_PECULIARITY'), fh.get('CRIMINAL_BACKGROUND', False),
                         fh.get('IS_ALIVE', True), fh.get('FAMILY_STAY_TOGETHER', True)
                     ))
-                
+
                 if family_values:
                     execute_values(
                         cursor,
-                        f"""INSERT INTO {IR_FAMILY_HISTORY_TABLE} 
-                           (id, interrogation_report_id, person_id, relation, family_member_peculiarity,
+                        f"""INSERT INTO {IR_FAMILY_HISTORY_TABLE}
+                           (interrogation_report_id, person_id, relation, family_member_peculiarity,
                             criminal_background, is_alive, family_stay_together)
                            VALUES %s""",
                         family_values
@@ -958,15 +958,15 @@ class InterrogationReportsETL:
                 for lc in local_contacts:
                     lc_person_id = normalize_person_id(lc.get('PERSON_ID'))
                     contact_values.append((
-                        str(uuid.uuid4()), ir_id, lc_person_id, lc.get('TOWN'),
+                        ir_id, lc_person_id, lc.get('TOWN'),
                         lc.get('ADDRESS'), lc.get('JURISDICTION_PS')
                     ))
-                
+
                 if contact_values:
                     execute_values(
                         cursor,
-                        f"""INSERT INTO {IR_LOCAL_CONTACTS_TABLE} 
-                           (id, interrogation_report_id, person_id, town, address, jurisdiction_ps)
+                        f"""INSERT INTO {IR_LOCAL_CONTACTS_TABLE}
+                           (interrogation_report_id, person_id, town, address, jurisdiction_ps)
                            VALUES %s""",
                         contact_values
                     )
@@ -977,11 +977,11 @@ class InterrogationReportsETL:
         # 3. Regular Habits
         regular_habits = record.get('REGULAR_HABITS', [])
         if regular_habits:
-            habit_values = [(str(uuid.uuid4()), ir_id, habit) for habit in regular_habits if habit]
+            habit_values = [(ir_id, habit) for habit in regular_habits if habit]
             if habit_values:
                 execute_values(
                     cursor,
-                    f"""INSERT INTO {IR_REGULAR_HABITS_TABLE} (id, interrogation_report_id, habit)
+                    f"""INSERT INTO {IR_REGULAR_HABITS_TABLE} (interrogation_report_id, habit)
                        VALUES %s ON CONFLICT DO NOTHING""",
                     habit_values
                 )
@@ -998,16 +998,16 @@ class InterrogationReportsETL:
                     if purchase_amount is None:
                         purchase_amount = td.get('PURCHASE_AMOUN_IN_INR')
                     drug_values.append((
-                        str(uuid.uuid4()), ir_id, td.get('TYPE_OF_DRUG'), td.get('QUANTITY'),
+                        ir_id, td.get('TYPE_OF_DRUG'), td.get('QUANTITY'),
                         purchase_amount, td.get('MODE_OF_PAYMENT'),
                         td.get('MODE_OF_TRANSPORT'), supplier_id, receiver_id
                     ))
-                
+
                 if drug_values:
                     execute_values(
                         cursor,
                         f"""INSERT INTO {IR_TYPES_OF_DRUGS_TABLE}
-                           (id, interrogation_report_id, type_of_drug, quantity, purchase_amount_in_inr,
+                           (interrogation_report_id, type_of_drug, quantity, purchase_amount_in_inr,
                             mode_of_payment, mode_of_transport, supplier_person_id, receivers_person_id)
                            VALUES %s""",
                         drug_values
@@ -1023,7 +1023,7 @@ class InterrogationReportsETL:
             for sd in sim_details:
                 sim_person_id = normalize_person_id(sd.get('PERSON_ID'))
                 sim_values.append((
-                    str(uuid.uuid4()), ir_id, sd.get('PHONE_NUMBER'), sd.get('SDR'),
+                    ir_id, sd.get('PHONE_NUMBER'), sd.get('SDR'),
                     sd.get('IMEI'), sd.get('TRUE_CALLER_NAME'), sim_person_id
                 ))
 
@@ -1031,7 +1031,7 @@ class InterrogationReportsETL:
                 execute_values(
                     cursor,
                     f"""INSERT INTO {IR_SIM_DETAILS_TABLE}
-                       (id, interrogation_report_id, phone_number, sdr, imei, true_caller_name, person_id)
+                       (interrogation_report_id, phone_number, sdr, imei, true_caller_name, person_id)
                        VALUES %s""",
                     sim_values
                 )
@@ -1044,17 +1044,17 @@ class InterrogationReportsETL:
                 for fh in financial_history:
                     account_holder_id = normalize_person_id(fh.get('ACCOUNT_HOLDER_PERSON_ID'))
                     financial_values.append((
-                        str(uuid.uuid4()), ir_id, account_holder_id, fh.get('PAN_NO'),
+                        ir_id, account_holder_id, fh.get('PAN_NO'),
                         fh.get('UPI_ID'), fh.get('NAME_OF_BANK'), fh.get('ACCOUNT_NUMBER'),
                         fh.get('BRANCH_NAME'), fh.get('IFSC_CODE'),
                         fh.get('IMMOVABLE_PROPERTY_ACQUIRED'), fh.get('MOVABLE_PROPERTY_ACQUIRED')
                     ))
-                
+
                 if financial_values:
                     execute_values(
                         cursor,
                         f"""INSERT INTO {IR_FINANCIAL_HISTORY_TABLE}
-                           (id, interrogation_report_id, account_holder_person_id, pan_no, upi_id,
+                           (interrogation_report_id, account_holder_person_id, pan_no, upi_id,
                             name_of_bank, account_number, branch_name, ifsc_code,
                             immovable_property_acquired, movable_property_acquired)
                            VALUES %s""",
@@ -1071,16 +1071,16 @@ class InterrogationReportsETL:
             for cd in consumer_details:
                 consumer_person_id = normalize_person_id(cd.get('CONSUMER_PERSON_ID'))
                 consumer_values.append((
-                    str(uuid.uuid4()), ir_id, consumer_person_id, cd.get('PLACE_OF_CONSUMPTION'),
+                    ir_id, consumer_person_id, cd.get('PLACE_OF_CONSUMPTION'),
                     cd.get('OTHER_SOURCES'), cd.get('OTHER_SOURCES_PHONE_NO'),
                     cd.get('AADHAR_CARD_NUMBER'), cd.get('AADHAR_CARD_NUMBER_PHONE_NO')
                 ))
-            
+
             if consumer_values:
                 execute_values(
                     cursor,
                     f"""INSERT INTO {IR_CONSUMER_DETAILS_TABLE}
-                       (id, interrogation_report_id, consumer_person_id, place_of_consumption,
+                       (interrogation_report_id, consumer_person_id, place_of_consumption,
                         other_sources, other_sources_phone_no, aadhar_card_number, aadhar_card_number_phone_no)
                        VALUES %s""",
                     consumer_values
@@ -1090,14 +1090,14 @@ class InterrogationReportsETL:
         modus_operandi = record.get('MODUS_OPERANDI', [])
         if modus_operandi:
             mo_values = [
-                (str(uuid.uuid4()), ir_id, mo.get('CRIME_HEAD'), mo.get('CRIME_SUB_HEAD'),
+                (ir_id, mo.get('CRIME_HEAD'), mo.get('CRIME_SUB_HEAD'),
                  mo.get('MODUS_OPERANDI'))
                 for mo in modus_operandi
             ]
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_MODUS_OPERANDI_TABLE}
-                   (id, interrogation_report_id, crime_head, crime_sub_head, modus_operandi)
+                   (interrogation_report_id, crime_head, crime_sub_head, modus_operandi)
                    VALUES %s""",
                 mo_values
             )
@@ -1108,7 +1108,7 @@ class InterrogationReportsETL:
             try:
                 po_values = [
                     (
-                        str(uuid.uuid4()), ir_id,
+                        ir_id,
                         parse_date(po.get('ARREST_DATE')) if po.get('ARREST_DATE') else None,
                         po.get('ARRESTED_BY'),
                         po.get('ARREST_PLACE'),
@@ -1132,7 +1132,7 @@ class InterrogationReportsETL:
                 execute_values(
                     cursor,
                     f"""INSERT INTO {IR_PREVIOUS_OFFENCES_TABLE}
-                       (id, interrogation_report_id, arrest_date, arrested_by, arrest_place, crime_num,
+                       (interrogation_report_id, arrest_date, arrested_by, arrest_place, crime_num,
                         dist_unit_division, gang_member, interrogated_by, law_section,
                         others_identify, property_recovered, property_stolen, ps_code, remarks,
                         conviction_status, bail_status, court_name, judge_name)
@@ -1153,16 +1153,16 @@ class InterrogationReportsETL:
                 for dc in defence_counsel:
                     dc_person_id = normalize_person_id(dc.get('DEFENCE_COUNSEL_PERSON_ID'))
                     dc_values.append((
-                        str(uuid.uuid4()), ir_id, dc.get('DIST_DIVISION'), dc.get('PS_CODE'), dc.get('CRIME_NUM'),
+                        ir_id, dc.get('DIST_DIVISION'), dc.get('PS_CODE'), dc.get('CRIME_NUM'),
                         dc.get('LAW_SECTION'), dc.get('SC_CC_NUM'), dc.get('DEFENCE_COUNSEL_ADDRESS'),
                         dc.get('DEFENCE_COUNSEL_PHONE'), dc.get('ASSISTANCE'), dc_person_id
                     ))
-                
+
                 if dc_values:
                     execute_values(
                         cursor,
                         f"""INSERT INTO {IR_DEFENCE_COUNSEL_TABLE}
-                           (id, interrogation_report_id, dist_division, ps_code, crime_num, law_section,
+                           (interrogation_report_id, dist_division, ps_code, crime_num, law_section,
                             sc_cc_num, defence_counsel_address, defence_counsel_phone, assistance, defence_counsel_person_id)
                            VALUES %s""",
                         dc_values
@@ -1179,14 +1179,14 @@ class InterrogationReportsETL:
                 for ad in associate_details:
                     ad_person_id = normalize_person_id(ad.get('PERSON_ID'))
                     assoc_values.append((
-                        str(uuid.uuid4()), ir_id, ad_person_id, ad.get('GANG'), ad.get('RELATION')
+                        ir_id, ad_person_id, ad.get('GANG'), ad.get('RELATION')
                     ))
-                
+
                 if assoc_values:
                     execute_values(
                         cursor,
                         f"""INSERT INTO {IR_ASSOCIATE_DETAILS_TABLE}
-                           (id, interrogation_report_id, person_id, gang, relation)
+                           (interrogation_report_id, person_id, gang, relation)
                            VALUES %s""",
                         assoc_values
                     )
@@ -1198,14 +1198,14 @@ class InterrogationReportsETL:
         shelter = record.get('SHELTER', [])
         if shelter:
             shelter_values = [
-                (str(uuid.uuid4()), ir_id, sh.get('PREPARATION_OF_OFFENCE'), sh.get('AFTER_OFFENCE'),
+                (ir_id, sh.get('PREPARATION_OF_OFFENCE'), sh.get('AFTER_OFFENCE'),
                  sh.get('REGULAR_RESIDENCY'), sh.get('REMARKS'), sh.get('OTHER_REGULAR_RESIDENCY'))
                 for sh in shelter
             ]
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_SHELTER_TABLE}
-                   (id, interrogation_report_id, preparation_of_offence, after_offence,
+                   (interrogation_report_id, preparation_of_offence, after_offence,
                     regular_residency, remarks, other_regular_residency)
                    VALUES %s""",
                 shelter_values
@@ -1214,11 +1214,11 @@ class InterrogationReportsETL:
         # 13. Media
         media = record.get('MEDIA', [])
         if media:
-            media_values = [(str(uuid.uuid4()), ir_id, media_id) for media_id in media if media_id]
+            media_values = [(ir_id, media_id) for media_id in media if media_id]
             if media_values:
                 execute_values(
                     cursor,
-                    f"""INSERT INTO {IR_MEDIA_TABLE} (id, interrogation_report_id, media_id)
+                    f"""INSERT INTO {IR_MEDIA_TABLE} (interrogation_report_id, media_id)
                        VALUES %s ON CONFLICT DO NOTHING""",
                     media_values
                 )
@@ -1226,11 +1226,11 @@ class InterrogationReportsETL:
         # 14. Interrogation Report Refs
         interrogation_report = record.get('INTERROGATION_REPORT', [])
         if interrogation_report:
-            ir_ref_values = [(str(uuid.uuid4()), ir_id, ref_id) for ref_id in interrogation_report if ref_id]
+            ir_ref_values = [(ir_id, ref_id) for ref_id in interrogation_report if ref_id]
             if ir_ref_values:
                 execute_values(
                     cursor,
-                    f"""INSERT INTO {IR_INTERROGATION_REPORT_REFS_TABLE} (id, interrogation_report_id, report_ref_id)
+                    f"""INSERT INTO {IR_INTERROGATION_REPORT_REFS_TABLE} (interrogation_report_id, report_ref_id)
                        VALUES %s ON CONFLICT DO NOTHING""",
                     ir_ref_values
                 )
@@ -1239,13 +1239,13 @@ class InterrogationReportsETL:
         dopams_links = record.get('DOPAMS_LINKS', [])
         if dopams_links:
             dopams_values = [
-                (str(uuid.uuid4()), ir_id, dl.get('PHONE_NUMBER'),
+                (ir_id, dl.get('PHONE_NUMBER'),
                  dl.get('DOPAMS_DATA') if isinstance(dl.get('DOPAMS_DATA'), list) else [])
                 for dl in dopams_links
             ]
             execute_values(
                 cursor,
-                f"""INSERT INTO {IR_DOPAMS_LINKS_TABLE} (id, interrogation_report_id, phone_number, dopams_data)
+                f"""INSERT INTO {IR_DOPAMS_LINKS_TABLE} (interrogation_report_id, phone_number, dopams_data)
                    VALUES %s""",
                 dopams_values
             )
@@ -1253,11 +1253,11 @@ class InterrogationReportsETL:
         # 16. INDULGANCE_BEFORE_OFFENCE
         indulgance_before_offence = record.get('INDULGANCE_BEFORE_OFFENCE', [])
         if indulgance_before_offence:
-            ind_values = [(str(uuid.uuid4()), ir_id, value) for value in indulgance_before_offence if value]
+            ind_values = [(ir_id, value) for value in indulgance_before_offence if value]
             if ind_values:
                 execute_values(
                     cursor,
-                    f"""INSERT INTO {IR_INDULGANCE_BEFORE_OFFENCE_TABLE} (id, interrogation_report_id, indulgance)
+                    f"""INSERT INTO {IR_INDULGANCE_BEFORE_OFFENCE_TABLE} (interrogation_report_id, indulgance)
                        VALUES %s""",
                     ind_values
                 )
@@ -1267,7 +1267,7 @@ class InterrogationReportsETL:
         if property_disposal:
             pd_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     pd.get('MODE_OF_DISPOSAL'),
                     pd.get('BUYER_NAME'),
                     pd.get('SOLD_AMOUNT_IN_INR'),
@@ -1280,7 +1280,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_PROPERTY_DISPOSAL_TABLE}
-                   (id, interrogation_report_id, mode_of_disposal, buyer_name, sold_amount_in_inr,
+                   (interrogation_report_id, mode_of_disposal, buyer_name, sold_amount_in_inr,
                     location_of_disposal, date_of_disposal, remarks)
                    VALUES %s""",
                 pd_values
@@ -1291,7 +1291,7 @@ class InterrogationReportsETL:
         if regularization_transit:
             rtw_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     row.get('WARRANT_NUMBER'),
                     row.get('WARRANT_TYPE'),
                     parse_date(row.get('ISSUED_DATE')) if row.get('ISSUED_DATE') else None,
@@ -1305,7 +1305,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_REGULARIZATION_TRANSIT_WARRANTS_TABLE}
-                   (id, interrogation_report_id, warrant_number, warrant_type, issued_date,
+                   (interrogation_report_id, warrant_number, warrant_type, issued_date,
                     jurisdiction_ps, crime_num, status, remarks)
                    VALUES %s""",
                 rtw_values
@@ -1316,7 +1316,7 @@ class InterrogationReportsETL:
         if execution_of_nbw:
             enbw_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     row.get('NBW_NUMBER'),
                     parse_date(row.get('ISSUED_DATE')) if row.get('ISSUED_DATE') else None,
                     parse_date(row.get('EXECUTED_DATE')) if row.get('EXECUTED_DATE') else None,
@@ -1331,7 +1331,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_EXECUTION_OF_NBW_TABLE}
-                   (id, interrogation_report_id, nbw_number, issued_date, executed_date,
+                   (interrogation_report_id, nbw_number, issued_date, executed_date,
                     jurisdiction_ps, crime_num, executed_by, place_of_execution, remarks)
                    VALUES %s""",
                 enbw_values
@@ -1342,7 +1342,7 @@ class InterrogationReportsETL:
         if pending_nbw:
             pnbw_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     row.get('NBW_NUMBER'),
                     parse_date(row.get('ISSUED_DATE')) if row.get('ISSUED_DATE') else None,
                     row.get('JURISDICTION_PS'),
@@ -1356,7 +1356,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_PENDING_NBW_TABLE}
-                   (id, interrogation_report_id, nbw_number, issued_date, jurisdiction_ps,
+                   (interrogation_report_id, nbw_number, issued_date, jurisdiction_ps,
                     crime_num, reason_for_pending, expected_execution_date, remarks)
                    VALUES %s""",
                 pnbw_values
@@ -1367,7 +1367,7 @@ class InterrogationReportsETL:
         if sureties:
             sur_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     normalize_person_id(row.get('SURETY_PERSON_ID')),
                     row.get('SURETY_NAME'),
                     row.get('RELATION_TO_ACCUSED'),
@@ -1391,7 +1391,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_SURETIES_TABLE}
-                   (id, interrogation_report_id, surety_person_id, surety_name, relation_to_accused,
+                   (interrogation_report_id, surety_person_id, surety_name, relation_to_accused,
                     occupation, aadhar_number, pan_number, house_no, street_road_no,
                     locality_village, area_mandal, district, state_ut, pin_code,
                     phone_number, surety_amount_in_inr, date_of_surety, remarks)
@@ -1404,7 +1404,7 @@ class InterrogationReportsETL:
         if jail_sentence:
             js_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     row.get('CRIME_NUM'),
                     row.get('JURISDICTION_PS'),
                     row.get('LAW_SECTION'),
@@ -1423,7 +1423,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_JAIL_SENTENCE_TABLE}
-                   (id, interrogation_report_id, crime_num, jurisdiction_ps, law_section,
+                   (interrogation_report_id, crime_num, jurisdiction_ps, law_section,
                     sentence_type, sentence_duration_in_months, sentence_start_date,
                     sentence_end_date, sentence_amount_in_inr, jail_name,
                     date_of_jail_entry, date_of_jail_release, remarks)
@@ -1436,7 +1436,7 @@ class InterrogationReportsETL:
         if new_gang_formation:
             ngf_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     row.get('GANG_NAME'),
                     parse_date(row.get('GANG_FORMATION_DATE')) if row.get('GANG_FORMATION_DATE') else None,
                     row.get('NUMBER_OF_MEMBERS'),
@@ -1453,7 +1453,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_NEW_GANG_FORMATION_TABLE}
-                   (id, interrogation_report_id, gang_name, gang_formation_date, number_of_members,
+                   (interrogation_report_id, gang_name, gang_formation_date, number_of_members,
                     leader_name, leader_person_id, gang_objective, criminal_history,
                     jurisdiction_ps, active, remarks)
                    VALUES %s""",
@@ -1465,7 +1465,7 @@ class InterrogationReportsETL:
         if conviction_acquittal:
             ca_values = [
                 (
-                    str(uuid.uuid4()), ir_id,
+                    ir_id,
                     row.get('CRIME_NUM'),
                     row.get('JURISDICTION_PS'),
                     row.get('COURT_NAME'),
@@ -1485,7 +1485,7 @@ class InterrogationReportsETL:
             execute_values(
                 cursor,
                 f"""INSERT INTO {IR_CONVICTION_ACQUITTAL_TABLE}
-                   (id, interrogation_report_id, crime_num, jurisdiction_ps, court_name,
+                   (interrogation_report_id, crime_num, jurisdiction_ps, court_name,
                     judge_name, law_section, verdict, verdict_date,
                     reason_if_acquitted, conviction_remarks, fine_amount_in_inr,
                     sentence_if_convicted, appeal_status, appeal_court)
