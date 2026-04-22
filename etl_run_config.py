@@ -20,6 +20,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from psycopg2 import sql
+
 IST = timezone(timedelta(hours=5, minutes=30))
 ABSOLUTE_ORIGIN = "2022-01-01"
 KB_PRESERVE_TABLES = frozenset({"geo_countries", "geo_reference", "drug_categories", "drug_ignore_list"})
@@ -106,17 +108,22 @@ def wipe_database(pool, logger) -> None:
             logger.info("No tables to wipe.")
             return
 
+        wiped_count = 0
         with conn.cursor() as cur:
             for table in tables_to_wipe:
                 try:
                     cur.execute(
-                        f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE"
+                        sql.SQL("TRUNCATE TABLE {}.{} RESTART IDENTITY CASCADE").format(
+                            sql.Identifier("public"),
+                            sql.Identifier(table),
+                        )
                     )
                     logger.info("  wiped: %s", table)
+                    wiped_count += 1
                 except Exception as exc:
                     logger.warning("  wipe failed for %s: %s (continuing)", table, exc)
                     conn.rollback()
                     continue
             conn.commit()
 
-    logger.warning("DB wipe complete. Wiped %d tables.", len(tables_to_wipe))
+    logger.warning("DB wipe complete. Wiped %d/%d tables.", wiped_count, len(tables_to_wipe))
