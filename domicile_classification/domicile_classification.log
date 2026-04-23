@@ -18419,3 +18419,33 @@
 2026-04-23 16:57:49,736 - INFO - Domicile Classification Completed Successfully!
 2026-04-23 16:57:49,736 - INFO - ============================================================
 2026-04-23 16:57:49,736 - INFO - Database connection closed
+2026-04-23 19:55:27,374 - INFO - ============================================================
+2026-04-23 19:55:27,374 - INFO - Starting Domicile Classification Process
+2026-04-23 19:55:27,374 - INFO - ============================================================
+2026-04-23 19:55:27,402 - WARNING - get_db_connection() is deprecated — prefer pool.get_connection_context()
+2026-04-23 19:55:27,418 - INFO - Database connection established successfully
+2026-04-23 19:55:27,418 - INFO - Step 1: Checking/Adding domicile_classification column...
+2026-04-23 19:55:27,418 - INFO - Checking if domicile_classification column exists in persons table...
+2026-04-23 19:55:27,428 - INFO - Column 'domicile_classification' already exists in persons table
+2026-04-23 19:55:27,428 - INFO -   - Data Type: character varying
+2026-04-23 19:55:27,428 - INFO -   - Max Length: 50
+2026-04-23 19:55:27,428 - INFO - Using existing column for classification updates
+2026-04-23 19:55:27,429 - INFO - 
+2026-04-23 19:55:27,429 - INFO - Step 2: Processing persons and classifying domicile...
+2026-04-23 19:55:27,497 - INFO - Connection pool initialized: 1-37 connections
+2026-04-23 19:55:27,497 - INFO - Fetching persons data...
+2026-04-23 19:55:27,674 - INFO - Found 26414 persons to evaluate
+2026-04-23 19:55:28,062 - INFO - Processed 25000/26414 persons...
+2026-04-23 19:55:28,064 - INFO - Processed 26414/26414 persons...
+2026-04-23 19:55:28,067 - INFO - Completed processing all 26414 persons
+2026-04-23 19:55:28,067 - INFO - Classification Statistics:
+2026-04-23 19:55:28,067 - INFO -   - Native State: 17767
+2026-04-23 19:55:28,067 - INFO -   - Inter State: 5640
+2026-04-23 19:55:28,067 - INFO -   - International: 76
+2026-04-23 19:55:28,067 - INFO -   - NULL/Empty: 2931
+2026-04-23 19:55:28,067 - INFO -   - Rows Updated: 23483
+2026-04-23 19:55:28,076 - INFO - 
+2026-04-23 19:55:28,076 - INFO - ============================================================
+2026-04-23 19:55:28,076 - INFO - Domicile Classification Completed Successfully!
+2026-04-23 19:55:28,076 - INFO - ============================================================
+2026-04-23 19:55:28,077 - INFO - Database connection closed
