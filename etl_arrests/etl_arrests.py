@@ -248,17 +248,7 @@ class ArrestsETL:
         self.invalid_ids_log.write(f"# Arrests that failed because CRIME_ID not found in crimes table\n")
         self.invalid_ids_log.write(f"# These records are SKIPPED and NOT inserted/updated\n")
         self.invalid_ids_log.write(f"{'='*80}\n\n")
-        
-        # Invalid person_id log file (person_id not found but record is still processed with NULL)
-        self.invalid_person_id_log_file = f'logs/arrests_invalid_person_id_{timestamp}.log'
-        self.invalid_person_id_log = open(self.invalid_person_id_log_file, 'w', encoding='utf-8')
-        self.invalid_person_id_log.write(f"# Arrests Invalid PERSON_ID Log\n")
-        self.invalid_person_id_log.write(f"# Generated: {datetime.now().isoformat()}\n")
-        self.invalid_person_id_log.write(f"# Arrests where PERSON_ID from API was not found in persons table\n")
-        self.invalid_person_id_log.write(f"# These records are PROCESSED with person_id = NULL\n")
-        self.invalid_person_id_log.write(f"# The record is still inserted/updated, but person_id is set to NULL\n")
-        self.invalid_person_id_log.write(f"{'='*80}\n\n")
-        
+
         # Duplicates log file (duplicate records found within chunks)
         self.duplicates_log_file = f'logs/arrests_duplicates_{timestamp}.log'
         self.duplicates_log = open(self.duplicates_log_file, 'w', encoding='utf-8')
@@ -266,12 +256,11 @@ class ArrestsETL:
         self.duplicates_log.write(f"# Generated: {datetime.now().isoformat()}\n")
         self.duplicates_log.write(f"# Duplicate records found within the same chunk\n")
         self.duplicates_log.write(f"{'='*80}\n\n")
-        
+
         logger.info(f"📝 API chunk log: {self.api_log_file}")
         logger.info(f"📝 DB chunk log: {self.db_log_file}")
         logger.info(f"📝 Failed records log: {self.failed_log_file}")
-        logger.info(f"📝 Invalid IDs log (CRIME_ID only - skipped): {self.invalid_ids_log_file}")
-        logger.info(f"📝 Invalid PERSON_ID log (processed with NULL): {self.invalid_person_id_log_file}")
+        logger.info(f"📝 Invalid IDs log (CRIME_ID and PERSON_ID - skipped): {self.invalid_ids_log_file}")
         logger.info(f"📝 Duplicates log: {self.duplicates_log_file}")
     
     def close_chunk_loggers(self):
@@ -284,8 +273,6 @@ class ArrestsETL:
             self.failed_log.close()
         if hasattr(self, 'invalid_ids_log') and self.invalid_ids_log:
             self.invalid_ids_log.close()
-        if hasattr(self, 'invalid_person_id_log') and self.invalid_person_id_log:
-            self.invalid_person_id_log.close()
         if hasattr(self, 'duplicates_log') and self.duplicates_log:
             self.duplicates_log.close()
     
@@ -824,8 +811,8 @@ class ArrestsETL:
     
     def log_invalid_ids(self, arrests: Dict, invalid_ids: Dict, chunk_range: str = ""):
         """
-        Log arrests that failed due to invalid IDs (crime_id only - these are skipped)
-        
+        Log arrests that failed due to invalid IDs (crime_id or person_id - both cause records to be skipped)
+
         Args:
             arrests: Transformed arrests dict
             invalid_ids: Dict with keys 'crime_id', 'person_id' indicating which are invalid
@@ -862,40 +849,6 @@ class ArrestsETL:
             self.invalid_ids_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
             self.invalid_ids_log.write(f"\n")
             self.invalid_ids_log.flush()
-    
-    def log_invalid_person_id(self, arrests: Dict, original_person_id: str, chunk_range: str = ""):
-        """
-        Log arrests where PERSON_ID from API was not found in persons table
-        These records are still processed with person_id = NULL
-        
-        Args:
-            arrests: Transformed arrests dict
-            original_person_id: Original PERSON_ID from API
-            chunk_range: Date range for chunk tracking
-        """
-        failure_info = {
-            'crime_id': arrests.get('_original_crime_id'),
-            'person_id': original_person_id,
-            'accused_seq_no': arrests.get('accused_seq_no'),
-            'chunk': chunk_range,
-            'timestamp': datetime.now().isoformat(),
-            'note': 'Record is still processed with person_id = NULL',
-            'arrests_data': arrests
-        }
-        
-        with self.log_lock:
-            self.invalid_person_id_log.write(f"\n{'='*80}\n")
-            self.invalid_person_id_log.write(f"CRIME_ID: {arrests.get('_original_crime_id')}\n")
-            self.invalid_person_id_log.write(f"PERSON_ID (from API): {original_person_id}\n")
-            self.invalid_person_id_log.write(f"ACCUSED_SEQ_NO: {arrests.get('accused_seq_no')}\n")
-            self.invalid_person_id_log.write(f"REASON: PERSON_ID not found in persons table\n")
-            self.invalid_person_id_log.write(f"ACTION: Record processed with person_id = NULL\n")
-            self.invalid_person_id_log.write(f"Chunk: {chunk_range}\n")
-            self.invalid_person_id_log.write(f"Timestamp: {datetime.now().isoformat()}\n")
-            self.invalid_person_id_log.write(f"\nJSON Format:\n")
-            self.invalid_person_id_log.write(json.dumps(failure_info, indent=2, ensure_ascii=False, default=str))
-            self.invalid_person_id_log.write(f"\n")
-            self.invalid_person_id_log.flush()
     
     def log_duplicates_chunk(self, from_date: str, to_date: str, duplicates: List[Dict]):
         """Log duplicates found in a chunk"""
@@ -965,32 +918,32 @@ class ArrestsETL:
             has_invalid_ids = True
         
         # Validate person_id (optional - only if provided in API)
-        # If API provides PERSON_ID but it's not found, log to separate file and process with NULL
         if original_person_id and not person_id:
             invalid_ids['person_id'] = True
-            logger.warning(f"⚠️  PERSON_ID {original_person_id} not found in persons table, will set to NULL and process record")
-            with self.stats_lock:
-                self.stats['total_arrests_failed_person_id'] += 1
-            # Set person_id to None explicitly
-            arrests['person_id'] = None
-            # Log to separate file for invalid person_id
-            self.log_invalid_person_id(arrests, original_person_id, chunk_date_range)
-        
-        # Only skip if crime_id is invalid (required field)
-        # person_id and accused_id are optional, so we process the record even if they're invalid
-        if invalid_ids.get('crime_id'):
+            has_invalid_ids = True
+
+        # Skip if crime_id or person_id is invalid (both required to maintain referential integrity)
+        if invalid_ids.get('crime_id') or invalid_ids.get('person_id'):
             reason = 'invalid_ids'
             error_details = f"Invalid IDs: {invalid_ids}"
-            logger.warning(f"⚠️  {error_details}, skipping arrests")
+
+            if invalid_ids.get('crime_id'):
+                logger.warning(f"⚠️  {error_details}, skipping arrests")
+            if invalid_ids.get('person_id'):
+                logger.warning(f"⚠️  {error_details}, skipping arrests")
+
             with self.stats_lock:
                 self.stats['total_arrests_failed'] += 1
-                self.stats['total_arrests_failed_crime_id'] += 1
+                if invalid_ids.get('crime_id'):
+                    self.stats['total_arrests_failed_crime_id'] += 1
                 if invalid_ids.get('person_id'):
                     self.stats['total_arrests_failed_person_id'] += 1
+
             self.log_failed_record(arrests, reason, error_details)
             self.log_invalid_ids(arrests, invalid_ids, chunk_date_range)
-            # Park in FK retry queue — recovers when crime record arrives.
-            if push_fk_failure is not None:
+
+            # Park in FK retry queue — recovers when crime record arrives
+            if push_fk_failure is not None and invalid_ids.get('crime_id'):
                 try:
                     missing_cid = arrests.get('_original_crime_id') or ''
                     push_fk_failure(
@@ -1239,14 +1192,20 @@ class ArrestsETL:
                     if original_person_id and not person_id:
                         invalid_ids['person_id'] = True
                     
-                    # Only skip if crime_id is invalid (required field)
-                    # person_id and accused_id are optional, so we process the record even if they're invalid
-                    if invalid_ids.get('crime_id'):
+                    # Skip if crime_id or person_id is invalid (both required to maintain referential integrity)
+                    if invalid_ids.get('crime_id') or invalid_ids.get('person_id'):
                         with chunk_lock:
-                            logger.warning(f"⚠️  Arrests with invalid CRIME_ID: {original_crime_id}, skipping")
-                            with self.stats_lock:
-                                self.stats['total_arrests_failed'] += 1
-                                self.stats['total_arrests_failed_crime_id'] += 1
+                            if invalid_ids.get('crime_id'):
+                                logger.warning(f"⚠️  Arrests with invalid CRIME_ID: {original_crime_id}, skipping")
+                                with self.stats_lock:
+                                    self.stats['total_arrests_failed'] += 1
+                                    self.stats['total_arrests_failed_crime_id'] += 1
+                            if invalid_ids.get('person_id'):
+                                logger.warning(f"⚠️  Arrests with invalid PERSON_ID: {original_person_id}, skipping")
+                                with self.stats_lock:
+                                    self.stats['total_arrests_failed'] += 1
+                                    self.stats['total_arrests_failed_person_id'] += 1
+
                             chunk_state['failed_keys'].append(f"{original_crime_id}:{accused_seq_no}")
                             reason = 'invalid_ids'
                             if reason not in chunk_state['failed_reasons']:
@@ -1260,22 +1219,6 @@ class ArrestsETL:
                             })
                             self.log_invalid_ids(arrests, invalid_ids, chunk_range)
                         return
-                    
-                    # Log warnings for invalid optional IDs but continue processing
-                    if invalid_ids.get('person_id'):
-                        with chunk_lock:
-                            logger.warning(f"⚠️  PERSON_ID {original_person_id} not found, will set to NULL and process record")
-                            with self.stats_lock:
-                                self.stats['total_arrests_failed_person_id'] += 1
-                            arrests['person_id'] = None
-                            chunk_state['invalid_ids_in_chunk'].append({
-                                'crime_id': original_crime_id,
-                                'person_id': original_person_id,
-                                'accused_seq_no': accused_seq_no,
-                                'invalid_ids': invalid_ids
-                            })
-                            # Log to separate file for invalid person_id
-                            self.log_invalid_person_id(arrests, original_person_id, chunk_range)
                     
                     # Create unique key for tracking duplicates (based on unique constraint)
                     unique_key = f"{crime_id}:{accused_seq_no}"
@@ -1535,18 +1478,7 @@ class ArrestsETL:
         self.invalid_ids_log.write(f"Note: These arrests records were SKIPPED because CRIME_ID was not found in crimes table.\n")
         self.invalid_ids_log.write(f"      CRIME_ID is a required field, so these records cannot be processed.\n")
         self.invalid_ids_log.write(f"      Please ensure these CRIME_IDs are loaded in the crimes table first.\n")
-        
-        # Invalid PERSON_ID log summary (processed with NULL)
-        self.invalid_person_id_log.write(f"\n\n{'='*80}\n")
-        self.invalid_person_id_log.write(f"SUMMARY\n")
-        self.invalid_person_id_log.write(f"{'='*80}\n")
-        self.invalid_person_id_log.write(f"Total Arrests with Invalid PERSON_ID (Processed with NULL): {self.stats['total_arrests_failed_person_id']}\n")
-        self.invalid_person_id_log.write(f"\n")
-        self.invalid_person_id_log.write(f"Note: These arrests records were PROCESSED with person_id = NULL because\n")
-        self.invalid_person_id_log.write(f"      PERSON_ID from API was not found in persons table.\n")
-        self.invalid_person_id_log.write(f"      PERSON_ID is optional, so records are still inserted/updated with person_id = NULL.\n")
-        self.invalid_person_id_log.write(f"      Please ensure these PERSON_IDs are loaded in the persons table if needed.\n")
-        
+
         # Duplicates log summary
         self.duplicates_log.write(f"\n\n{'='*80}\n")
         self.duplicates_log.write(f"SUMMARY\n")
@@ -1679,11 +1611,10 @@ class ArrestsETL:
             logger.info(f"  Total Duplicate Occurrences (Processed): {self.stats['total_duplicates']}")
             logger.info(f"  Note: All duplicates are processed to allow updates")
             logger.info(f"")
-            logger.info(f"⚠️  INVALID IDs:")
+            logger.info(f"⚠️  INVALID IDs (SKIPPED):")
             logger.info(f"  Arrests SKIPPED Due to Invalid CRIME_ID: {self.stats['total_arrests_failed_crime_id']}")
+            logger.info(f"  Arrests SKIPPED Due to Invalid PERSON_ID: {self.stats['total_arrests_failed_person_id']}")
             logger.info(f"    Check logs/arrests_invalid_ids_*.log for details")
-            logger.info(f"  Arrests with Invalid PERSON_ID (Processed with NULL): {self.stats['total_arrests_failed_person_id']}")
-            logger.info(f"    Check logs/arrests_invalid_person_id_*.log for details")
             logger.info(f"")
             logger.info(f"📊 COVERAGE:")
             if self.stats['total_arrests_fetched'] > 0:
@@ -1719,8 +1650,7 @@ class ArrestsETL:
             logger.info(f"📝 API chunk log saved to: {self.api_log_file}")
             logger.info(f"📝 DB chunk log saved to: {self.db_log_file}")
             logger.info(f"📝 Failed records log saved to: {self.failed_log_file}")
-            logger.info(f"📝 Invalid IDs log (CRIME_ID only - skipped) saved to: {self.invalid_ids_log_file}")
-            logger.info(f"📝 Invalid PERSON_ID log (processed with NULL) saved to: {self.invalid_person_id_log_file}")
+            logger.info(f"📝 Invalid IDs log (CRIME_ID and PERSON_ID - skipped) saved to: {self.invalid_ids_log_file}")
             logger.info(f"📝 Duplicates log saved to: {self.duplicates_log_file}")
             return True
             
