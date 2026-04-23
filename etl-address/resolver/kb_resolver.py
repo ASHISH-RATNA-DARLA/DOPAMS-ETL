@@ -77,8 +77,11 @@ def resolve_kb(pool, cand: AddressCandidate) -> ResolvedAddress:
         # India first
         country = kb.country_of_indian_state(out.state)
     if country is None:
-        # foreign state → country
+        # foreign state → country (exact)
         country = kb.country_of_foreign_state(out.state)
+    if country is None and (out.state or cand.state):
+        # fuzzy: foreign state token → country (catches unresolved or misspelled state names)
+        country = _trgm_country_from_state(pool, out.state or cand.state)
     if country is None and cand.country:
         country = _trgm_country(pool, cand.country)
     if country is None and cand.nationality:
@@ -200,5 +203,23 @@ def _trgm_country(pool, token: str) -> Optional[str]:
     with pool.get_connection_context() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (token, token, token, SIM_COUNTRY))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+def _trgm_country_from_state(pool, token: str) -> Optional[str]:
+    """Derive country by fuzzy-matching token against geo_countries.state_name."""
+    sql = """
+        SELECT country_name, similarity(lower(state_name), lower(%s)) AS sim
+        FROM geo_countries
+        WHERE state_name IS NOT NULL
+          AND lower(state_name) %% lower(%s)
+          AND similarity(lower(state_name), lower(%s)) >= %s
+        ORDER BY sim DESC
+        LIMIT 1
+    """
+    with pool.get_connection_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (token, token, token, SIM_COUNTRY_STATE))
             row = cur.fetchone()
             return row[0] if row else None

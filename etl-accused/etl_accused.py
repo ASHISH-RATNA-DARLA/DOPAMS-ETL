@@ -1194,17 +1194,21 @@ class AccusedETL:
             logger.error(f"❌ Error inserting fallback accused {accused_id}: {e}")
             return False, f'insert_error: {str(e)}'
     
-    def insert_accused(self, accused: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
+    def insert_accused(self, accused: Dict, conn, cursor, chunk_date_range: str = "",
+                       existing_crimes=None, existing_persons=None, person_stubs_to_create=None) -> Tuple[bool, str]:
         """
         Insert or update single accused into database with smart update logic
         Dates priority: API dates > Crime dates > NULL (never use CURRENT_TIMESTAMP)
-        
+
         Args:
             accused: Transformed accused dict
             conn: Database connection object
             cursor: Database cursor object
             chunk_date_range: Date range for chunk tracking
-        
+            existing_crimes: Set of crime_ids known to exist (optimization - skip per-record check)
+            existing_persons: Set of person_ids known to exist (optimization - skip per-record check)
+            person_stubs_to_create: Set to accumulate person_ids for batch stub creation
+
         Returns:
             Tuple of (success: bool, operation: str) where operation is 'inserted', 'updated', 'no_change', or error reason
         """
@@ -1216,7 +1220,7 @@ class AccusedETL:
             person_id = None
         # Update the accused dict with normalized person_id
         accused['person_id'] = person_id
-        
+
         if not accused_id:
             reason = 'missing_accused_id'
             error_details = "Accused record missing ACCUSED_ID"
@@ -1225,7 +1229,7 @@ class AccusedETL:
                 self.stats['total_accused_failed'] += 1
             self.log_failed_record(accused, reason, error_details)
             return False, reason
-        
+
         if not crime_id:
             reason = 'missing_crime_id'
             error_details = "Accused record missing CRIME_ID"
@@ -1235,14 +1239,18 @@ class AccusedETL:
                 self.stats['accused_without_crime'] += 1
             self.log_failed_record(accused, reason, error_details)
             return False, reason
-        
+
         try:
             logger.trace(f"Processing accused: ACCUSED_ID={accused_id}, CRIME_ID={crime_id}, PERSON_ID={person_id or 'NULL'}")
-            
-            # Check if crime exists in crimes table
-            cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
-            crime_exists = cursor.fetchone() is not None
-            
+
+            # Check if crime exists (use pre-fetched data if available, else fall back to query)
+            if existing_crimes is not None:
+                crime_exists = crime_id in existing_crimes
+            else:
+                # Fallback: per-record check if bulk fetch failed
+                cursor.execute(f"SELECT 1 FROM {CRIMES_TABLE} WHERE crime_id = %s", (crime_id,))
+                crime_exists = cursor.fetchone() is not None
+
             if not crime_exists:
                 # Old format: Simply warn and skip if crime not found
                 reason = 'crime_not_found'
@@ -1256,28 +1264,39 @@ class AccusedETL:
             
             # Check if person exists (create stub if needed) - only if person_id is provided
             if person_id:
-                cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
-                person_exists = cursor.fetchone() is not None
-                
+                # Use pre-fetched data if available, else fall back to query
+                if existing_persons is not None:
+                    person_exists = person_id in existing_persons
+                else:
+                    # Fallback: per-record check if bulk fetch failed
+                    cursor.execute(f"SELECT 1 FROM {PERSONS_TABLE} WHERE person_id = %s", (person_id,))
+                    person_exists = cursor.fetchone() is not None
+
                 if not person_exists:
-                    # Try to create stub person
-                    try:
-                        cursor.execute(
-                            f"INSERT INTO {PERSONS_TABLE} (person_id) VALUES (%s) ON CONFLICT (person_id) DO NOTHING",
-                            (person_id,)
-                        )
-                        with self.stats_lock:
-                            self.stats['stub_persons_created'] += 1
-                        logger.trace(f"Created stub person: {person_id}")
-                    except Exception as e:
-                        reason = 'person_not_found'
-                        error_details = f"PERSON_ID {person_id} not found and could not create stub: {str(e)}"
-                        logger.warning(f"⚠️  {error_details}, skipping accused {accused_id}")
-                        with self.stats_lock:
-                            self.stats['total_accused_failed'] += 1
-                            self.stats['accused_without_person'] += 1
-                        self.log_failed_record(accused, reason, error_details)
-                        return False, reason
+                    # OPTIMIZATION: Accumulate person stubs for batch creation at chunk end
+                    # Instead of inserting per-record, collect them and insert in one batch
+                    if person_stubs_to_create is not None:
+                        person_stubs_to_create.add(person_id)
+                        logger.trace(f"Queued person stub for batch creation: {person_id}")
+                    else:
+                        # Fallback: create stub immediately if batch collection not available
+                        try:
+                            cursor.execute(
+                                f"INSERT INTO {PERSONS_TABLE} (person_id) VALUES (%s) ON CONFLICT (person_id) DO NOTHING",
+                                (person_id,)
+                            )
+                            with self.stats_lock:
+                                self.stats['stub_persons_created'] += 1
+                            logger.trace(f"Created stub person: {person_id}")
+                        except Exception as e:
+                            reason = 'person_not_found'
+                            error_details = f"PERSON_ID {person_id} not found and could not create stub: {str(e)}"
+                            logger.warning(f"⚠️  {error_details}, skipping accused {accused_id}")
+                            with self.stats_lock:
+                                self.stats['total_accused_failed'] += 1
+                                self.stats['accused_without_person'] += 1
+                            self.log_failed_record(accused, reason, error_details)
+                            return False, reason
             else:
                 # person_id is NULL/empty - this is now allowed
                 logger.trace(f"Processing accused with NULL person_id: {accused_id}")
@@ -1709,7 +1728,49 @@ class AccusedETL:
         # Transform and insert each accused
         self.stats['total_accused_fetched'] += len(accused_raw)
         logger.trace(f"Processing {len(accused_raw)} accused for chunk {chunk_range}")
-        
+
+        # OPTIMIZATION: Pre-fetch crime and person data for entire chunk (batch instead of per-record)
+        unique_crime_ids = set()
+        unique_person_ids = set()
+        for row in accused_raw:
+            crime_id = row.get('CRIME_ID')
+            person_id = row.get('PERSON_ID')
+            if crime_id:
+                unique_crime_ids.add(crime_id)
+            if person_id:
+                unique_person_ids.add(person_id)
+
+        logger.trace(f"Chunk has {len(unique_crime_ids)} unique crimes, {len(unique_person_ids)} unique persons")
+
+        # Bulk fetch existing crimes and persons (single queries instead of per-record)
+        existing_crimes = set()
+        existing_persons = set()
+        try:
+            with self.db_pool.get_connection_context() as check_conn:
+                check_cursor = check_conn.cursor()
+
+                # Bulk fetch existing crimes
+                if unique_crime_ids:
+                    check_cursor.execute(
+                        f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = ANY(%s)",
+                        (list(unique_crime_ids),)
+                    )
+                    existing_crimes = {row[0] for row in check_cursor.fetchall()}
+                    logger.trace(f"Found {len(existing_crimes)}/{len(unique_crime_ids)} crimes in database")
+
+                # Bulk fetch existing persons
+                if unique_person_ids:
+                    check_cursor.execute(
+                        f"SELECT person_id FROM {PERSONS_TABLE} WHERE person_id = ANY(%s)",
+                        (list(unique_person_ids),)
+                    )
+                    existing_persons = {row[0] for row in check_cursor.fetchall()}
+                    logger.trace(f"Found {len(existing_persons)}/{len(unique_person_ids)} persons in database")
+        except Exception as e:
+            logger.warning(f"Failed to bulk fetch crime/person data for chunk: {e}, falling back to per-record checks")
+            existing_crimes = None
+            existing_persons = None
+
         # Track operations for this chunk
         inserted_ids = []
         updated_ids = []
@@ -1719,13 +1780,16 @@ class AccusedETL:
         duplicates_in_chunk = []
         # crime_ids of newly inserted accused rows — used to invalidate Branch C logs
         inserted_crime_ids = set()
-        
+
         # Track accused_ids seen in this chunk to detect duplicates (for reporting only, not skipping)
         seen_accused_ids = {}
         accused_id_occurrences = {}  # Track how many times each accused_id appears
-        
+
+        # Collect person stubs to create in batch at chunk end (instead of per-record)
+        person_stubs_to_create = set()
+
         logger.trace(f"Starting to process records for chunk: {chunk_range} concurrently")
-        
+
         def process_row(accused_raw_row, chunk_range):
             # Protected resource access using ConnectionLimiter
             with self.db_limiter.acquire() as conn:
@@ -1736,7 +1800,12 @@ class AccusedETL:
                     with self.stats_lock:
                         self.stats['total_accused_failed'] += 1
                     return {'accused_id': None, 'operation': 'missing_accused_id', 'success': False, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
-                success, operation = self.insert_accused(accused, conn, cursor, chunk_range)
+                success, operation = self.insert_accused(
+                    accused, conn, cursor, chunk_range,
+                    existing_crimes=existing_crimes,  # Pass pre-fetched data
+                    existing_persons=existing_persons,
+                    person_stubs_to_create=person_stubs_to_create
+                )
                 return {'accused_id': accused_id, 'operation': operation, 'success': success, 'crime_id': accused.get('crime_id'), 'person_id': accused.get('person_id')}
 
         # Scale concurrency for 64GB server; default to 8 workers per chunk
@@ -1808,7 +1877,26 @@ class AccusedETL:
                         failed_reasons[operation].append(accused_id)
                 except Exception as exc:
                     logger.error(f"Record generated an exception: {exc}")
-        
+
+        # OPTIMIZATION: Batch create person stubs at end of chunk (instead of per-record)
+        if person_stubs_to_create:
+            try:
+                with self.db_pool.get_connection_context() as stub_conn:
+                    stub_cursor = stub_conn.cursor()
+                    # Create all stubs in one batch using execute_batch
+                    stub_values = [(pid,) for pid in person_stubs_to_create]
+                    execute_batch(
+                        stub_cursor,
+                        f"INSERT INTO {PERSONS_TABLE} (person_id) VALUES (%s) ON CONFLICT (person_id) DO NOTHING",
+                        stub_values
+                    )
+                    stub_conn.commit()
+                    with self.stats_lock:
+                        self.stats['stub_persons_created'] += len(person_stubs_to_create)
+                    logger.trace(f"Batch created {len(person_stubs_to_create)} person stubs for chunk {chunk_range}")
+            except Exception as e:
+                logger.warning(f"Failed to batch create person stubs for chunk {chunk_range}: {e}")
+
         # Log duplicates for this chunk (for reporting, but they were all processed)
         if duplicates_in_chunk:
             logger.info(f"📊 Found {len(duplicates_in_chunk)} duplicate occurrences in chunk {chunk_range} - All were processed for potential updates")

@@ -1,4 +1,0 @@
-SELECT COUNT(*)
-FROM persons
-WHERE TRIM(COALESCE(permanent_area_mandal,'')) = ''
-   OR TRIM(COALESCE(present_area_mandal,'')) = '';

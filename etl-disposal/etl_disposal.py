@@ -303,28 +303,33 @@ class DisposalETL:
             self.duplicates_log.close()
     
     def connect_db(self):
-        """Connect to PostgreSQL database with optimized pool sizing"""
+        """Connect to PostgreSQL database with optimized pool sizing for parallel chunk processing"""
         try:
             pool_config = DB_CONFIG.copy()
-            
-            # Smart connection pool sizing to avoid worker contention
-            # Formula: max_workers * 1.5 ensures each worker can get a connection when needed
-            # plus buffer for schema operations
-            max_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
-            optimal_pool_size = max(max_workers // 2, 5)  # At least 5, but allow worker sharing
-            max_pool_size = max_workers + 10  # Max can be higher to prevent queue buildup
-            
-            pool_config['minconn'] = optimal_pool_size // 2
-            pool_config['maxconn'] = max_pool_size
-            
+
+            # Auto-scale pool for parallel chunk processing
+            # Chunk workers: parallel date range processors (from DISPOSAL_CHUNK_PARALLEL_WORKERS or CHUNK_PARALLEL_WORKERS env)
+            # Record workers: within-chunk record processors (from MAX_WORKERS env)
+            chunk_workers = int(os.environ.get('DISPOSAL_CHUNK_PARALLEL_WORKERS', os.environ.get('CHUNK_PARALLEL_WORKERS', 4)))
+            record_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
+
+            # Pool sizing: chunk_workers may grab connections in parallel
+            # Each chunk may use multiple record_workers internally
+            minconn = max(10, chunk_workers + 3)  # Pre-allocate: chunk_workers + buffer
+            maxconn = max(20, chunk_workers * 2 + 5)  # Max: chunk_workers * 2 + safety buffer
+
+            # Auto-downgrade if configured values are too small
+            pool_config['minconn'] = minconn
+            pool_config['maxconn'] = maxconn
+
             self.db_pool = PostgreSQLConnectionPool(**pool_config)
-            
+
             # Keep one permanent connection for schema generation operations if needed
             self.db_conn = self.db_pool.get_connection()
             self.db_cursor = self.db_conn.cursor()
-            
+
             logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']} using connection pool")
-            logger.info(f"   Pool: min={optimal_pool_size // 2}, max={max_pool_size} (workers={max_workers})")
+            logger.info(f"   Pool: min={minconn}, max={maxconn} (chunk_workers={chunk_workers}, record_workers={record_workers})")
             return self.db_pool is not None
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")
@@ -1320,7 +1325,91 @@ class DisposalETL:
                 self.db_log.write(f"\n")
             
             self.db_log.flush()
-    
+
+    def _process_chunk_worker(self, from_date: str, to_date: str, table_columns: Set[str], result_queue, worker_id: int):
+        """Worker thread for processing individual date range chunks in parallel"""
+        chunk_range = f"{from_date} to {to_date}"
+        try:
+            logger.debug(f"⚡ Worker {worker_id} processing: {chunk_range}")
+            self.process_date_range(from_date, to_date, table_columns)
+            result_queue.append({
+                'worker_id': worker_id,
+                'chunk': chunk_range,
+                'success': True,
+                'error': None
+            })
+        except Exception as e:
+            logger.error(f"❌ Worker {worker_id} failed for {chunk_range}: {e}")
+            result_queue.append({
+                'worker_id': worker_id,
+                'chunk': chunk_range,
+                'success': False,
+                'error': str(e)
+            })
+
+    def process_date_ranges_parallel(self, date_ranges: List[Tuple[str, str]], table_columns: Set[str]):
+        """Orchestrate parallel chunk processing with error recovery and monitoring"""
+        import queue
+
+        # Determine optimal worker count (disposal-specific or global setting)
+        chunk_workers = min(
+            int(os.environ.get('DISPOSAL_CHUNK_PARALLEL_WORKERS', os.environ.get('CHUNK_PARALLEL_WORKERS', 4))),
+            len(date_ranges)  # Don't create more workers than chunks
+        )
+
+        # Verify pool can handle parallel workers (reserve 5 connections for metadata ops)
+        if self.db_pool:
+            max_pool_workers = getattr(self.db_pool, 'maxconn', 32) - 5
+            if chunk_workers > max_pool_workers:
+                logger.warning(f"⚠️  Reducing workers from {chunk_workers} to {max_pool_workers} (pool capacity limit)")
+                chunk_workers = max(1, max_pool_workers)
+
+        logger.info(f"⚡ Starting parallel chunk processing ({len(date_ranges)} chunks)")
+        logger.info(f"🔄 Parallel workers: {chunk_workers} (max_pool_workers={max_pool_workers if self.db_pool else 'unknown'})")
+        logger.info("")
+
+        failed_chunks = []
+        processed = 0
+
+        with ThreadPoolExecutor(max_workers=chunk_workers) as executor:
+            result_queue = []
+            futures = {}
+
+            # Submit all chunks to executor
+            for worker_id, (from_date, to_date) in enumerate(date_ranges, 1):
+                future = executor.submit(
+                    self._process_chunk_worker,
+                    from_date, to_date, table_columns, result_queue, worker_id
+                )
+                futures[future] = (from_date, to_date)
+
+            # Monitor progress with progress bar
+            with tqdm(total=len(date_ranges), desc="Processing chunks", unit="chunk") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        from_date, to_date = futures[future]
+                        logger.error(f"❌ Future failed for {from_date} to {to_date}: {e}")
+                        failed_chunks.append((from_date, to_date, str(e)))
+
+                    processed += 1
+                    pbar.update(1)
+
+        # Queue failed chunks for sequential retry with exponential backoff
+        if failed_chunks:
+            logger.warning(f"⚠️  {len(failed_chunks)} chunks failed, queuing for sequential retry")
+            for attempt, (from_date, to_date, error) in enumerate(failed_chunks, 1):
+                retry_delay = 0.5 * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s, 8s...
+                logger.info(f"🔄 Retrying {attempt}/{len(failed_chunks)}: {from_date} to {to_date} (delay={retry_delay:.1f}s)")
+                time.sleep(retry_delay)
+                try:
+                    self.process_date_range(from_date, to_date, table_columns)
+                except Exception as e:
+                    logger.error(f"❌ Retry failed for {from_date} to {to_date}: {e}")
+
+        logger.info(f"✅ Chunk processing complete: {processed}/{len(date_ranges)} successful")
+
     def write_log_summaries(self):
         """Write summary sections to all log files"""
         # API log summary
@@ -1543,12 +1632,9 @@ class DisposalETL:
             logger.info(f"ℹ️  Date Range: {format_iso_date(start_dt)} to {format_iso_date(end_dt)}")
             logger.info(f"ℹ️  ETL Server Timezone: UTC")
             logger.info("")
-            
-            # Process each date range with progress bar
-            for from_date, to_date in tqdm(date_ranges, desc="Processing date ranges", unit="range"):
-                # Process the chunk (will check for schema evolution and process data)
-                self.process_date_range(from_date, to_date, table_columns)
-                time.sleep(1)  # Be nice to the API
+
+            # Process each date range in parallel for significant speedup
+            self.process_date_ranges_parallel(date_ranges, table_columns)
             
             # Get database counts
             with self.db_pool.get_connection_context() as conn:

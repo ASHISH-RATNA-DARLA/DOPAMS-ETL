@@ -95,11 +95,15 @@ class PersonsETL:
             'errors': 0,
             'dry_run_changes': 0,
             'dry_run_no_change': 0,
-            'dry_run_inserts': 0
+            'dry_run_inserts': 0,
+            'llm_skipped': 0,  # Records queued but not resolved by LLM
+            'llm_resolved': 0  # Records successfully resolved by LLM
         }
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
         self.dry_run_lock = threading.Lock()
+        self.llm_retry_queue = []  # Track records that failed LLM for retry
+        self.llm_queue_lock = threading.Lock()
 
         self.dry_run_log_file = None
         if self.person_gender_dry_run:
@@ -1293,6 +1297,7 @@ class PersonsETL:
                     fix_batch.append((new_gender, new_conf, new_source, person_id, old_gender))
 
             # LLM batch pass for names that rule engine could not resolve
+            llm_failed_records = []
             if pending_llm:
                 logger.info(f"   🤖 LLM batch pass for {len(pending_llm)} unresolved names …")
                 bs = self.llm_gender_batch_size
@@ -1302,17 +1307,31 @@ class PersonsETL:
                     llm_results = self._infer_gender_llm_batch(name_list)
                     for person_id, inf_name, old_gender in chunk:
                         if inf_name not in llm_results:
+                            llm_failed_records.append((person_id, inf_name, old_gender))
+                            with self.stats_lock:
+                                self.stats['llm_skipped'] += 1
                             continue
                         llm_gender, llm_conf = llm_results[inf_name]
                         if llm_gender == old_gender or llm_gender == 'Unknown':
+                            llm_failed_records.append((person_id, inf_name, old_gender))
+                            with self.stats_lock:
+                                self.stats['llm_skipped'] += 1
                             continue
                         corrected += 1
+                        with self.stats_lock:
+                            self.stats['llm_resolved'] += 1
                         logger.info(
                             f"   🤖 {person_id} | {inf_name!r} → "
                             f"{old_gender} → {llm_gender} (llm {llm_conf:.3f})"
                         )
                         if not effective_dry_run:
                             fix_batch.append((llm_gender, llm_conf, 'llm', person_id, old_gender))
+
+                # Queue failed records for retry with available parallel workers
+                if llm_failed_records:
+                    with self.llm_queue_lock:
+                        self.llm_retry_queue.extend(llm_failed_records)
+                    logger.warning(f"   ⏳ Queued {len(llm_failed_records)} records for LLM retry in next batch")
 
             if fix_batch and not effective_dry_run:
                 with self.db_pool.get_connection_context() as conn:
@@ -1545,11 +1564,11 @@ class PersonsETL:
             except requests.exceptions.Timeout:
                 logger.warning(f"API timeout for person {person_id}, retrying... (Attempt {attempt + 1}/{API_CONFIG['max_retries']})")
                 if attempt < API_CONFIG['max_retries'] - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(3)
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"API connection error for person {person_id}, retrying... (Attempt {attempt + 1}/{API_CONFIG['max_retries']}): {e}")
                 if attempt < API_CONFIG['max_retries'] - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(3)
             except Exception as e:
                 logger.error(f"API error for person {person_id}: {e}")
                 if attempt == API_CONFIG['max_retries'] - 1:
@@ -1988,22 +2007,22 @@ class PersonsETL:
                 nonlocal first_record_processed
                 data = self.fetch_person_api(pid, from_date, to_date)
                 if data:
-                    # Check for schema evolution on first record
+                    # Check for schema evolution on first record with minimal lock contention
                     if not first_record_processed and table_columns is not None and not self.person_gender_dry_run:
-                        with self.schema_lock:
-                            # Double check in case another thread already did it
-                            if not first_record_processed:
-                                new_fields = self.detect_new_fields(data, table_columns)
-                                if new_fields:
+                        new_fields = self.detect_new_fields(data, table_columns)
+                        if new_fields:
+                            with self.schema_lock:
+                                if not first_record_processed:
                                     logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
-                                    # Add new columns to table
                                     for api_field, db_column in new_fields.items():
                                         if self.add_column_to_table(db_column):
-                                            # Update table_columns set
                                             table_columns.add(db_column)
-                                    # Update existing records with new fields
                                     self.update_existing_records_with_new_fields(new_fields)
-                                first_record_processed = True
+                                    first_record_processed = True
+                        else:
+                            first_record_processed = True
+                    elif not first_record_processed:
+                        first_record_processed = True
                     
                     db_retry_attempts = int(os.environ.get('DB_WRITE_MAX_RETRIES', '3'))
                     for db_attempt in range(db_retry_attempts):
@@ -2066,6 +2085,58 @@ class PersonsETL:
                                         f"Failed: {self.stats['failed']}"
                                     )
 
+            # Process queued LLM retry records with available parallel workers
+            with self.llm_queue_lock:
+                retry_queue = self.llm_retry_queue.copy()
+                self.llm_retry_queue.clear()
+
+            if retry_queue and self.llm_gender_enabled:
+                logger.info("")
+                logger.info(f"🔄 Processing {len(retry_queue)} queued LLM retry records …")
+
+                retry_fix_batch = []
+                retry_bs = self.llm_gender_batch_size
+                for chunk_start in range(0, len(retry_queue), retry_bs):
+                    chunk = retry_queue[chunk_start: chunk_start + retry_bs]
+                    name_list = [inf_name for _, inf_name, _ in chunk]
+                    llm_results = self._infer_gender_llm_batch(name_list)
+                    for person_id, inf_name, old_gender in chunk:
+                        if inf_name not in llm_results:
+                            logger.debug(f"   ⏭️  {person_id} | {inf_name!r} — LLM still unable to resolve")
+                            continue
+                        llm_gender, llm_conf = llm_results[inf_name]
+                        if llm_gender == old_gender or llm_gender == 'Unknown':
+                            logger.debug(f"   ⏭️  {person_id} | {inf_name!r} — no gender change {old_gender} → {llm_gender}")
+                            continue
+                        logger.info(
+                            f"   ✅ {person_id} | {inf_name!r} → "
+                            f"{old_gender} → {llm_gender} (retry, llm {llm_conf:.3f})"
+                        )
+                        retry_fix_batch.append((llm_gender, llm_conf, 'llm', person_id, old_gender))
+                        with self.stats_lock:
+                            self.stats['llm_resolved'] += 1
+
+                if retry_fix_batch:
+                    with self.db_pool.get_connection_context() as conn:
+                        cursor = conn.cursor()
+                        execute_batch(
+                            cursor,
+                            f"""
+                            UPDATE {PERSONS_TABLE}
+                            SET gender = %s,
+                                gender_confidence = %s,
+                                gender_source = %s
+                            WHERE person_id = %s
+                              AND gender = %s
+                              AND (gender_source IS NULL
+                                   OR gender_source NOT IN ('api', 'invalid_name'))
+                            """,
+                            retry_fix_batch,
+                            page_size=500,
+                        )
+                        conn.commit()
+                    logger.info(f"✅ Resolved {len(retry_fix_batch)} retried records via LLM")
+
             # Get database counts
             with self.db_pool.get_connection_context() as conn:
                 cursor = conn.cursor()
@@ -2095,6 +2166,10 @@ class PersonsETL:
             if self.stats['person_ids'] > 0:
                 coverage = ((self.stats['inserted'] + self.stats['updated']) / self.stats['person_ids']) * 100
                 logger.info(f"  Processed → DB Coverage: {coverage:.2f}%")
+            logger.info(f"")
+            logger.info(f"🤖 LLM GENDER INFERENCE:")
+            logger.info(f"  Resolved by LLM:          {self.stats['llm_resolved']}")
+            logger.info(f"  Queued (unable to resolve): {self.stats['llm_skipped']}")
             logger.info(f"")
             logger.info(f"❌ Errors:                  {self.stats['errors']}")
             if self.person_gender_dry_run:

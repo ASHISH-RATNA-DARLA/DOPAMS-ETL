@@ -47,6 +47,18 @@ STATE_ABBREV = {
     "ld": "Lakshadweep",
 }
 
+COUNTRY_ALIASES = {
+    "us":                      "United States",
+    "usa":                     "United States",
+    "u s":                     "United States",
+    "u s a":                   "United States",
+    "united states of america":"United States",
+    "uk":                      "United Kingdom",
+    "u k":                     "United Kingdom",
+    "uae":                     "United Arab Emirates",
+    "u a e":                   "United Arab Emirates",
+}
+
 CITY_NICKNAMES = {
     "hyd": "Hyderabad",
     "sec": "Secunderabad",
@@ -120,6 +132,16 @@ def expand_state(raw: Optional[str]) -> Optional[str]:
     key = t.lower().strip().rstrip(".")
     if key in STATE_ABBREV:
         return STATE_ABBREV[key]
+    return _titlecase(t)
+
+
+def expand_country(raw: Optional[str]) -> Optional[str]:
+    t = norm_token(raw)
+    if not t:
+        return None
+    key = t.lower().strip().rstrip(".")
+    if key in COUNTRY_ALIASES:
+        return COUNTRY_ALIASES[key]
     return _titlecase(t)
 
 
@@ -214,7 +236,7 @@ def build_candidates(row: PersonRow) -> tuple[AddressCandidate, AddressCandidate
         state=expand_state(row.perm_state),
         district=expand_city(row.perm_district),
         mandal=expand_city(row.perm_mandal),
-        country=_titlecase(norm_token(row.perm_country) or "") or None,
+        country=expand_country(row.perm_country),
         ward=norm_token(row.perm_ward),
         street=norm_token(row.perm_street),
         pin=norm_token(row.perm_pin),
@@ -232,7 +254,7 @@ def build_candidates(row: PersonRow) -> tuple[AddressCandidate, AddressCandidate
         state=expand_state(row.pres_state),
         district=expand_city(row.pres_district),
         mandal=expand_city(row.pres_mandal),
-        country=_titlecase(norm_token(row.pres_country) or "") or None,
+        country=expand_country(row.pres_country),
         ward=norm_token(row.pres_ward),
         street=norm_token(row.pres_street),
         pin=norm_token(row.pres_pin),
