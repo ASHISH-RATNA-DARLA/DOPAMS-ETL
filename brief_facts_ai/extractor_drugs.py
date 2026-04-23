@@ -336,6 +336,44 @@ class CrimeReportExtraction(BaseModel):
     drugs: List[DrugExtraction]
 
 
+_ACCUSED_REF_PATTERN = re.compile(r'\bA\s*[-.]?\s*(\d+)\b', flags=re.IGNORECASE)
+
+
+def _normalize_accused_ref(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = " ".join(str(value).strip().split())
+    if not text:
+        return None
+
+    match = _ACCUSED_REF_PATTERN.search(text)
+    if match:
+        return f"A-{int(match.group(1))}"
+
+    return text.upper()
+
+
+def _extract_dedup_accused_ref(drug: DrugExtraction) -> Optional[str]:
+    meta = drug.extraction_metadata if isinstance(drug.extraction_metadata, dict) else {}
+
+    accused_ref = _normalize_accused_ref(meta.get("accused_ref"))
+    if accused_ref:
+        return accused_ref
+
+    source_sentence = str(meta.get("source_sentence") or "")
+    matches = []
+    for match in _ACCUSED_REF_PATTERN.finditer(source_sentence):
+        normalized = f"A-{int(match.group(1))}"
+        if normalized not in matches:
+            matches.append(normalized)
+
+    if len(matches) == 1:
+        return matches[0]
+
+    return None
+
+
 # =============================================================================
 # Extraction Prompt
 # =============================================================================
@@ -499,6 +537,31 @@ NOTE: Motorcycle is NOT extracted (R20). W/Rs 4000/- is seizure_worth even thoug
 EXTRACT EVERY DRUG SEIZURE. If seizure is collective with NO per-person breakdown, produce ONE entry with the total quantity. Extract seizure_worth from "worth Rs.", "W/Rs:", "valued at", "worth of Rs." mentions — map each worth to its specific drug. Set worth_scope to indicate if the value is individual, drug_total, or overall_total. Set is_commercial=true ONLY if the text explicitly mentions "commercial quantity". NEVER extract vehicles, phones, cash, paraphernalia, or alcohol as drug entries (R20). RETURN VALID JSON ONLY. NO MARKDOWN.
 """
 
+
+# Prompt override: keep the legacy prompt above for reference, but use this
+# shorter production prompt to preserve per-accused seizures and accused refs.
+EXTRACTION_PROMPT = """You are an expert forensic analyst extracting NDPS drug seizure rows from police brief facts.
+
+Return VALID JSON ONLY with this exact shape:
+{"drugs":[{"raw_drug_name":str,"raw_quantity":float,"raw_unit":str,"primary_drug_name":str,"drug_form":"solid|liquid|count","seizure_worth":float,"worth_scope":"individual|drug_total|overall_total","is_commercial":bool,"confidence_score":int,"supplier_name":str|null,"source_location":str|null,"destination":str|null,"purchase_price_per_unit":float|null,"extraction_metadata":{"source_sentence":str,"accused_ref":str|null}}]}
+
+Rules:
+1. One row per actual seizure incident. Different accused with the same drug are separate rows.
+2. If per-person quantities are stated, create one row per person. Example: A1 has 800g Ganja and A2 has 50g Ganja -> 2 rows.
+3. If multiple people share one common total with NO per-person split, create exactly 1 collective row for that total.
+4. Per-accused rows are NOT duplicates. Example: 6 accused each having 50g Ganja from their own possession -> 6 rows.
+5. Skip customers or buyers mentioned only in confession history when nothing is seized from them.
+6. Critical edge case: if a person is called a buyer/customer but is later apprehended and contraband is seized from that person's possession, that person IS a valid seizure row and must be extracted.
+7. Extract only the quantity physically seized at arrest. Skip historical purchase quantities, already-sold quantities, samples S1/S2, and remaining property breakdowns like P1 when they are subsets of the seized total.
+8. When a row belongs to one accused, extraction_metadata.accused_ref MUST contain the accused code from the roster (A1, A2, etc.). If no code exists, use the exact accused name. For collective unattributed totals, set accused_ref to null.
+9. extraction_metadata.source_sentence must be the verbatim clause or sentence supporting that row.
+10. Extract seizure_worth from worth phrases such as "worth Rs.", "W/Rs:", "market value", or "valued at". If one worth covers all rows of the same drug, use worth_scope="drug_total". If one worth covers all drugs, use worth_scope="overall_total". If no worth is stated, set seizure_worth=0 and worth_scope="individual".
+11. Never extract vehicles, phones, SIM cards, cash, alcohol, empty covers, weighing scales, or other non-drug property as drug rows.
+12. Use the actual NDPS drug name for primary_drug_name whenever identifiable.
+
+Input text:
+{text}
+"""
 
 # =============================================================================
 # Post-processing Step 1 (NEW): Resolve primary_drug_name via KB lookup
@@ -1075,11 +1138,12 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
 
     seen = {}
     for drug in drugs:
-        # Dedup key: primary drug identity only (not quantity/unit)
-        # This allows consolidation of same drug with different unit representations
+        # Dedup key keeps same-drug rows separate across different accused, while
+        # still consolidating alternate unit representations for the same seizure.
         key = (
             (drug.primary_drug_name or '').lower().strip(),
             (drug.raw_drug_name or '').lower().strip(),
+            (_extract_dedup_accused_ref(drug) or '').lower().strip(),
             (drug.supplier_name or '').lower().strip(),        # Different supplier = different seizure
             (drug.source_location or '').lower().strip(),      # Different location = different seizure
         )

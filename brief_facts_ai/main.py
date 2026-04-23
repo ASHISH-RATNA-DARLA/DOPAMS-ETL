@@ -552,8 +552,8 @@ def _fetch_current_bfai_rows(conn, crime_id):
             WHERE crime_id = %s
             ORDER BY
                 CASE
-                    WHEN seq_num ~ '^[0-9]+$' THEN seq_num::int
-                    ELSE 2147483647
+                    WHEN seq_num ~ '^[0-9]+$' THEN seq_num::numeric
+                    ELSE 999999999999999999
                 END,
                 bf_accused_id
             """,

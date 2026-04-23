@@ -271,7 +271,21 @@ def fetch_existing_accused_for_crime(conn, crime_id):
                    NULLIF(TRIM(CONCAT_WS(', ', NULLIF(TRIM(p.present_house_no), ''), NULLIF(TRIM(p.present_street_road_no), ''),
                    NULLIF(TRIM(p.present_ward_colony), ''), NULLIF(TRIM(p.present_locality_village), ''), NULLIF(TRIM(p.present_area_mandal), ''),
                    NULLIF(TRIM(p.present_district), ''), NULLIF(TRIM(p.present_state_ut), ''), NULLIF(TRIM(p.present_country), ''))), '') AS address
-            FROM accused a LEFT JOIN persons p ON a.person_id = p.person_id WHERE a.crime_id = %s
+            FROM accused a
+            LEFT JOIN persons p ON a.person_id = p.person_id
+            WHERE a.crime_id = %s
+            ORDER BY
+                CASE
+                    WHEN a.accused_code ~* '^A[-.]?[0-9]+$'
+                    THEN regexp_replace(a.accused_code, '\D', '', 'g')::numeric
+                    ELSE NULL
+                END NULLS LAST,
+                CASE
+                    WHEN a.seq_num ~ '^[0-9]+$'
+                    THEN a.seq_num::numeric
+                    ELSE NULL
+                END NULLS LAST,
+                a.accused_id
         """
         cur.execute(query, (crime_id,))
         return cur.fetchall()
@@ -436,6 +450,40 @@ def _norm_person_code(value):
     m = re.search(r'A\s*[-.]?\s*(\d+)', v)
     if m: return f"A-{int(m.group(1))}"
     return None
+
+
+def _safe_int(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or not text.isdigit():
+        return None
+    return int(text)
+
+
+def _bfai_row_sort_key(row):
+    code = _norm_person_code(row.get('person_code'))
+    code_num = _safe_int(code.split('-', 1)[1]) if code and '-' in code else None
+    seq_num = _safe_int(row.get('seq_num'))
+    return (
+        0 if code_num is not None else 1,
+        code_num if code_num is not None else 10**12,
+        0 if seq_num is not None else 1,
+        seq_num if seq_num is not None else 10**18,
+        str(row.get('full_name') or '').lower(),
+        str(row.get('accused_id') or ''),
+    )
+
+
+def _pick_primary_row(rows):
+    if not rows:
+        return None
+
+    for row in rows:
+        if _norm_person_code(row.get('person_code')) == 'A-1':
+            return row
+
+    return sorted(rows, key=_bfai_row_sort_key)[0]
 
 def _extract_person_codes(drug_data):
     if not isinstance(drug_data, dict):
@@ -628,8 +676,8 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
         None
     )
     real_rows = [r for r in bfai_rows if r.get('accused_id')]
-    ordered_real_rows = real_rows if real_rows else bfai_rows
-    primary_row = ordered_real_rows[0] if ordered_real_rows else bfai_rows[0]
+    ordered_real_rows = sorted(real_rows if real_rows else bfai_rows, key=_bfai_row_sort_key)
+    primary_row = _pick_primary_row(ordered_real_rows) or (bfai_rows[0] if bfai_rows else None)
 
     for drug_data in drug_data_list:
         if not isinstance(drug_data, dict):
