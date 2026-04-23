@@ -436,7 +436,9 @@ R23:cannabis-edibles|chocolates/cookies/brownies/laddoos or any food described a
 R24:precursors|acetic anhydride, ephedrine, pseudoephedrine, phenylacetic acid, and other NDPS Table I/II precursors are extractable|primary_drug_name must be the chemical name exactly|do NOT confuse with cutting agents (sugar, starch)
 R25:source-sentence|extraction_metadata.source_sentence MUST be the verbatim sentence/clause that contains the drug mention|never summarize|if quantity spans two sentences, include both verbatim
 R26:supplier-name|if text says accused "purchased from X" or "brought from X"→set supplier_name=X|extract only the SUPPLIER (person they bought from), NOT the accused themselves|if no supplier mentioned→null
+R26A:RULE 15 CLARIFICATION|supplier is CONTEXT ONLY, never assign drugs to supplier as accused|Example: "A1 confessed he purchased ganja from Raju for Rs.5000"→assign drug to A1 (who possessed it), set supplier_name=Raju (context)|Raju is NOT in crime facts unless arrested; only use Raju's name if Raju is explicitly charged in the FIR|if supplier not in accused list, assign drug to the actual possessor (e.g. A1) not supplier
 R27:source-location|if text explicitly names a city/state/country as origin of drugs (e.g. "brought from Goa"→"Goa", "from Delhi supplier"→"Delhi")→set source_location|only when PLACE is explicitly named|if not present→null
+R27A:RULE 16 CLARIFICATION|location context used only if explicitly present in brief facts|Example: "contraband recovered from A1's car parked at Market Street"→location="Market Street" (explicit)|Example: "A1 apprehended in Hyderabad"→location could be Hyderabad (explicitly named)|NEVER infer location from non-explicit clues|location is for context and consolidation, never for accusation inference
 R28:destination|if text states intended delivery city/location (e.g. "to be sold in Hyderabad")→set destination|only when EXPLICIT→null if not mentioned
 R29:purchase-price|if text states "purchased for Rs.X per packet/kg" or "bought at Rs.X"→set purchase_price_per_unit=X (float rupees per unit)|this is NOT seizure_worth|if not mentioned→null
 
@@ -1046,35 +1048,163 @@ def _collapse_collective_seizures(drugs: List[DrugExtraction]) -> List[DrugExtra
 
 def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 100) -> List[DrugExtraction]:
     """
-    Remove duplicate drug extractions and cap at max_per_crime.
-    Deduplicates by (primary_drug_name, raw_drug_name, raw_quantity, raw_unit).
-    Keeps the highest confidence entry when exact duplicates exist.
+    Remove duplicate drug extractions and consolidate multi-unit seizures into single entries.
+
+    Deduplication strategy:
+    1. PRIMARY DEDUP: By (primary_drug_name, raw_drug_name) only — ignores quantity/unit.
+       Rationale: Same drug with different unit representations (32 tablets vs 19.648g)
+       are the SAME seizure, just measured differently.
+
+    2. CONSOLIDATION: For duplicates, merge measurements and keep highest confidence.
+       - weight_g, weight_kg, volume_ml, volume_l, count_total are normalized forms.
+       - Keep the entry with highest confidence_score.
+       - Preserve all source data for audit trail (raw_quantity, raw_unit, extraction_metadata).
+
+    3. EDGE CASES:
+       - Different suppliers/locations for same drug → keep separate (different seizures).
+       - Same drug, same quantities, different units (e.g., 32 tablets = 19.648g) → consolidate.
+
+    Example:
+       Input:  [{primary_drug_name: 'Spasmo Proxyvon', raw_quantity: 32, raw_unit: 'tablets', confidence: 0.95},
+                {primary_drug_name: 'Spasmo Proxyvon', raw_quantity: 19.648, raw_unit: 'grams', confidence: 0.95}]
+       Output: [{primary_drug_name: 'Spasmo Proxyvon', raw_quantity: 32, raw_unit: 'tablets',
+                 weight_g: 19.648, count_total: 32, confidence: 0.95}]
     """
     if not drugs:
         return drugs
 
     seen = {}
     for drug in drugs:
+        # Dedup key: primary drug identity only (not quantity/unit)
+        # This allows consolidation of same drug with different unit representations
         key = (
             (drug.primary_drug_name or '').lower().strip(),
             (drug.raw_drug_name or '').lower().strip(),
-            round(float(drug.raw_quantity or 0), 2),
-            (drug.raw_unit or '').lower().strip()
+            (drug.supplier_name or '').lower().strip(),        # Different supplier = different seizure
+            (drug.source_location or '').lower().strip(),      # Different location = different seizure
         )
+
         existing = seen.get(key)
-        if not existing or (drug.confidence_score or 0) > (existing.confidence_score or 0):
+        if not existing:
             seen[key] = drug
+        else:
+            # Consolidation logic: keep higher confidence, merge measurements
+            if (drug.confidence_score or 0) > (existing.confidence_score or 0):
+                # Preserve measurement data from new entry, but keep raw fields from existing if missing
+                if not drug.raw_quantity or drug.raw_quantity == 0:
+                    drug.raw_quantity = existing.raw_quantity
+                    drug.raw_unit = existing.raw_unit
+                # Merge standardized measurements (weight_g, weight_kg, volume_ml, volume_l, count_total)
+                # Prefer non-null values from either entry
+                if drug.weight_g is None:
+                    drug.weight_g = existing.weight_g
+                if drug.weight_kg is None:
+                    drug.weight_kg = existing.weight_kg
+                if drug.volume_ml is None:
+                    drug.volume_ml = existing.volume_ml
+                if drug.volume_l is None:
+                    drug.volume_l = existing.volume_l
+                if drug.count_total is None:
+                    drug.count_total = existing.count_total
+                # Keep metadata from both (append source_sentence if different)
+                if isinstance(drug.extraction_metadata, dict) and isinstance(existing.extraction_metadata, dict):
+                    existing_source = (existing.extraction_metadata or {}).get('source_sentence', '')
+                    drug_source = (drug.extraction_metadata or {}).get('source_sentence', '')
+                    if existing_source and drug_source and existing_source != drug_source:
+                        # Store alternate measurement source for audit trail
+                        drug.extraction_metadata['alternate_source_sentence'] = existing_source
+                seen[key] = drug
+            else:
+                # Existing entry has higher/equal confidence, merge new measurements into it
+                if drug.raw_quantity and drug.raw_quantity > 0 and (not existing.raw_quantity or existing.raw_quantity == 0):
+                    existing.raw_quantity = drug.raw_quantity
+                    existing.raw_unit = drug.raw_unit
+                # Merge standardized measurements
+                if drug.weight_g is not None and (existing.weight_g is None or existing.weight_g == 0):
+                    existing.weight_g = drug.weight_g
+                if drug.weight_kg is not None and (existing.weight_kg is None or existing.weight_kg == 0):
+                    existing.weight_kg = drug.weight_kg
+                if drug.volume_ml is not None and (existing.volume_ml is None or existing.volume_ml == 0):
+                    existing.volume_ml = drug.volume_ml
+                if drug.volume_l is not None and (existing.volume_l is None or existing.volume_l == 0):
+                    existing.volume_l = drug.volume_l
+                if drug.count_total is not None and (existing.count_total is None or existing.count_total == 0):
+                    existing.count_total = drug.count_total
+                # Merge metadata
+                if isinstance(drug.extraction_metadata, dict) and isinstance(existing.extraction_metadata, dict):
+                    drug_source = (drug.extraction_metadata or {}).get('source_sentence', '')
+                    existing_source = (existing.extraction_metadata or {}).get('source_sentence', '')
+                    if drug_source and existing_source and existing_source != drug_source:
+                        existing.extraction_metadata['alternate_source_sentence'] = drug_source
 
     deduped = list(seen.values())
 
     if len(drugs) > len(deduped):
-        logger.info(f"Deduplicated extractions: {len(drugs)} -> {len(deduped)}")
+        logger.info(f"Deduplicated extractions: {len(drugs)} -> {len(deduped)} (consolidated multi-unit seizures)")
 
     if len(deduped) > max_per_crime:
         logger.warning(f"Capping extractions from {len(deduped)} to {max_per_crime}")
         deduped = sorted(deduped, key=lambda d: d.confidence_score or 0, reverse=True)[:max_per_crime]
 
     return deduped
+
+
+# =============================================================================
+# Sample/Aliquot Detection (Rule 13)
+# =============================================================================
+def _mark_sample_entries(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
+    """
+    RULE 13: Samples vs Bulk Seizure.
+
+    Detect if a drug entry is a sample/aliquot (small quantity drawn for testing)
+    vs bulk seizure. Samples should be marked with metadata to prevent
+    double-counting with parent seizure.
+
+    Detection keywords:
+      "sample", "aliquot", "drawn for testing", "for FSL analysis",
+      "portion", "subsample", "test portion", "sub-sample"
+
+    Marked entries are tracked but not merged (they are part of the bulk quantity).
+
+    Args:
+        drugs: List of DrugExtraction objects
+
+    Returns:
+        Same list with sample metadata added where applicable
+    """
+    if not drugs:
+        return drugs
+
+    sample_keywords = {
+        'sample', 'aliquot', 'drawn for', 'drawn to', 'for testing',
+        'for fsl', 'for analysis', 'portion', 'sub portion', 'subsample',
+        'test portion', 'sub-sample', 'subsampl', 'for examination',
+        'for chemical examination', 'for laboratory'
+    }
+
+    for drug in drugs:
+        # Get source sentence from extraction metadata
+        meta = drug.extraction_metadata or {}
+        source_sentence = str(meta.get('source_sentence', '')).lower()
+
+        # Check if any sample keyword appears in source sentence
+        is_sample = any(keyword in source_sentence for keyword in sample_keywords)
+
+        if is_sample:
+            # Mark as sample with audit trail
+            if not isinstance(drug.extraction_metadata, dict):
+                drug.extraction_metadata = {}
+
+            drug.extraction_metadata['is_sample_or_aliquot'] = True
+            drug.extraction_metadata['sample_reason'] = 'Detected keywords in source_sentence'
+
+            # Log for audit trail
+            logger.info(
+                f"[RuleCheck] SAMPLE DETECTED: {drug.primary_drug_name} "
+                f"({drug.raw_quantity} {drug.raw_unit}) - marked as sample/aliquot"
+            )
+
+    return drugs
 
 
 # =============================================================================
@@ -1232,11 +1362,12 @@ def extract_drug_info(
         # ── Step 5: Drop non-drug entries (ignore list + safety net) ──
         filtered = filter_non_drug_entries(kb_resolved, ignore_set)
 
-        # ── Steps 6-9: Unit standardization → Worth distribution → Commercial check → Dedup ──
+        # ── Steps 6-9: Unit standardization → Worth distribution → Commercial check → Sample detection → Dedup ──
         standardized       = standardize_units(filtered)
         worth_distributed  = _distribute_seizure_worth(standardized)
         commercial_checked = _apply_commercial_quantity_check(worth_distributed)
-        return deduplicate_extractions(commercial_checked)
+        sample_marked      = _mark_sample_entries(commercial_checked)
+        return deduplicate_extractions(sample_marked)
 
     except Exception as e:
         logger.error(f"Drug extraction failed: {e}", exc_info=True)

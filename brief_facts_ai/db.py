@@ -477,12 +477,108 @@ def _match_rows_by_name(source_sentence, bfai_rows):
             matched.append(row)
     return matched
 
+def _add_or_consolidate_drug(accused_row, drug_data, attribution_type, drug_label, qty_label):
+    """
+    RULE 4: Same Accused, Same Drug Consolidation (within same crime_id).
+
+    If accused already has the same drug (by primary_drug_name, supplier_name, source_location),
+    consolidate by merging quantities. Otherwise, add as new entry.
+
+    Consolidation ONLY happens within same (crime_id, accused_id) — not across different crimes.
+
+    Args:
+        accused_row: The bfai row (accused) to add/consolidate drug to
+        drug_data: The drug extraction data (dict or DrugExtraction)
+        attribution_type: Type of attribution (INDIVIDUAL, COLLECTIVE_TOTAL, FALLBACK_A1, etc.)
+        drug_label: Display label for logging
+        qty_label: Quantity label for logging
+    """
+    if not accused_row or not drug_data:
+        return
+
+    primary_name = str(drug_data.get('primary_drug_name') or '').strip().upper()
+    supplier_name = (drug_data.get('supplier_name') or '').strip().upper()
+    source_location = (drug_data.get('source_location') or '').strip().upper()
+
+    # Consolidation key: (primary_drug_name, supplier_name, source_location)
+    # This is used to find existing drugs from same source
+    consolidation_key = (primary_name, supplier_name, source_location)
+
+    # Check if accused already has this drug (same source)
+    existing_drug = None
+    existing_idx = None
+    drugs_list = accused_row.get('drugs') or []
+
+    for idx, existing in enumerate(drugs_list):
+        if not isinstance(existing, dict):
+            try:
+                existing = existing.model_dump()
+            except BaseException:
+                pass
+
+        existing_primary = str(existing.get('primary_drug_name') or '').strip().upper()
+        existing_supplier = (existing.get('supplier_name') or '').strip().upper()
+        existing_location = (existing.get('source_location') or '').strip().upper()
+        existing_key = (existing_primary, existing_supplier, existing_location)
+
+        if consolidation_key == existing_key:
+            existing_drug = existing
+            existing_idx = idx
+            break
+
+    if existing_drug is not None:
+        # CONSOLIDATE: Merge with existing drug entry (Rule 4)
+        # Merge quantities: add raw_quantity values
+        new_qty = float(drug_data.get('raw_quantity') or 0)
+        existing_qty = float(existing_drug.get('raw_quantity') or 0)
+
+        if new_qty > 0 or existing_qty > 0:
+            merged_qty = existing_qty + new_qty
+            existing_drug['raw_quantity'] = merged_qty
+
+            # Also merge standardized measurements if available
+            if drug_data.get('weight_g') and not existing_drug.get('weight_g'):
+                existing_drug['weight_g'] = drug_data.get('weight_g')
+            if drug_data.get('weight_kg') and not existing_drug.get('weight_kg'):
+                existing_drug['weight_kg'] = drug_data.get('weight_kg')
+            if drug_data.get('volume_ml') and not existing_drug.get('volume_ml'):
+                existing_drug['volume_ml'] = drug_data.get('volume_ml')
+            if drug_data.get('volume_l') and not existing_drug.get('volume_l'):
+                existing_drug['volume_l'] = drug_data.get('volume_l')
+            if drug_data.get('count_total') and not existing_drug.get('count_total'):
+                existing_drug['count_total'] = drug_data.get('count_total')
+
+            # Preserve source metadata (alternate source sentence for audit trail)
+            existing_meta = existing_drug.get('extraction_metadata') or {}
+            new_meta = drug_data.get('extraction_metadata') or {}
+            existing_source = existing_meta.get('source_sentence', '')
+            new_source = new_meta.get('source_sentence', '')
+
+            if new_source and existing_source != new_source:
+                if 'consolidated_sources' not in existing_meta:
+                    existing_meta['consolidated_sources'] = [existing_source]
+                existing_meta['consolidated_sources'].append(new_source)
+                existing_drug['extraction_metadata'] = existing_meta
+
+            logger.info(
+                f"[DrugAttrib] CONSOLIDATED: {drug_label} ({qty_label}) "
+                f"→ merged with existing (total qty now: {merged_qty} {drug_data.get('raw_unit', '')})"
+            )
+
+            # Update the entry in the list
+            drugs_list[existing_idx] = existing_drug
+            accused_row['drugs'] = drugs_list
+    else:
+        # ADD: New drug entry for this accused
+        new_drug_element = _build_drug_element(drug_data, attribution_type)
+        accused_row['drugs'].append(new_drug_element)
+
 
 def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
     """
     Merge drug extraction results into accused rows (bfai_rows).
 
-    Attribution rules (one entry per drug — no ghost/reference copies):
+    Attribution rules (one entry per drug per accused — no ghost/reference copies):
 
     Case 1 — INDIVIDUAL (code match):
         source_sentence names exactly 1 A-code → that accused only.
@@ -505,6 +601,14 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
 
     Case 6 — NO_ACCUSED_ORPHAN:
         Sentinel crime row (no real accused) → drug on orphan row.
+
+    RULE 4 — CONSOLIDATION (within same crime_id):
+        If same accused has same drug from multiple packets/seizures in SAME CRIME:
+        Merge into one entry with aggregated quantity.
+
+        Consolidation key: (primary_drug_name, supplier_name, source_location)
+        Only merge if within same (crime_id, accused_id) pair.
+        Do NOT merge same drug across different crime_ids (different cases).
 
     Why no ghost entries: one seizure → one row. REFERENCED_A1 nulled-quantity
     copies inflated aggregates and caused double-counting.
@@ -567,7 +671,7 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
             # ── Cases 1 & 2: individual — one accused has this drug ──
             code = matched_rows[0].get('person_code') or matched_rows[0].get('full_name') or '?'
             logger.info(f"[DrugAttrib] INDIVIDUAL: {drug_label} ({qty_label}) → {code}")
-            matched_rows[0]['drugs'].append(_build_drug_element(drug_data, 'INDIVIDUAL'))
+            _add_or_consolidate_drug(matched_rows[0], drug_data, 'INDIVIDUAL', drug_label, qty_label)
 
         elif len(matched_rows) > 1:
             # ── Case 3: collective — same drug/seizure shared by multiple accused ──
@@ -578,7 +682,7 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
                 f"[DrugAttrib] COLLECTIVE_TOTAL: {drug_label} ({qty_label}) "
                 f"mentioned with {all_codes} → stored on {holder_code} only"
             )
-            matched_rows[0]['drugs'].append(_build_drug_element(drug_data, 'COLLECTIVE_TOTAL'))
+            _add_or_consolidate_drug(matched_rows[0], drug_data, 'COLLECTIVE_TOTAL', drug_label, qty_label)
 
         else:
             # ── Case 4: no attribution found — assign to A1/primary ──
@@ -587,7 +691,7 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
                 f"[DrugAttrib] FALLBACK_A1: {drug_label} ({qty_label}) "
                 f"no code/name in source → {fallback_code}"
             )
-            primary_row['drugs'].append(_build_drug_element(drug_data, 'UNATTRIBUTED_FALLBACK_A1'))
+            _add_or_consolidate_drug(primary_row, drug_data, 'UNATTRIBUTED_FALLBACK_A1', drug_label, qty_label)
 
     return bfai_rows
 

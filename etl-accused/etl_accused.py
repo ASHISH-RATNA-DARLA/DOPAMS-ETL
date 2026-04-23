@@ -78,7 +78,7 @@ CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 ACCUSED_TABLE = TABLE_CONFIG.get('accused', 'accused')
 PERSONS_TABLE = TABLE_CONFIG.get('persons', 'persons')
 ARRESTS_TABLE = TABLE_CONFIG.get('arrests', 'arrests')
-BRIEF_FACTS_ACCUSED_TABLE = TABLE_CONFIG.get('brief_facts_accused', 'brief_facts_accused')
+BRIEF_FACTS_ACCUSED_TABLE = TABLE_CONFIG.get('brief_facts_ai', 'brief_facts_ai')  # Updated to unified table
 
 
 def parse_iso_date(date_str: str) -> datetime:
@@ -220,7 +220,7 @@ class AccusedETL:
 
     def route_accused_status(self, accused: Dict, cursor):
         """
-        Route ACCUSED_STATUS field to arrests and brief_facts_accused tables.
+        Route ACCUSED_STATUS field to arrests and brief_facts_ai tables.
         """
         accused_status = accused.get('accused_status')
         if not accused_status:
@@ -231,7 +231,7 @@ class AccusedETL:
         seq_num = accused.get('seq_num')
         person_id = accused.get('person_id')
 
-        # 1. Update brief_facts_accused status
+        # 1. Update brief_facts_ai status
         if accused_id:
             try:
                 cursor.execute(f"""
@@ -239,7 +239,7 @@ class AccusedETL:
                     SET status = %s
                     WHERE accused_id = %s
                 """, (accused_status, accused_id))
-                logger.trace(f"Updated status in {BRIEF_FACTS_ACCUSED_TABLE} for accused_id {accused_id}")
+                logger.trace(f"Updated status in brief_facts_ai for accused_id {accused_id}")
             except Exception as e:
                 logger.error(f"Error updating {BRIEF_FACTS_ACCUSED_TABLE} status: {e}")
 
@@ -1827,7 +1827,7 @@ class AccusedETL:
         # promoting the LLM-only rows to proper Branch A/B rows with relational identity.
         if inserted_crime_ids:
             try:
-                from brief_facts_accused.db import invalidate_branch_c_log_for_crimes
+                from brief_facts_ai.db import invalidate_branch_c_log_for_crimes
                 with self.db_pool.get_connection_context() as _inv_conn:
                     invalidate_branch_c_log_for_crimes(_inv_conn, list(inserted_crime_ids))
                     _inv_conn.commit()

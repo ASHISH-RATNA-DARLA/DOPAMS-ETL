@@ -402,7 +402,13 @@ class FSLCasePropertyETL:
         return new_fields
 
     def mo_id_exists_for_crime(self, crime_id: str, mo_id: Optional[str]) -> bool:
-        """Return True if mo_id is null/empty or found for the same crime in mo_seizures."""
+        """
+        Check if mo_id exists for crime (logging warning only, not blocking).
+        Returns True to allow insert - MO_ID is API reference, not strict FK.
+
+        PRODUCTION FIX: API returns MongoDB ObjectIDs that don't map to mo_seizures directly.
+        Allow inserts with unmatched MO_ID; log warning for audit trail.
+        """
         if not mo_id:
             return True
         try:
@@ -416,11 +422,17 @@ class FSLCasePropertyETL:
                 """,
                 (crime_id, mo_id)
             )
-            return self.db_cursor.fetchone() is not None
+            exists = self.db_cursor.fetchone() is not None
+            if not exists:
+                logger.warning(
+                    f"⚠️  [INFO] MO_ID {mo_id} not found in {MO_SEIZURES_TABLE} "
+                    f"for CRIME_ID {crime_id} (API reference, allowing insert)"
+                )
+            return True  # Allow insert even if mo_id not found
         except Exception as e:
             logger.error(f"Error validating mo_id={mo_id} for crime_id={crime_id}: {e}")
             self.db_conn.rollback()
-            return False
+            return True  # Allow insert on validation error
 
     def normalize_media_items(self, media_items: List) -> List[Dict]:
         """Normalize API MEDIA array/object/value into child-row payloads."""
@@ -1094,17 +1106,11 @@ class FSLCasePropertyETL:
                                    original_crime_id, _qe)
             return False, reason
 
-        # Validate MO relationship logically (crime_id + mo_id) when mo_id is provided.
-        if mo_id and not self.mo_id_exists_for_crime(crime_id, mo_id):
-            reason = 'invalid_mo_id'
-            error_details = (
-                f"MO_ID {mo_id} not found in {MO_SEIZURES_TABLE} for CRIME_ID {crime_id}"
-            )
-            logger.warning(f"⚠️  {error_details}")
-            self.stats['total_records_failed'] += 1
-            self.stats['total_records_failed_mo_id'] += 1
-            self.log_failed_record(case_property, reason, error_details)
-            return False, reason
+        # PRODUCTION FIX: MO_ID validation is informational only, not blocking.
+        # API returns MongoDB ObjectIDs as mo_id reference; they don't map 1:1 to mo_seizures.mo_id.
+        # Check exists for logging but allow inserts to proceed.
+        if mo_id:
+            self.mo_id_exists_for_crime(crime_id, mo_id)  # Logs warning if not found, but allows insert
         
         try:
             logger.trace(f"Processing case property: case_property_id={case_property_id}, crime_id={crime_id}")
