@@ -46,6 +46,43 @@ def fetch_crimes_by_ids(conn, crime_ids):
         cur.execute(query, (crime_ids,))
         return cur.fetchall()
 
+def fetch_unprocessed_crimes_daily(conn, limit=100):
+    """
+    Daily incremental check: Find crimes in crimes table NOT YET in brief_facts_ai.
+
+    This is the single authoritative check for daily runs:
+    - Crimes never processed (no row in brief_facts_ai)
+    - Crimes modified since last processing (date_modified > last update)
+    - Crimes with processing errors (failed/incomplete log entries)
+
+    Returns: List of unprocessed crime records, ordered by crime_id
+
+    Expected: ~1-10% of previous batch size per day (new crimes + modifications)
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        query = """
+        SELECT DISTINCT
+            c.crime_id,
+            c.ps_code,
+            c.brief_facts,
+            COALESCE(c.date_modified, c.date_created) AS source_changed_at,
+            bfa.etl_run_id AS last_processing_run_id,
+            COALESCE(bfa.date_updated, '1900-01-01'::timestamp) AS last_processed_at
+        FROM public.crimes c
+        LEFT JOIN public.brief_facts_ai bfa ON c.crime_id = bfa.crime_id
+        WHERE
+            -- Unprocessed: No entry in brief_facts_ai
+            bfa.crime_id IS NULL
+            OR
+            -- Or modified since last processing
+            COALESCE(c.date_modified, c.date_created) > COALESCE(bfa.date_updated, '1900-01-01'::timestamp)
+        ORDER BY c.crime_id
+        LIMIT %s
+        """
+        cur.execute(query, (limit,))
+        return cur.fetchall()
+
+
 def fetch_unprocessed_crimes(conn, limit=100):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = """
