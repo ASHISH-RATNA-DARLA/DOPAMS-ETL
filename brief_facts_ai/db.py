@@ -67,7 +67,7 @@ def fetch_unprocessed_crimes_daily(conn, limit=100):
             c.brief_facts,
             COALESCE(c.date_modified, c.date_created) AS source_changed_at,
             bfa.etl_run_id AS last_processing_run_id,
-            COALESCE(bfa.date_updated, '1900-01-01'::timestamp) AS last_processed_at
+            COALESCE(bfa.date_modified, '1900-01-01'::timestamp) AS last_processed_at
         FROM public.crimes c
         LEFT JOIN public.brief_facts_ai bfa ON c.crime_id = bfa.crime_id
         WHERE
@@ -75,7 +75,7 @@ def fetch_unprocessed_crimes_daily(conn, limit=100):
             bfa.crime_id IS NULL
             OR
             -- Or modified since last processing
-            COALESCE(c.date_modified, c.date_created) > COALESCE(bfa.date_updated, '1900-01-01'::timestamp)
+            COALESCE(c.date_modified, c.date_created) > COALESCE(bfa.date_modified, '1900-01-01'::timestamp)
         ORDER BY c.crime_id
         LIMIT %s
         """
