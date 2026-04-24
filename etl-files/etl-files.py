@@ -122,6 +122,10 @@ class ProductionConfig:
     # Batch processing
     BATCH_SIZE = get_int_env('ETL_BATCH_SIZE', 100)
 
+    # API rate limiting (patient requests to prevent 429 bursts)
+    FILES_API_MAX_RPM = get_int_env('FILES_API_MAX_RPM', 5)
+    SECONDS_PER_REQUEST = 60.0 / max(1, FILES_API_MAX_RPM)
+
 # ============================================================================
 # MEMORY MONITORING
 # ============================================================================
@@ -231,7 +235,11 @@ class FilesETL:
         self.memory_monitor = MemoryMonitor(ProductionConfig.MAX_MEMORY_GB) if ProductionConfig.ENABLE_MEMORY_MONITORING else None
         self.file_locker = FileLocker() if ProductionConfig.ENABLE_FILE_LOCKING else None
         self.stats_lock = threading.Lock()
-        
+
+        # API rate limiting — shared across all worker threads
+        self._api_rate_lock = threading.Lock()
+        self._last_api_request_ts = 0.0
+
         self.stats = {
             "total_fir_copy_values": 0,
             "total_processed": 0,
@@ -275,6 +283,18 @@ class FilesETL:
             for key, value in kwargs.items():
                 if key in self.stats:
                     self.stats[key] += value
+
+    def _wait_for_request_slot(self) -> None:
+        """
+        Strict pacing: ensure only one API request every SECONDS_PER_REQUEST interval.
+        All 8 concurrent workers share this lock — prevents bursts that trigger 429 rate limits.
+        """
+        with self._api_rate_lock:
+            now = time.time()
+            wait_for = (self._last_api_request_ts + ProductionConfig.SECONDS_PER_REQUEST) - now
+            if wait_for > 0:
+                time.sleep(wait_for)
+            self._last_api_request_ts = time.time()
 
     def get_distinct_fir_copy_values(self):
         """
@@ -378,6 +398,8 @@ class FilesETL:
             for attempt in range(1, max_retries + 1):
                 try:
                     logger.info(f"⬇️  Downloading {file_id} (attempt {attempt}/{max_retries})")
+                    # Enforce strict request pacing to avoid 429 rate limits
+                    self._wait_for_request_slot()
                     with requests.get(
                         url,
                         headers=headers,
@@ -392,6 +414,16 @@ class FilesETL:
                                         f.write(chunk)
 
                             new_size = os.path.getsize(dest_path)
+                            # Validate download completeness against Content-Length header
+                            expected_size = int(resp.headers.get('content-length', 0))
+                            if expected_size > 0 and new_size != expected_size:
+                                os.remove(dest_path)
+                                logger.error(f"❌ Incomplete download {file_id}: got {new_size}/{expected_size} bytes, retrying...")
+                                if attempt < max_retries:
+                                    time.sleep(base_delay * attempt)
+                                    continue
+                                else:
+                                    raise ValueError(f"Incomplete download {file_id}: {new_size}/{expected_size} bytes")
                             logger.info(f"✅ Downloaded {file_id}.pdf ({new_size} bytes)")
                             self.update_stats(downloaded_new=1, total_bytes=new_size)
                             return True

@@ -313,6 +313,9 @@ class FilesMediaServerETL:
             "skipped_exists_on_disk": 0,
             "resumed_from": None,
         }
+        # Batch DB updates to reduce commit overhead
+        self._pending_db_updates = []
+        self._DB_BATCH_SIZE = 50
 
     # -------------------------------------------------------------------------
     # DB helpers
@@ -336,6 +339,33 @@ class FilesMediaServerETL:
         if self.db_conn:
             self.db_conn.close()
         logger.info("Database connection closed")
+
+    def _flush_pending_db_updates(self) -> None:
+        """Batch flush all pending DB status updates and commit once."""
+        if not self._pending_db_updates:
+            return
+        try:
+            for file_id, success, error_msg in self._pending_db_updates:
+                if success:
+                    self.db_cursor.execute(
+                        f"UPDATE {FILES_TABLE} "
+                        "SET is_downloaded=TRUE, downloaded_at=CURRENT_TIMESTAMP, download_error=NULL "
+                        "WHERE file_id=%s",
+                        (file_id,)
+                    )
+                else:
+                    self.db_cursor.execute(
+                        f"UPDATE {FILES_TABLE} "
+                        "SET is_downloaded=FALSE, download_error=%s "
+                        "WHERE file_id=%s",
+                        (error_msg or "Download failed", file_id)
+                    )
+            self.db_conn.commit()
+            logger.info(f"💾 Flushed {len(self._pending_db_updates)} DB status updates")
+            self._pending_db_updates.clear()
+        except Exception as exc:
+            logger.error(f"❌ Failed to flush DB updates: {exc}")
+            self.db_conn.rollback()
 
     def ensure_download_tracking_columns(self) -> bool:
         """
@@ -708,6 +738,20 @@ class FilesMediaServerETL:
                             raise
 
                         new_size = os.path.getsize(dest_path)
+                        # Validate download completeness against Content-Length header
+                        expected_size = int(resp.headers.get('content-length', 0))
+                        if expected_size > 0 and new_size != expected_size:
+                            os.remove(dest_path)
+                            logger.error(
+                                f"❌ Incomplete download file_id={file_id}: "
+                                f"got {new_size}/{expected_size} bytes, will retry..."
+                            )
+                            if attempt < max_retries:
+                                sleep_for = SECONDS_PER_REQUEST * attempt
+                                self._respect_rate_limit(start_time, extra_sleep=sleep_for)
+                                continue
+                            else:
+                                raise ValueError(f"Incomplete download {file_id}: {new_size}/{expected_size} bytes")
                         logger.info(
                             f"✅ Downloaded file_id={file_id} to {dest_path}, "
                             f"size={new_size} bytes"
@@ -796,7 +840,8 @@ class FilesMediaServerETL:
 
     def _mark_as_downloaded(self, file_id: str, success: bool, error_msg: Optional[str] = None) -> None:
         """
-        Update database to mark file as downloaded or record error.
+        Buffer database update to mark file as downloaded or record error.
+        Updates are batched and flushed every _DB_BATCH_SIZE records to reduce commits.
 
         FIX: download_attempts is NO LONGER incremented here. It is incremented
         once at the start of each attempt loop in download_single_file(), which
@@ -808,32 +853,9 @@ class FilesMediaServerETL:
             success: True if download succeeded, False if failed
             error_msg: Error message if download failed
         """
-        try:
-            if success:
-                # NOTE: download_attempts intentionally NOT incremented here.
-                # It is already incremented once per attempt in download_single_file().
-                update_sql = f"""
-                    UPDATE {FILES_TABLE}
-                    SET is_downloaded = TRUE,
-                        downloaded_at = CURRENT_TIMESTAMP,
-                        download_error = NULL
-                    WHERE file_id = %s
-                """
-                self.db_cursor.execute(update_sql, (file_id,))
-            else:
-                # NOTE: download_attempts intentionally NOT incremented here either.
-                update_sql = f"""
-                    UPDATE {FILES_TABLE}
-                    SET is_downloaded = FALSE,
-                        download_error = %s
-                    WHERE file_id = %s
-                """
-                self.db_cursor.execute(update_sql, (error_msg or "Download failed", file_id,))
-
-            self.db_conn.commit()
-        except Exception as exc:
-            logger.warning(f"⚠️  Failed to update download status for file_id={file_id}: {exc}")
-            self.db_conn.rollback()
+        self._pending_db_updates.append((file_id, success, error_msg))
+        if len(self._pending_db_updates) >= self._DB_BATCH_SIZE:
+            self._flush_pending_db_updates()
 
     @staticmethod
     def _respect_rate_limit(start_time: float, extra_sleep: float = 0.0) -> None:
@@ -927,6 +949,9 @@ class FilesMediaServerETL:
             if self.stats['resumed_from']:
                 logger.info(f"Resumed from file_id: {self.stats['resumed_from']}")
             logger.info("=" * 80)
+
+            # Flush any remaining pending DB updates
+            self._flush_pending_db_updates()
 
             return True
 

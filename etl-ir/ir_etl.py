@@ -7,6 +7,7 @@ Fetches IR data in date-range chunks with overlap and loads into normalized Post
 import sys
 import os
 import time
+import random
 import requests
 import psycopg2
 from psycopg2.extras import Json, execute_values
@@ -613,7 +614,14 @@ class InterrogationReportsETL:
                 elif response.status_code == 404:
                     logger.warning(f"⚠️  No data found for {from_date} to {to_date} (404)")
                     return []
-                
+
+                elif response.status_code == 429:
+                    # Rate limited — honor Retry-After header or use backoff with jitter
+                    retry_after = response.headers.get('Retry-After')
+                    wait_time = float(retry_after) if retry_after else min(60, 2 ** attempt + random.uniform(0, 1))
+                    logger.warning(f"⚠️  API rate limited (429), waiting {wait_time:.1f}s before retry (attempt {attempt + 1})")
+                    time.sleep(wait_time)
+
                 else:
                     # Log error response body for debugging
                     try:
@@ -624,7 +632,7 @@ class InterrogationReportsETL:
                         logger.error(f"API returned status code {response.status_code}")
                         logger.error(f"Error response text: {response.text[:500]}")
                     logger.warning(f"Retrying... (Attempt {attempt + 1})")
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    time.sleep(2 ** attempt + random.uniform(0, 0.5))  # Exponential backoff with jitter
                     
             except requests.exceptions.Timeout:
                 logger.warning(f"API timeout, retrying... (Attempt {attempt + 1})")
@@ -1496,23 +1504,39 @@ class InterrogationReportsETL:
                 ca_values
             )
 
-    def process_ir_record(self, record: Dict[str, Any], conn, cursor) -> bool:
+    def process_ir_record(self, record: Dict[str, Any], conn, cursor, local_stats=None, local_errors=None, savepoint_name=None) -> bool:
         """
         Process a single IR record (insert or update).
-        
+
         Args:
             record: IR record dictionary
-        
+            local_stats: Optional local stats dict for batch processing (avoids lock contention)
+            local_errors: Optional local errors list for batch processing
+            savepoint_name: Optional SAVEPOINT name for batch transaction isolation
+
         Returns:
             True if successful, False otherwise
         """
+        # Use local_stats if provided, otherwise use global stats with lock
+        def update_stat(key, value=1):
+            if local_stats is not None:
+                local_stats[key] = local_stats.get(key, 0) + value
+            else:
+                with self.stats_lock:
+                    self.stats[key] += value
+
+        def append_error(msg):
+            if local_errors is not None:
+                local_errors.append(msg)
+            else:
+                with self.stats_lock:
+                    self.stats['errors'].append(msg)
         ir_id = record.get('INTERROGATION_REPORT_ID')
         crime_id = record.get('CRIME_ID')
         
         if not ir_id:
             logger.warning("Record missing INTERROGATION_REPORT_ID, skipping")
-            with self.stats_lock:
-                self.stats['total_ir_failed'] += 1
+            update_stat('total_ir_failed')
             return False
 
         if crime_id and crime_id not in self.crime_ids:
@@ -1763,31 +1787,32 @@ class InterrogationReportsETL:
             logger.info("")
 
             # Process date ranges with parallel API calls
-            # Use ThreadPoolExecutor for concurrent API requests
-            # Default: 8 workers (from .env), can override with MAX_API_WORKERS env var
-            # Optimized: 4 → 8 reduces execution time by 30-40% (1319s → 800-950s)
-            max_api_workers = int(os.environ.get('MAX_API_WORKERS', 8))
-            max_api_workers = min(max_api_workers, len(date_ranges))  # Don't exceed number of ranges
-            logger.info(f"⚡ Using {max_api_workers} parallel API workers (optimized from 4)")
+            if len(date_ranges) > 0:
+                # Use ThreadPoolExecutor for concurrent API requests
+                # Default: 8 workers (from .env), can override with MAX_API_WORKERS env var
+                # Optimized: 4 → 8 reduces execution time by 30-40% (1319s → 800-950s)
+                max_api_workers = int(os.environ.get('MAX_API_WORKERS', 8))
+                max_api_workers = min(max_api_workers, len(date_ranges))  # Don't exceed number of ranges
+                logger.info(f"⚡ Using {max_api_workers} parallel API workers (optimized from 4)")
 
-            with ThreadPoolExecutor(max_workers=max_api_workers) as api_executor:
-                # Submit all API calls
-                futures = {}
-                for from_date, to_date in date_ranges:
-                    future = api_executor.submit(self.process_date_range, from_date, to_date, table_columns)
-                    futures[future] = (from_date, to_date)
+                with ThreadPoolExecutor(max_workers=max_api_workers) as api_executor:
+                    # Submit all API calls
+                    futures = {}
+                    for from_date, to_date in date_ranges:
+                        future = api_executor.submit(self.process_date_range, from_date, to_date, table_columns)
+                        futures[future] = (from_date, to_date)
 
-                # Process results as they complete (not in order)
-                with tqdm(total=len(date_ranges), desc="Processing date ranges", unit="range") as pbar:
-                    for future in as_completed(futures):
-                        from_date, to_date = futures[future]
-                        try:
-                            future.result()
-                        except Exception as e:
-                            logger.error(f"Error processing {from_date} to {to_date}: {e}")
-                            with self.stats_lock:
-                                self.stats['failed_api_calls'] += 1
-                        pbar.update(1)
+                    # Process results as they complete (not in order)
+                    with tqdm(total=len(date_ranges), desc="Processing date ranges", unit="range") as pbar:
+                        for future in as_completed(futures):
+                            from_date, to_date = futures[future]
+                            try:
+                                future.result()
+                            except Exception as e:
+                                logger.error(f"Error processing {from_date} to {to_date}: {e}")
+                                with self.stats_lock:
+                                    self.stats['failed_api_calls'] += 1
+                            pbar.update(1)
             
             # Retry pending FK records
             self.retry_pending_fk()
