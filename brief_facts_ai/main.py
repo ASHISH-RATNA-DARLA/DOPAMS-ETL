@@ -52,6 +52,7 @@ from extractor_accused import (
     extract_roles_for_known_accused,
     detect_gender,
     detect_ccl,
+    detect_ccl_from_age,
     classify_accused_type,
     compute_shared_role,
     _is_procedural_role,
@@ -438,6 +439,54 @@ def _should_skip_role_only_mention(name: str, facts_text: str) -> tuple:
         return (False, None, "financier", "financier-only context")
 
     return (False, None, None, None)
+
+
+def apply_row_creation_gate(
+    name: str,
+    text: str,
+    db_accused: list,
+    db_name_variants: list = None
+) -> tuple:
+    """Rule A-1: Comprehensive row creation gate.
+
+    Before creating any accused row (gap-fill or otherwise), apply this gate.
+    First rule that fires wins.
+
+    Returns: (should_create: bool, reason: Optional[str])
+    """
+    if not name or not name.strip():
+        return False, "EMPTY_NAME"
+
+    # Gate 1: Check duplicate in DB (Rule A-2)
+    if db_name_variants and _match_extracted_name_to_db_accused(name, db_name_variants):
+        return False, "DUPLICATE_IN_DB"
+
+    # Gate 2: Check for "unknown person" pattern
+    text_lower = (text or "").lower()
+    unknown_patterns = [
+        "unknown person", "unknown accused", "one unknown", "some unknown",
+        "unidentified person", "unidentified accused"
+    ]
+    if any(p in text_lower for p in unknown_patterns):
+        return False, "UNKNOWN_PERSON_PATTERN"
+
+    # Gate 3: Check police/official titles (Rule A-4)
+    if _is_police_name(name, text):
+        return False, "POLICE_OFFICIAL"
+
+    # Gate 4: Check supplier-only context (Rule A-3)
+    if _is_supplier_context(name, text):
+        # Supplier-only would be skipped UNLESS they have an A-code or arrest
+        # For now, we mark as supplier type but don't skip
+        return True, "SUPPLIER_CONTEXT"
+
+    # Gate 5: Check associate-only context
+    if _is_associate_only_context(name, text):
+        return False, "ASSOCIATE_ONLY"
+
+    # If passed all gates → CREATE
+    return True, None
+
 
 def _match_extracted_name_to_db_accused(extracted_name: str, db_name_variants: list) -> bool:
     """
@@ -1413,8 +1462,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
         if not gender:
             gender = detect_gender(facts_text, full_name or accused_code)
 
-        # CCL
-        is_ccl = bool(is_ccl_db) or detect_ccl(full_name or '', role_in_crime or '')
+        # CCL: Rule A-6 — Age < 18 OR keyword detection
+        is_ccl = bool(is_ccl_db) or detect_ccl_from_age(age) or detect_ccl(full_name or '', role_in_crime or '')
 
         if accused_type == 'unknown':
             accused_type = None
@@ -1583,7 +1632,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
 
                     gender_extra = detect_gender(facts_text, clean, gender_extra)
                     status_extra = resolve_status_for_insert(None, facts_text, clean)
-                    is_ccl_extra = detect_ccl(clean, role_desc or "")
+                    is_ccl_extra = detect_ccl_from_age(age_extra) or detect_ccl(clean, role_desc or "")
 
                     canonical_extra, dedup_conf_extra, dedup_tier_extra, dedup_flag_extra = \
                         _resolve_canonical_identity(
@@ -1841,7 +1890,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
 
                 gender_s  = detect_gender(facts_text, stub_name, gender_s)
                 status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
-                is_ccl_s  = bool(stub_is_ccl) or detect_ccl(stub_name, role_desc or '')
+                is_ccl_s  = bool(stub_is_ccl) or detect_ccl_from_age(age_s) or detect_ccl(stub_name, role_desc or '')
 
                 synth_id = stub_id or _synthetic_accused_id(crime_id, stub_name, stub_seq)
 

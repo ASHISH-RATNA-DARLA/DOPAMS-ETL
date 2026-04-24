@@ -698,7 +698,16 @@ def detect_status(text: str, full_name: str) -> str:
     # Placeholder for more complex status logic if needed.
     return "unknown" 
 
+def detect_ccl_from_age(age: Optional[int]) -> bool:
+    """Rule A-6: Deterministic age-based CCL detection.
+
+    If age < 18, is_ccl = True (regardless of keywords).
+    """
+    return age is not None and age < 18
+
+
 def detect_ccl(full_name: str, role: str) -> bool:
+    """Keyword-based CCL detection (legacy, kept for backward compat)."""
     s = (full_name + " " + role).lower()
     if "ccl" in s or "child in conflict" in s or "juvenile" in s or "minor" in s:
         return True
