@@ -342,10 +342,10 @@ _SEGMENT_QUANTITY_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _PACKET_QUANTITY_PATTERN = re.compile(
-    r'(?P<idx>\d+)\s*[\)\.:\-]?\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams|grm|grms|mg|ml|l|ltr|litre|litres|packet|packets|piece|pieces|cover|covers|bundle|bundles)\b',
+    r'(?:(?P<idx>\d+)|(?P<exhibit_prefix>M\s*\d+)|(?P<word_idx>first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th))?\s*[\)\.:\-]?\s*(?:packet|exhibit|sachet|bundle)?\s*(?:was|of|weighing|wg)?\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams|grm|grms|mg|ml|l|ltr|litre|litres|packet|packets|piece|pieces|cover|covers|bundle|bundles)\b(?:\s*[\(\[]?(?:marked\s+as\s+|marked\s+)?(?P<exhibit_suffix>M\s*\d+)[\)\]]?)?',
     flags=re.IGNORECASE,
 )
-_PACKET_CONTEXT_RE = re.compile(r'\b(packet|packets|cover|covers|bundle|bundles|transparent|polythene|plastic)\b', re.IGNORECASE)
+_PACKET_CONTEXT_RE = re.compile(r'\b(packet|packets|cover|covers|bundle|bundles|transparent|polythene|plastic|sachet|sachets|M\d+)\b', re.IGNORECASE)
 
 
 def _best_drug_keyword_match(text: str, kb_lookup: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
@@ -443,6 +443,7 @@ def _extract_explicit_packet_rows(text: str, kb_lookup: Dict[str, str]) -> List[
                     'source_sentence': sentence.strip(),
                     'packet_index': packet_index,
                     'accused_ref': accused_ref,
+                    'packet_prefix': match.group('exhibit_prefix') or match.group('exhibit_suffix') or match.group('word_idx') or match.group('idx') or str(packet_index),
                     'explicit_packet_row': True,
                 },
             })
@@ -518,39 +519,79 @@ def _extract_segmented_accused_rows(text: str, kb_lookup: Dict[str, str]) -> Lis
 
 def _drop_redundant_total_rows(drugs: List[DrugExtraction], packet_rows: List[dict]) -> List[DrugExtraction]:
     """
-    Remove confession-style total rows when explicit packet rows already exist for
-    the same drug and their quantities sum to the total.
+    Handle multi-packet consolidation and redundant total row dropping.
+    Case A: Packets have different explicit accused mapping -> drop total row, keep packet rows.
+    Case B: Packets have no/same accused mapping -> keep total row (or create one by summing), drop packet rows.
     """
     if not drugs or not packet_rows:
         return drugs
 
     from collections import defaultdict
 
-    packet_sums = defaultdict(float)
-    packet_counts = defaultdict(int)
+    packet_groups = defaultdict(list)
     for packet in packet_rows:
-        key = (str(packet.get('primary_drug_name') or '').lower().strip())
-        packet_sums[key] += float(packet.get('raw_quantity') or 0.0)
-        packet_counts[key] += 1
+        key = (str(packet.get('primary_drug_name') or packet.get('raw_drug_name') or '').lower().strip())
+        packet_groups[key].append(packet)
 
-    kept = []
-    for drug in drugs:
-        drug_key = (drug.primary_drug_name or '').lower().strip()
-        total_qty = float(drug.raw_quantity or 0.0)
-        source_sentence = str((drug.extraction_metadata or {}).get('source_sentence') or '').lower()
+    drugs_to_remove = set()
+    new_consolidated_drugs = []
 
-        if packet_counts.get(drug_key, 0) >= 2:
-            packet_total = round(packet_sums[drug_key], 3)
-            if packet_total > 0 and abs(round(total_qty, 3) - packet_total) <= 0.01:
-                if any(marker in source_sentence for marker in ('total', 'about', 'approx', 'approximately', 'purchased', 'came to', 'came with', 'confessed')):
-                    logger.info(
-                        f"Dropped redundant total drug row: {drug.raw_drug_name} qty={drug.raw_quantity} "
-                        f"because explicit packet rows total {packet_total} already exist"
-                    )
-                    continue
+    for drug_key, p_rows in packet_groups.items():
+        if len(p_rows) < 2:
+            continue
+            
+        packet_total = sum(float(p.get('raw_quantity') or 0.0) for p in p_rows)
+        packet_total = round(packet_total, 3)
+        
+        accused_refs = set()
+        for p in p_rows:
+            ref = (p.get('extraction_metadata') or {}).get('accused_ref')
+            if ref:
+                accused_refs.add(ref)
+                
+        is_case_a = len(accused_refs) > 1
+        
+        total_row = None
+        for d in drugs:
+            if isinstance(d.extraction_metadata, dict) and d.extraction_metadata.get('explicit_packet_row'):
+                continue
+            
+            d_key = (d.primary_drug_name or d.raw_drug_name or '').lower().strip()
+            if d_key == drug_key:
+                total_qty = float(d.raw_quantity or 0.0)
+                if total_qty > 0 and abs(round(total_qty, 3) - packet_total) <= 0.01:
+                    total_row = d
+                    break
+                    
+        if is_case_a:
+            if total_row:
+                logger.info(f"Dropped redundant total drug row ({drug_key}) because packets have explicit different accused (Case A)")
+                drugs_to_remove.add(id(total_row))
+        else:
+            for d in drugs:
+                if isinstance(d.extraction_metadata, dict) and d.extraction_metadata.get('explicit_packet_row'):
+                    d_key = (d.primary_drug_name or d.raw_drug_name or '').lower().strip()
+                    if d_key == drug_key:
+                        drugs_to_remove.add(id(d))
+                        
+            if total_row:
+                logger.info(f"Kept total drug row ({drug_key}) and dropped individual packets (Case B consolidation)")
+                total_row.confidence_score = 99.0  # Ensure total row wins deduplication
+            else:
+                logger.info(f"Created consolidated total drug row ({drug_key}) from {len(p_rows)} packets (Case B consolidation)")
+                template = p_rows[0].copy()
+                template['raw_quantity'] = packet_total
+                template['extraction_metadata'] = template.get('extraction_metadata', {}).copy()
+                template['extraction_metadata']['consolidated_packets'] = len(p_rows)
+                template['extraction_metadata'].pop('explicit_packet_row', None)
+                template['extraction_metadata'].pop('packet_index', None)
+                template['extraction_metadata'].pop('packet_prefix', None)
+                new_drug = DrugExtraction(**template)
+                new_drug.confidence_score = 99.0
+                new_consolidated_drugs.append(new_drug)
 
-        kept.append(drug)
-
+    kept = [d for d in drugs if id(d) not in drugs_to_remove]
+    kept.extend(new_consolidated_drugs)
     return kept
 
 
@@ -597,11 +638,15 @@ def _looks_like_monetary_amount(item: dict) -> bool:
         return False
 
     raw_unit = str(item.get('raw_unit') or '').strip().lower()
-    source_sentence = str((item.get('extraction_metadata') or {}).get('source_sentence') or '').strip().lower()
+    raw_name = str(item.get('raw_drug_name') or '').strip().lower()
 
     if raw_unit in {'rs', 'rs.', 'rupees', 'rupee', 'inr', '₹'}:
         return True
-    return bool(_MONEY_HINT_RE.search(source_sentence))
+        
+    if any(cash_term in raw_name for cash_term in ['cash', 'currency', 'rupees', 'money']):
+        return True
+
+    return False
 
 
 def _parse_monetary_amount(item: dict) -> Optional[float]:
@@ -622,6 +667,18 @@ def _parse_monetary_amount(item: dict) -> Optional[float]:
     if match:
         return float(match.group(1).replace(',', ''))
 
+    return None
+
+def _parse_seizure_worth_fallback(item: dict) -> Optional[float]:
+    source_sentence = str((item.get('extraction_metadata') or {}).get('source_sentence') or '')
+    
+    # Priority 1: explicitly marked as worth
+    worth_match = re.search(r'(?:worth|valued\s*at|value\s*of|w/rs[.:]?)\s*(?:rs\.?|rupees|₹)?\s*([0-9][0-9,]*(?:\.\d+)?)', source_sentence, flags=re.IGNORECASE)
+    if worth_match:
+        return float(worth_match.group(1).replace(',', ''))
+        
+    # If it says 'at Rs. 50 per gram', do not capture the rate.
+    # The rate match won't match the worth_match above because we require 'worth'.
     return None
 
 
@@ -1057,9 +1114,14 @@ def filter_consumption_only_drugs(
         #  2. Has sold marker AND no seizure marker (sold, not seized)
         #  3. No seizure marker anywhere (no seizure evidence)
 
-        is_consumption_only = has_consumption_marker and not has_seizure_marker and not has_seizure_in_text
-        is_sold_only = has_sold_marker and not has_seizure_marker and not has_seizure_in_text
+        # STRICT FILTER: If it has sold/consumed markers in the sentence and NO seizure marker in the SAME sentence, DROP IT.
+        # Do not rely on has_seizure_in_text for these, because a seizure elsewhere does not make a "sold" sentence a seizure.
+        is_consumption_only = has_consumption_marker and not has_seizure_marker
+        is_sold_only = has_sold_marker and not has_seizure_marker
+        
+        # For general sentences with no markers, we still allow them if there's a seizure somewhere in the text
         is_no_seizure = not has_seizure_marker and not has_seizure_in_text
+        
         is_paraphernalia_only = (
             has_paraphernalia_marker
             and not _has_strong_drug_seizure_phrase(source_sentence, getattr(drug, 'primary_drug_name', '') or getattr(drug, 'raw_drug_name', ''))
@@ -1145,12 +1207,13 @@ def filter_non_drug_entries(
     """
     # Hardcoded safety net — items that are NEVER drugs under NDPS Act
     SEIZED_NON_DRUG_ITEMS = {
-        'motorcycle', 'motor cycle', 'motorbike', 'scooter', 'moped',
+        'motorcycle', 'motor cycle', 'motorbike', 'scooter', 'moped', 'scooty',
         'car', 'truck', 'lorry', 'tractor', 'auto', 'vehicle', 'two-wheeler',
         'mobile', 'mobile phone', 'cell phone', 'smartphone', 'sim card', 'sim',
         'cash', 'currency', 'rupees', 'money', 'notes',
         'weighing scale', 'weighing machine', 'digital scale', 'balance',
         'kite string', 'manja', 'chinese manja',
+        'pen drive', 'empty cover', 'transport bag', 'panchanama',
     }
 
     CONTAINER_UNIT_MARKERS = {
@@ -1643,6 +1706,7 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
             (drug.raw_drug_name or '').lower().strip(),
             (drug.supplier_name or '').lower().strip(),        # Different supplier = different seizure
             (drug.source_location or '').lower().strip(),      # Different location = different seizure
+            _extract_dedup_accused_ref(drug),                  # Case A: Explicit accused mapping keeps rows separate
         )
 
         existing = seen.get(key)
@@ -1931,11 +1995,14 @@ def extract_drug_info(
                     if amount is not None:
                         d['purchase_price_per_unit'] = amount if d.get('purchase_price_per_unit') is None else d.get('purchase_price_per_unit')
                     d['raw_quantity'] = 0.0
-                    if not d.get('raw_unit') or str(d.get('raw_unit')).strip().lower() in {'rs', 'rs.', 'rupees', 'rupee', 'inr', '₹'}:
-                        d['raw_unit'] = 'Unknown'
-                    # Monetary-only rows are not seizure-worth rows.
+                    d['raw_unit'] = 'Unknown'
                     d['seizure_worth'] = 0.0
                     d['worth_scope'] = 'individual'
+                else:
+                    if d.get('seizure_worth') == 0.0:
+                        worth_amount = _parse_seizure_worth_fallback(d)
+                        if worth_amount is not None:
+                            d['seizure_worth'] = worth_amount
 
                 valid_scopes = {'individual', 'drug_total', 'overall_total'}
                 ws = str(d.get('worth_scope', 'individual')).lower().strip()

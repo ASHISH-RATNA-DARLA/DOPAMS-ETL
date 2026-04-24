@@ -1,103 +1,101 @@
 #!/usr/bin/env python3
 """
 Test to verify that drug deduplication consolidates the same drug
-across different accused mentions into a single entry.
-
-SCENARIO: FIR mentions "Ganja" in relation to:
-- A-1: initially seized 6 Kg
-- A-3: sold 1 Kg in Hyderabad
-- A-4: main supplier (motorcycle owner)
-
-EXPECTED: Single "Ganja" entry with source sentences from all 3 mentions.
-PREVIOUS BUG: 5 separate entries created (different A-codes in dedup key).
+across different accused mentions into a single entry for Case B, 
+while preserving explicit packet mappings for Case A.
 """
 
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from extractor_drugs import deduplicate_extractions, DrugExtraction
+from extractor_drugs import deduplicate_extractions, DrugExtraction, _drop_redundant_total_rows
 
 
-def test_ganja_consolidation():
-    """Test that same drug with different accused mentions gets consolidated."""
+def test_case_a_explicit_mapping_kept_separate():
+    """Case A: Packets explicitly associated to different accused are kept separate."""
 
-    # Simulate 5 LLM extractions of Ganja (as might come from different sentences)
     extractions = [
         DrugExtraction(
             primary_drug_name="Ganja",
             raw_drug_name="ganja",
-            raw_quantity=6.0,
+            raw_quantity=3.372,
             raw_unit="kg",
             confidence_score=0.95,
-            extraction_metadata={"source_sentence": "A-1 had 6 Kg of Ganja seized"},
+            extraction_metadata={"source_sentence": "M1 3.372 kg ganja seized from A-1", "accused_ref": "A-1"},
         ),
         DrugExtraction(
             primary_drug_name="Ganja",
             raw_drug_name="ganja",
-            raw_quantity=1.0,
+            raw_quantity=2.470,
             raw_unit="kg",
-            confidence_score=0.90,
-            extraction_metadata={"source_sentence": "A-3 sold 1 Kg of Ganja in Hyderabad"},
-        ),
-        DrugExtraction(
-            primary_drug_name="Ganja",
-            raw_drug_name="ganja",
-            raw_quantity=6.0,
-            raw_unit="kg",
-            confidence_score=0.92,
-            supplier_name="A-4",
-            extraction_metadata={"source_sentence": "A-4 main supplier, motorcycle owner, 6 Kg total"},
-        ),
-        DrugExtraction(
-            primary_drug_name="Ganja",
-            raw_drug_name="ganja",
-            raw_quantity=5.0,
-            raw_unit="kg",
-            confidence_score=0.93,
-            extraction_metadata={"source_sentence": "5 Kg remaining with A-1"},
-        ),
-        DrugExtraction(
-            primary_drug_name="Ganja",
-            raw_drug_name="ganja",
-            raw_quantity=0.0,
-            raw_unit="unknown",
-            confidence_score=0.85,
-            extraction_metadata={"source_sentence": "Ganja mentioned as primary drug in NDPS charges"},
+            confidence_score=0.95,
+            extraction_metadata={"source_sentence": "M2 2.470 kg ganja seized from A-2", "accused_ref": "A-2"},
         ),
     ]
 
-    print(f"Before dedup: {len(extractions)} Ganja extractions")
-    for i, drug in enumerate(extractions, 1):
-        meta = drug.extraction_metadata or {}
-        supplier = drug.supplier_name or "unknown"
-        print(f"  {i}. {drug.raw_quantity} {drug.raw_unit}, supplier={supplier}, "
-              f"conf={drug.confidence_score}, source='{meta.get('source_sentence', '')}'")
-
-    # Run deduplication (FIX: should now consolidate all 5 into 1)
+    print(f"Before dedup: {len(extractions)} Ganja extractions (different accused)")
+    
+    # Run deduplication
     deduped = deduplicate_extractions(extractions)
 
     print(f"\nAfter dedup: {len(deduped)} Ganja entry(ies)")
-    assert len(deduped) == 1, f"Expected 1 Ganja entry, got {len(deduped)}"
+    assert len(deduped) == 2, f"Expected 2 Ganja entries (Case A), got {len(deduped)}"
 
-    drug = deduped[0]
-    print(f"  Drug name: {drug.primary_drug_name}")
-    print(f"  Raw quantity: {drug.raw_quantity} {drug.raw_unit}")
-    print(f"  Confidence: {drug.confidence_score}")
+    print("\n✓ TEST PASSED: Case A - Explicit per-packet mapping kept separate")
+    return True
 
-    # Check that consolidated sources are tracked
-    meta = drug.extraction_metadata or {}
-    consolidated_sources = meta.get('consolidated_sources', [])
-    print(f"  Consolidated sources ({len(consolidated_sources)}):")
-    for source in consolidated_sources:
-        print(f"    - {source}")
 
-    # Verify we have sources from all 5 extractions
-    assert len(consolidated_sources) >= 4, (
-        f"Expected at least 4 consolidated sources, got {len(consolidated_sources)}"
+def test_case_b_consolidation():
+    """Case B: Packets with no/same accused mapping are consolidated, and quantities are summed."""
+
+    # Simulate _extract_explicit_packet_rows creating these packet rows
+    packet_rows = [
+        {
+            'primary_drug_name': "Ganja",
+            'raw_drug_name': "ganja",
+            'raw_quantity': 3.372,
+            'raw_unit': "kg",
+            'extraction_metadata': {"source_sentence": "packet M1 was 3.372 kg", "explicit_packet_row": True, "packet_index": 1},
+        },
+        {
+            'primary_drug_name': "Ganja",
+            'raw_drug_name': "ganja",
+            'raw_quantity': 2.470,
+            'raw_unit': "kg",
+            'extraction_metadata': {"source_sentence": "packet M2 was 2.470 kg", "explicit_packet_row": True, "packet_index": 2},
+        }
+    ]
+
+    drugs = [DrugExtraction(**p) for p in packet_rows]
+    
+    # Simulate LLM extracting total row
+    total_row = DrugExtraction(
+        primary_drug_name="Ganja",
+        raw_drug_name="ganja",
+        raw_quantity=5.842,
+        raw_unit="kg",
+        confidence_score=0.90,
+        extraction_metadata={"source_sentence": "total 5.842 kg ganja"}
     )
+    drugs.append(total_row)
 
-    print("\n✓ TEST PASSED: Same drug consolidated across different accused mentions")
+    print(f"\nBefore _drop_redundant_total_rows: {len(drugs)} drugs")
+    
+    # Run redundant total rows logic
+    filtered_drugs = _drop_redundant_total_rows(drugs, packet_rows)
+    
+    print(f"After _drop_redundant_total_rows: {len(filtered_drugs)} drugs")
+    assert len(filtered_drugs) == 1, f"Expected 1 Ganja entry (Case B total), got {len(filtered_drugs)}"
+    
+    # Run deduplication
+    deduped = deduplicate_extractions(filtered_drugs)
+
+    print(f"After dedup: {len(deduped)} Ganja entry(ies)")
+    assert len(deduped) == 1, f"Expected 1 Ganja entry (Case B), got {len(deduped)}"
+    assert deduped[0].raw_quantity == 5.842, f"Expected quantity 5.842, got {deduped[0].raw_quantity}"
+
+    print("\n✓ TEST PASSED: Case B - Packets with no explicit mapping are consolidated into total")
     return True
 
 
@@ -168,7 +166,8 @@ def test_same_drug_different_suppliers():
 
 if __name__ == "__main__":
     try:
-        test_ganja_consolidation()
+        test_case_a_explicit_mapping_kept_separate()
+        test_case_b_consolidation()
         test_different_drugs_kept_separate()
         test_same_drug_different_suppliers()
         print("\n✅ ALL TESTS PASSED")

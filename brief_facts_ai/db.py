@@ -618,6 +618,8 @@ def _match_rows_by_name(source_sentence, bfai_rows):
     if not source_sentence or not bfai_rows:
         return []
     sentence_lower = source_sentence.lower()
+    downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received)\s+(?:to|by|from)?\s*'
+    
     matched = []
     for row in bfai_rows:
         name = (row.get('full_name') or '').strip()
@@ -625,10 +627,32 @@ def _match_rows_by_name(source_sentence, bfai_rows):
             continue
         # Require at least 2 tokens to match (avoids single-word false hits)
         tokens = [t for t in name.lower().split() if len(t) >= 3]
+        
+        name_matched = False
+        match_idx = -1
+        
         if len(tokens) >= 2 and sum(1 for t in tokens if t in sentence_lower) >= 2:
-            matched.append(row)
+            name_matched = True
+            # Find the position of the first matching token to check lookback
+            for t in tokens:
+                idx = sentence_lower.find(t)
+                if idx >= 0:
+                    match_idx = idx
+                    break
         elif len(tokens) == 1 and tokens[0] in sentence_lower:
+            name_matched = True
+            match_idx = sentence_lower.find(tokens[0])
+            
+        if name_matched:
+            # Check for downstream keywords
+            if match_idx >= 0:
+                lookback_window = max(0, match_idx - 100)
+                text_before = sentence_lower[lookback_window:match_idx]
+                if re.search(downstream_keywords, text_before):
+                    logger.debug(f"[DrugAttrib] Filtered out name match {name} - appears in downstream transaction context")
+                    continue
             matched.append(row)
+            
     return matched
 
 def _add_or_consolidate_drug(accused_row, drug_data, attribution_type, drug_label, qty_label):
