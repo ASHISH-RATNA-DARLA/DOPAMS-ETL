@@ -248,34 +248,61 @@ def clean_accused_name(name: str) -> str:
     """
     if not name:
         return ""
-    
+
     # 1. Remove Prefix like "A-1", "1.", "A1)"
     name = re.sub(r'^(?:A[\.\-]?\d+|[0-9]+)[\)/\.\:\s-]*', '', name, flags=re.IGNORECASE)
-    
+
     # 2. Split at common separators causing metadata leak
     # Split at @ (alias)
     if "@" in name:
         name = name.split("@")[0]
-        
-    # Split at relational indicators
-    indicators = [" s/o ", " d/o ", " w/o ", " h/o ", " son of ", " daughter of ", " wife of "]
-    for ind in indicators:
-        if ind in name.lower():
-            # Use regex to split case-insensitively
-            name = re.split(re.escape(ind), name, flags=re.IGNORECASE)[0]
-            
-    # Split at address/metadata markers
-    markers = [" r/o ", " h.no ", " h no ", " age:", " caste:", " occ:", " cell:", " phone:"]
-    for m in markers:
-        if m in name.lower():
-            name = re.split(re.escape(m), name, flags=re.IGNORECASE)[0]
+
+    # Split at relational indicators with punctuation/spacing variants.
+    # Examples handled: "s/o", "s/o:", " s/o ", "son of".
+    rel_match = re.search(
+        r'\b(?:s\s*/\s*o|d\s*/\s*o|w\s*/\s*o|h\s*/\s*o|son\s+of|daughter\s+of|wife\s+of)\b',
+        name,
+        flags=re.IGNORECASE,
+    )
+    if rel_match:
+        name = name[:rel_match.start()]
+
+    # Split at address/metadata markers with punctuation variants.
+    meta_match = re.search(
+        r'\b(?:r\s*/\s*o|residing\s+at|resident\s+of|h\.?\s*no\.?|age|caste|occ|occupation|cell|phone|mobile|aadhaar)\b\s*[:\-]?',
+        name,
+        flags=re.IGNORECASE,
+    )
+    if meta_match:
+        name = name[:meta_match.start()]
 
     # 3. Cleanup
     name = name.strip()
     # Remove trailing parenthesis if any (e.g. "John (Absconding)")
     name = re.sub(r'\s*\(.*?\)$', '', name)
-    
+    name = re.sub(r'\s+', ' ', name).strip(' ,;:-')
+
     return name.strip()
+
+
+def _canonical_name_key(name: str) -> str:
+    """
+    Build a stable dedupe key for accused names.
+    For multi-token names, token order is ignored so variants like
+    "Badhavath Prashanth" and "Prashanth Badhavath" collapse together.
+    """
+    cleaned = clean_accused_name(name or "")
+    if not cleaned:
+        return ""
+
+    base = re.sub(r'\s+', ' ', cleaned.lower()).strip()
+    tokens = [t for t in re.split(r'\s+', base) if t]
+
+    # Keep single-token names order-sensitive to avoid over-merging.
+    if len(tokens) <= 1:
+        return base
+
+    return ' '.join(sorted(tokens))
 
 class AccusedDetailsResponse(BaseModel):
     accused_details: List[AccusedDetails]
@@ -978,6 +1005,23 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
     logger.info(f"Pass 2 found details entries: {len(details)}")
 
     final_accused = []
+    dedup_map = {}
+
+    def _accused_quality_score(item: AccusedExtraction) -> int:
+        score = 0
+        if item.role_in_crime and item.role_in_crime != "Role not clearly stated":
+            score += 3
+        if item.key_details:
+            score += 2
+        if item.address:
+            score += 1
+        if item.phone_numbers:
+            score += 1
+        if item.accused_type and item.accused_type != "unknown":
+            score += 1
+        if item.status and item.status != "unknown":
+            score += 1
+        return score
 
     detail_map = {d.full_name.lower().strip(): d for d in details}
 
@@ -1104,7 +1148,38 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             status=status,
             is_ccl=is_ccl
         )
-        final_accused.append(obj)
+        dedup_key = _canonical_name_key(obj.full_name)
+        if not dedup_key:
+            dedup_key = re.sub(r'\s+', ' ', (obj.full_name or '').lower()).strip()
+
+        existing = dedup_map.get(dedup_key)
+        if existing is None:
+            dedup_map[dedup_key] = obj
+            final_accused.append(obj)
+        else:
+            # Merge duplicates conservatively: keep richer record, fill missing fields.
+            keep = existing
+            other = obj
+            if _accused_quality_score(other) > _accused_quality_score(keep):
+                keep, other = other, keep
+
+            keep.alias_name = keep.alias_name or other.alias_name
+            keep.age = keep.age if keep.age is not None else other.age
+            keep.gender = keep.gender or other.gender
+            keep.occupation = keep.occupation or other.occupation
+            keep.address = keep.address or other.address
+            keep.phone_numbers = keep.phone_numbers or other.phone_numbers
+            keep.role_in_crime = keep.role_in_crime or other.role_in_crime
+            keep.key_details = keep.key_details or other.key_details
+            keep.accused_type = keep.accused_type or other.accused_type
+            if keep.status == "unknown" and other.status != "unknown":
+                keep.status = other.status
+            keep.is_ccl = bool(keep.is_ccl or other.is_ccl)
+
+            if keep is not existing:
+                idx = final_accused.index(existing)
+                final_accused[idx] = keep
+                dedup_map[dedup_key] = keep
 
     return final_accused
 

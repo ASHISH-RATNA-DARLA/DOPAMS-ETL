@@ -254,6 +254,97 @@ def _normalize_phone_digits(value):
     return digits[-10:] if len(digits) >= 10 else digits
 
 
+def _extract_identity_fallback_from_text(facts_text, name_hint):
+    """Parse relation/address details near the accused name in narrative text.
+
+    Returns dict with optional keys:
+      - address
+      - gender (derived from relation marker)
+      - father_name
+      - relation_marker (s/o, d/o, w/o, h/o)
+    """
+    result = {
+        'address': None,
+        'gender': None,
+        'father_name': None,
+        'relation_marker': None,
+    }
+    if not facts_text or not name_hint:
+        return result
+
+    text = str(facts_text)
+    clean_name = clean_accused_name(name_hint) or str(name_hint)
+    if not clean_name.strip():
+        return result
+
+    name_pat = re.sub(r'\s+', r'\\s+', re.escape(clean_name.strip()))
+    m = re.search(name_pat, text, flags=re.IGNORECASE)
+    if m:
+        start = max(0, m.start() - 40)
+        end = min(len(text), m.end() + 380)
+        window = text[start:end]
+    else:
+        window = text
+
+    rel = re.search(
+        r'\b(s\s*/\s*o|d\s*/\s*o|w\s*/\s*o|h\s*/\s*o)\b\s*[:\-]?\s*([A-Za-z][A-Za-z\s\.]{1,80}?)'
+        r'(?=,\s*(?:age|caste|occ|occupation|r\s*/\s*o|resident|residing|mobile|aadhaar)\b|,|\.|\n|$)',
+        window,
+        flags=re.IGNORECASE,
+    )
+    if rel:
+        marker = rel.group(1).lower().replace(' ', '')
+        father_name = re.sub(r'\s+', ' ', rel.group(2)).strip(' ,.;:-')
+        result['relation_marker'] = marker
+        result['father_name'] = father_name or None
+        if marker.startswith('s/o'):
+            result['gender'] = 'Male'
+        elif marker.startswith('d/o') or marker.startswith('w/o') or marker.startswith('h/o'):
+            result['gender'] = 'Female'
+
+    addr = re.search(
+        r'\b(?:r\s*/\s*o|resident\s+of|residing\s+at)\b\s*[:\-]?\s*([^\n]{3,220})',
+        window,
+        flags=re.IGNORECASE,
+    )
+    if addr:
+        address = addr.group(1)
+        address = re.split(
+            r'\b(?:mobile|aadhaar|age|caste|occ|occupation|s\s*/\s*o|d\s*/\s*o|w\s*/\s*o|h\s*/\s*o)\b',
+            address,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        address = re.sub(r'\s+', ' ', address).strip(' ,.;:-')
+        result['address'] = address or None
+
+    return result
+
+
+def _apply_text_identity_fallback(payload, facts_text, name_hint, source_person=None, source_summary=None):
+    """Fill null person fields from relation/address patterns in text narrative."""
+    details = _extract_identity_fallback_from_text(facts_text, name_hint)
+    if not details:
+        return
+
+    if not payload.get('address') and details.get('address'):
+        payload['address'] = details['address']
+        if isinstance(source_person, dict):
+            source_person['address'] = 'TEXT_RELATION_FALLBACK'
+
+    if not payload.get('gender') and details.get('gender'):
+        payload['gender'] = details['gender']
+        if isinstance(source_person, dict):
+            source_person['gender'] = 'TEXT_RELATION_FALLBACK'
+
+    if isinstance(source_summary, dict):
+        if details.get('father_name') and 'father_name' not in source_summary:
+            source_summary['father_name'] = details['father_name']
+            source_summary['father_name_source'] = 'TEXT_RELATION_FALLBACK'
+        if details.get('relation_marker') and 'relation_marker' not in source_summary:
+            source_summary['relation_marker'] = details['relation_marker']
+
+
 def _is_same_crime_duplicate_accused(row_a, row_b):
     """
     Conservative duplicate detector for source accused rows within ONE crime.
@@ -1673,6 +1764,19 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
         if accused_type:
             source_summary['accused_type'] = 'LLM_CLASSIFICATION'
 
+        # Fill address/gender/father metadata from relation markers in text
+        # when Person API fields are unavailable or null.
+        _tmp_identity = {'address': address, 'gender': gender}
+        _apply_text_identity_fallback(
+            _tmp_identity,
+            facts_text,
+            full_name or accused_code,
+            source_person=source_person,
+            source_summary=source_summary,
+        )
+        address = _tmp_identity.get('address')
+        gender = _tmp_identity.get('gender')
+
         canonical_person_id, dedup_confidence, dedup_match_tier, dedup_review_flag = _resolve_canonical_identity(
             conn,
             crime_id,
@@ -1808,6 +1912,28 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                             accused_type_extra = base_type + " (Suspect)"
                         logging.info(f"Branch A gap-fill: '{clean}' tagged as confessional-only suspect")
 
+                    _tmp_identity_extra = {
+                        'address': address_extra,
+                        'gender': gender_extra,
+                    }
+                    _source_person_extra = {}
+                    _source_summary_extra = {
+                        k: 'LLM' for k, v in [
+                            ('role_in_crime', role_desc),
+                            ('key_details', key_details_extra),
+                            ('accused_type', accused_type_extra),
+                        ] if v is not None
+                    }
+                    _apply_text_identity_fallback(
+                        _tmp_identity_extra,
+                        facts_text,
+                        clean,
+                        source_person=_source_person_extra,
+                        source_summary=_source_summary_extra,
+                    )
+                    address_extra = _tmp_identity_extra.get('address')
+                    gender_extra = _tmp_identity_extra.get('gender')
+
                     gender_extra = detect_gender(facts_text, clean, gender_extra)
                     status_extra = resolve_status_for_insert(None, facts_text, clean)
                     is_ccl_extra = detect_ccl_from_age(age_extra) or detect_ccl(clean, role_desc or "")
@@ -1856,13 +1982,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                         'dedup_review_flag'    : dedup_flag_extra,
                         'source_person_fields' : {},  # populated below
                         'source_accused_fields': {'ps_code': ps_code, 'accused_id': 'SYNTHETIC_GAP_FILL'},
-                        'source_summary_fields': {
-                            k: 'LLM' for k, v in [
-                                ('role_in_crime', role_desc),
-                                ('key_details', key_details_extra),
-                                ('accused_type', accused_type_extra),
-                            ] if v is not None
-                        },
+                        'source_summary_fields': _source_summary_extra,
                         'etl_run_id'           : run_id,
                     }
                     # Fix source_person_fields using the actual values
@@ -1877,6 +1997,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                             ('phone_numbers', phone_extra),
                         ] if v is not None
                     }
+                    for k, v in _source_person_extra.items():
+                        extra_row['source_person_fields'][k] = v
                     branch_records.append(extra_row)
                     count += 1
     except Exception as gap_err:
@@ -1975,10 +2097,22 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
             if data.get('status') == 'unknown':
                 data['status'] = None
 
+            _source_person_override = {}
+            _source_summary_override = {}
+            _apply_text_identity_fallback(
+                data,
+                facts_text,
+                accused.full_name,
+                source_person=_source_person_override,
+                source_summary=_source_summary_override,
+            )
+
             # Source audit trail: all from LLM in Branch B
             data['source_person_fields'] = {k: 'LLM' for k in
                 ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'address', 'phone_numbers']
                 if data.get(k) is not None}
+            for k, v in _source_person_override.items():
+                data['source_person_fields'][k] = v
             data['source_accused_fields'] = {
                 'accused_id': 'DB_PAIRED' if accused_id else 'UNMATCHED',
                 'ps_code': ps_code,
@@ -1986,6 +2120,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
             data['source_summary_fields'] = {k: 'LLM' for k in
                 ['role_in_crime', 'key_details', 'accused_type', 'status']
                 if data.get(k) is not None}
+            data['source_summary_fields'].update(_source_summary_override)
 
             canonical_person_id, dedup_confidence, dedup_match_tier, dedup_review_flag = _resolve_canonical_identity(
                 conn,
@@ -2073,6 +2208,19 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                 status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
                 is_ccl_s  = bool(stub_is_ccl) or detect_ccl_from_age(age_s) or detect_ccl(stub_name, role_desc or '')
 
+                _tmp_identity_stub = {'address': addr_s, 'gender': gender_s}
+                _source_person_stub = {}
+                _source_summary_stub = {}
+                _apply_text_identity_fallback(
+                    _tmp_identity_stub,
+                    facts_text,
+                    stub_name,
+                    source_person=_source_person_stub,
+                    source_summary=_source_summary_stub,
+                )
+                addr_s = _tmp_identity_stub.get('address')
+                gender_s = _tmp_identity_stub.get('gender')
+
                 synth_id = stub_id or _synthetic_accused_id(crime_id, stub_name, stub_seq)
 
                 canonical_s, dedup_conf_s, dedup_tier_s, dedup_flag_s = \
@@ -2139,6 +2287,9 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                     },
                     'etl_run_id'           : run_id,
                 }
+                for k, v in _source_person_stub.items():
+                    stub_row['source_person_fields'][k] = v
+                stub_row['source_summary_fields'].update(_source_summary_stub)
                 branch_records.append(stub_row)
                 count += 1
 
@@ -2230,14 +2381,27 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id, llm_extractio
             if data.get('status') == 'unknown':
                 data['status'] = None
 
+            _source_person_override = {}
+            _source_summary_override = {}
+            _apply_text_identity_fallback(
+                data,
+                facts_text,
+                accused.full_name,
+                source_person=_source_person_override,
+                source_summary=_source_summary_override,
+            )
+
             # Source audit trail: all from LLM in Branch C
             data['source_person_fields'] = {k: 'LLM' for k in
                 ['full_name', 'alias_name', 'age', 'gender', 'occupation', 'address', 'phone_numbers']
                 if data.get(k) is not None}
+            for k, v in _source_person_override.items():
+                data['source_person_fields'][k] = v
             data['source_accused_fields'] = {'ps_code': ps_code}
             data['source_summary_fields'] = {k: 'LLM' for k in
                 ['role_in_crime', 'key_details', 'accused_type', 'status']
                 if data.get(k) is not None}
+            data['source_summary_fields'].update(_source_summary_override)
 
             canonical_person_id, dedup_confidence, dedup_match_tier, dedup_review_flag = _resolve_canonical_identity(
                 conn,
