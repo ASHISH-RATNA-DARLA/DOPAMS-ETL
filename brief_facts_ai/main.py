@@ -12,6 +12,7 @@ from dataclasses import dataclass
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from db_pooling import get_singleton_pool
 
 try:
     from unidecode import unidecode as _unidecode
