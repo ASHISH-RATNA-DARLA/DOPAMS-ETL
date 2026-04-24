@@ -34,6 +34,7 @@ from db import (
     get_incremental_cutoff_date,
     fetch_existing_accused_for_crime,
     start_crime_processing_run,
+    try_claim_crime_for_processing,
     complete_crime_processing_run,
     fail_crime_processing_run,
     normalize_accused_status,
@@ -1127,7 +1128,8 @@ class DBTask:
     """Work item for DB insertion queue. Queued immediately after LLM completes."""
     crime_id: str
     enriched_rows: list
-    run_id: str = None
+    branch: str = None
+    unified_mode: bool = True
     result_event: threading.Event = None
     error: str = None
 
@@ -1182,24 +1184,40 @@ def _db_worker_loop(db_queue: queue.Queue):
 
         crime_id = task.crime_id
         pool = get_singleton_pool()
+        run_id = None
 
         try:
             with pool.get_connection_context() as conn:
-                # Bulk upsert: all enriched rows for this crime at once
-                db_module.bulk_upsert_brief_facts_ai(conn, task.enriched_rows)
-                logging.info(f"[DB Worker] Crime {crime_id}: {len(task.enriched_rows)} rows upserted")
+                if task.unified_mode:
+                    # Start an auditable run inside the same transaction that will write rows.
+                    run_id = start_crime_processing_run(conn, crime_id, branch=task.branch)
+                    delete_brief_facts_for_crime(conn, crime_id)
 
-                # Mark processing complete if in unified mode
-                if task.run_id:
-                    try:
-                        complete_crime_processing_run(conn, task.run_id, len(task.enriched_rows))
-                    except Exception as e:
-                        logging.warning(f"[DB Worker] Failed to mark complete for Crime {crime_id}: {e}")
+                    for row in (task.enriched_rows or []):
+                        if not row.get('etl_run_id'):
+                            row['etl_run_id'] = run_id
+
+                    # Bulk upsert: all enriched rows for this crime at once
+                    db_module.bulk_upsert_brief_facts_ai(conn, task.enriched_rows)
+                    logging.info(f"[DB Worker] Crime {crime_id}: {len(task.enriched_rows)} rows upserted")
+
+                    if run_id:
+                        try:
+                            complete_crime_processing_run(conn, run_id, len(task.enriched_rows))
+                        except Exception as e:
+                            logging.warning(f"[DB Worker] Failed to mark complete for Crime {crime_id}: {e}")
 
                 conn.commit()
                 logging.info(f"[DB Worker] Crime {crime_id}: ✅ committed")
                 task.error = None
         except Exception as e:
+            if run_id:
+                try:
+                    with pool.get_connection_context() as fail_conn:
+                        fail_crime_processing_run(fail_conn, run_id, str(e))
+                        fail_conn.commit()
+                except Exception as fail_e:
+                    logging.warning(f"[DB Worker] Crime {crime_id}: failed to mark run as failed: {fail_e}")
             logging.error(f"[DB Worker] Crime {crime_id}: ❌ DB insertion failed: {e}", exc_info=True)
             task.error = str(e)
         finally:
@@ -1248,7 +1266,7 @@ def process_crimes_parallel(crimes):
     _dynamic_keywords = build_drug_keywords(_drug_categories)
     logging.info(f"Drug KB loaded once: {len(_dynamic_keywords)} keywords, {len(_drug_categories)} categories")
 
-    _stats = {'success': 0, 'failure': 0, 'db_pending': 0}
+    _stats = {'success': 0, 'failure': 0, 'skipped': 0, 'db_pending': 0}
     _stats_lock = threading.Lock()
 
     # Create LLM task queue and start LLM worker threads
@@ -1277,17 +1295,19 @@ def process_crimes_parallel(crimes):
         pool = get_singleton_pool()
 
         with pool.get_connection_context() as conn:
-            run_id = None
             rows_written = 0
             unified_mode = (config.ACCUSED_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME
             try:
+                # Prevent duplicate processing of the same crime across threads/instances.
+                if not try_claim_crime_for_processing(conn, crime_id):
+                    logging.info(f"Crime {crime_id}: skipped (already claimed by another worker/instance)")
+                    with _stats_lock:
+                        _stats['skipped'] += 1
+                    return False, crime_id, None
+
                 # Pre-LLM: branch classification and DB setup
                 db_accused = fetch_existing_accused_for_crime(conn, crime_id)
                 branch = _classify_db_accused(db_accused)
-
-                if unified_mode:
-                    run_id = start_crime_processing_run(conn, crime_id, branch=branch)
-                    delete_brief_facts_for_crime(conn, crime_id)
 
                 # ── Queue LLM extraction and wait for result ──
                 llm_task = LLMTask(crime_id, facts_text, threading.Event())
@@ -1306,10 +1326,9 @@ def process_crimes_parallel(crimes):
                         'existing_accused': False,
                         'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
                         'source_summary_fields': {'error': llm_task.error},
-                        'etl_run_id'      : run_id,
                     }
                     db_event = threading.Event()
-                    db_task = DBTask(crime_id, [failure_row], run_id, db_event)
+                    db_task = DBTask(crime_id, [failure_row], branch, unified_mode, db_event)
                     db_queue.put(db_task)
                     with _stats_lock:
                         _stats['failure'] += 1
@@ -1319,11 +1338,11 @@ def process_crimes_parallel(crimes):
 
                 # Post-LLM: branch-specific processing (extractions already obtained from queue)
                 if branch == 'A':
-                    rows_written, branch_records = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, llm_task.result)
+                    rows_written, branch_records = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, None, llm_task.result)
                 elif branch == 'B':
-                    rows_written, branch_records = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, llm_task.result)
+                    rows_written, branch_records = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, None, llm_task.result)
                 else:
-                    rows_written, branch_records = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id, llm_task.result)
+                    rows_written, branch_records = _process_branch_c(conn, crime_id, ps_code, facts_text, None, llm_task.result)
 
                 # Post-LLM: drug extraction and unified mode processing
                 enriched_rows = []
@@ -1372,7 +1391,6 @@ def process_crimes_parallel(crimes):
                             'source_accused_fields': {},
                             'source_summary_fields': {'note': 'NO_ACCUSED_DRUGS_ONLY'},
                             'drugs'                : [],
-                            'etl_run_id'           : run_id,
                         }
                         enriched_rows = db_module.write_drugs_by_accused_in_memory([orphan_row], extractions)
                     else:
@@ -1380,7 +1398,7 @@ def process_crimes_parallel(crimes):
 
                 # ── Queue DB task for immediate insertion (don't wait, don't commit here) ──
                 db_event = threading.Event()
-                db_task = DBTask(crime_id, enriched_rows, run_id, db_event)
+                db_task = DBTask(crime_id, enriched_rows, branch, unified_mode, db_event)
                 db_queue.put(db_task)
                 with _stats_lock:
                     _stats['success'] += 1
@@ -1389,13 +1407,6 @@ def process_crimes_parallel(crimes):
                 return True, crime_id, branch
             except Exception as e:
                 conn.rollback()
-                if unified_mode and run_id:
-                    try:
-                        fail_crime_processing_run(conn, run_id, str(e))
-                        conn.commit()
-                    except Exception as inner_e:
-                        conn.rollback()
-                        logging.error(f"Failed to write failure marker for Crime {crime_id}: {inner_e}")
                 logging.error(f"Crime {crime_id}: ❌ failed: {e}", exc_info=True)
                 with _stats_lock:
                     _stats['failure'] += 1
@@ -1404,7 +1415,16 @@ def process_crimes_parallel(crimes):
     # Process crimes in batches (batch synchronization: all crimes + all DB tasks complete before next batch)
     total_crimes = len(crimes)
     for batch_idx, batch_start in enumerate(range(0, total_crimes, batch_size_limit)):
-        batch_crimes = crimes[batch_start:batch_start + batch_size_limit]
+        raw_batch_crimes = crimes[batch_start:batch_start + batch_size_limit]
+        # Defensive dedup: same crime_id can surface multiple times from source joins.
+        seen_crime_ids = set()
+        batch_crimes = []
+        for crime in raw_batch_crimes:
+            cid = crime.get('crime_id')
+            if cid in seen_crime_ids:
+                continue
+            seen_crime_ids.add(cid)
+            batch_crimes.append(crime)
         batch_num = batch_idx + 1
         logging.info(f"📦 Batch {batch_num}: processing {len(batch_crimes)} crimes (crimes {batch_start+1}-{min(batch_start+len(batch_crimes), total_crimes)} of {total_crimes})")
 
@@ -1422,7 +1442,7 @@ def process_crimes_parallel(crimes):
         db_queue.join()  # Block until all DB tasks are processed
         with _stats_lock:
             _stats['db_pending'] = 0
-        logging.info(f"📦 Batch {batch_num} complete: success={_stats['success']}, failure={_stats['failure']}")
+        logging.info(f"📦 Batch {batch_num} complete: success={_stats['success']}, failure={_stats['failure']}, skipped={_stats['skipped']}")
 
     # Shutdown worker threads (wait for queues to drain and all threads to exit)
     logging.info("Waiting for LLM queue to drain...")
@@ -1446,7 +1466,7 @@ def process_crimes_parallel(crimes):
         if t.is_alive():
             logging.warning(f"DB worker thread {t.name} did not exit gracefully")
 
-    logging.info(f"✅ All {total_crimes} crimes processed: success={_stats['success']}, failure={_stats['failure']}")
+    logging.info(f"✅ All {total_crimes} crimes processed: success={_stats['success']}, failure={_stats['failure']}, skipped={_stats['skipped']}")
 
 
 # ---------------------------------------------------------------------------

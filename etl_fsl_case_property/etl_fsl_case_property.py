@@ -522,11 +522,32 @@ class FSLCasePropertyETL:
             return True  # Allow insert on validation error
 
     def normalize_media_items(self, media_items: List) -> List[Dict]:
-        """Normalize API MEDIA array/object/value into child-row payloads."""
+        """Normalize API MEDIA payload into media child rows without losing source entries."""
         normalized_items: List[Dict] = []
 
         if media_items is None:
             return normalized_items
+
+        def extract_file_id(media_item: Dict) -> Optional[str]:
+            """Extract file id from variant key names used by upstream APIs."""
+            file_id_raw = (
+                media_item.get('FILE_ID')
+                or media_item.get('fileId')
+                or media_item.get('file_id')
+                or media_item.get('FILEID')
+                or media_item.get('fileID')
+                or media_item.get('id')
+                or media_item.get('ID')
+            )
+            if isinstance(file_id_raw, str):
+                file_id_raw = file_id_raw.strip()
+            return file_id_raw if file_id_raw else None
+
+        # Some sources wrap list-like media under keys such as data/items/media.
+        if isinstance(media_items, dict):
+            nested = media_items.get('data') or media_items.get('items') or media_items.get('media')
+            if isinstance(nested, list):
+                media_items = nested
 
         if not isinstance(media_items, list):
             media_items = [media_items]
@@ -535,19 +556,12 @@ class FSLCasePropertyETL:
             item_payload = media_item if isinstance(media_item, dict) else {'value': media_item}
 
             if isinstance(media_item, dict):
-                file_id_raw = (
-                    media_item.get('FILE_ID')
-                    or media_item.get('fileId')
-                    or media_item.get('file_id')
-                    or media_item.get('id')
-                    or media_item.get('ID')
-                )
+                file_id = extract_file_id(media_item)
             else:
                 file_id_raw = media_item
-
-            if isinstance(file_id_raw, str):
-                file_id_raw = file_id_raw.strip()
-            file_id = file_id_raw if file_id_raw else None
+                if isinstance(file_id_raw, str):
+                    file_id_raw = file_id_raw.strip()
+                file_id = file_id_raw if file_id_raw else None
 
             normalized_items.append({
                 'media_index': idx,
@@ -691,37 +705,68 @@ class FSLCasePropertyETL:
         # Use fsl_case_property_url from config (which reads from .env)
         url = API_CONFIG.get('fsl_case_property_url', f"{API_CONFIG['base_url']}/case-property")
         params = {
-            'fromDate': from_date,
-            'toDate': to_date
+        Check if FSL MO_ID maps to any MO seizure key for the same crime.
+        Returns True to allow insert - this is an audit check, not a strict FK gate.
         }
-        headers = {
-            'x-api-key': API_CONFIG['api_key']
+        Matching strategy:
+        1) crime_id + mo_seizure_id (primary observed API mapping)
+        2) crime_id + mo_id (legacy/alternate mapping)
+
+        If neither matches, log an informational warning for investigation.
         }
         
         for attempt in range(API_CONFIG['max_retries']):
             try:
                 logger.debug(f"Fetching FSL case property: {from_date} to {to_date} (Attempt {attempt + 1})")
                 logger.trace(f"API Request - URL: {url}, Params: {params}, Headers: {headers}")
-                response = requests.get(
-                    url,
-                    params=params,
-                    headers=headers,
-                    timeout=API_CONFIG['timeout']
+                SELECT
+                    EXISTS (
+                        SELECT 1
+                        FROM {MO_SEIZURES_TABLE}
+                        WHERE crime_id = %s
+                          AND mo_seizure_id = %s
+                    ) AS match_mo_seizure_id,
+                    EXISTS (
+                        SELECT 1
+                        FROM {MO_SEIZURES_TABLE}
+                        WHERE crime_id = %s
+                          AND mo_id = %s
+                    ) AS match_mo_id
+                """,
+                (crime_id, mo_id, crime_id, mo_id)
+            )
+            row = self.db_cursor.fetchone()
+            match_mo_seizure_id = bool(row[0]) if row else False
+            match_mo_id = bool(row[1]) if row else False
+
+            if match_mo_seizure_id:
+                logger.trace(
+                    "MO_ID %s matched in %s via mo_seizure_id for CRIME_ID %s",
+                    mo_id,
+                    MO_SEIZURES_TABLE,
+                    crime_id,
                 )
-                logger.trace(f"API Response - Status: {response.status_code}, Headers: {dict(response.headers)}")
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    self.stats['total_api_calls'] += 1
-                    
-                    # Handle both single object and array responses
-                    if data.get('status'):
-                        case_property_data = data.get('data')
-                        if case_property_data:
-                            # If single object, convert to list
-                            if isinstance(case_property_data, dict):
-                                case_property_data = [case_property_data]
-                            
+            elif match_mo_id:
+                logger.trace(
+                    "MO_ID %s matched in %s via mo_id for CRIME_ID %s",
+                    mo_id,
+                    MO_SEIZURES_TABLE,
+                    crime_id,
+                )
+            else:
+                logger.warning(
+                    "⚠️  [INFO] MO_ID %s not found in %s for CRIME_ID %s "
+                    "(checked mo_seizure_id + mo_id; API reference, allowing insert)",
+                    mo_id,
+                    MO_SEIZURES_TABLE,
+                    crime_id,
+                )
+
+            return True  # Always allow insert; this is audit-only validation.
+        except Exception as e:
+            logger.error(f"Error validating mo_id={mo_id} for crime_id={crime_id}: {e}")
+            self.db_conn.rollback()
+            return True  # Allow insert on validation error
                             # Extract crime_ids for logging
                             crime_ids = [d.get('CRIME_ID') for d in case_property_data if d.get('CRIME_ID')]
                             
@@ -917,7 +962,9 @@ class FSLCasePropertyETL:
             # Store original CRIME_ID string for validation
             '_original_crime_id': crime_id_str,
             # Store normalized media child rows from API snapshot
-            '_media_files': self.normalize_media_items(case_property_raw.get('MEDIA'))
+            '_media_files': self.normalize_media_items(
+                case_property_raw.get('MEDIA', case_property_raw.get('media'))
+            )
         }
         logger.trace(f"Transformed case property: {json.dumps({k: v for k, v in transformed.items() if k not in ('_original_crime_id', '_media_files')}, indent=2, default=str)}")
         return transformed

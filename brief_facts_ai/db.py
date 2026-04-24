@@ -61,26 +61,45 @@ def fetch_unprocessed_crimes_daily(conn, limit=100):
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         query = """
-        SELECT DISTINCT
+        SELECT
             c.crime_id,
             c.ps_code,
             c.brief_facts,
             COALESCE(c.date_modified, c.date_created) AS source_changed_at,
             bfa.etl_run_id AS last_processing_run_id,
-            COALESCE(bfa.date_modified, '1900-01-01'::timestamp) AS last_processed_at
+            COALESCE(bfa.last_processed_at, '1900-01-01'::timestamp) AS last_processed_at
         FROM public.crimes c
-        LEFT JOIN public.brief_facts_ai bfa ON c.crime_id = bfa.crime_id
+        LEFT JOIN LATERAL (
+            SELECT
+                MAX(date_modified) AS last_processed_at,
+                MAX(etl_run_id)::text AS etl_run_id
+            FROM public.brief_facts_ai b
+            WHERE b.crime_id = c.crime_id
+        ) bfa ON TRUE
         WHERE
             -- Unprocessed: No entry in brief_facts_ai
-            bfa.crime_id IS NULL
+            bfa.last_processed_at IS NULL
             OR
             -- Or modified since last processing
-            COALESCE(c.date_modified, c.date_created) > COALESCE(bfa.date_modified, '1900-01-01'::timestamp)
+            COALESCE(c.date_modified, c.date_created) > COALESCE(bfa.last_processed_at, '1900-01-01'::timestamp)
         ORDER BY c.crime_id
         LIMIT %s
         """
         cur.execute(query, (limit,))
         return cur.fetchall()
+
+
+def try_claim_crime_for_processing(conn, crime_id):
+    """
+    Attempt to claim a crime for processing using transaction-scoped advisory lock.
+
+    Returns True when this transaction owns the claim, False when another worker/
+    ETL instance already owns it.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s))", (str(crime_id),))
+        row = cur.fetchone()
+        return bool(row and row[0])
 
 
 def fetch_unprocessed_crimes(conn, limit=100):
