@@ -410,6 +410,17 @@ def _extract_explicit_packet_rows(text: str, kb_lookup: Dict[str, str]) -> List[
 
         accused_ref = _infer_unique_accused_ref(sentence)
 
+        # Skip sentences that describe gross vs net weight — they are NOT separate packets.
+        # The two numbers (2.592 kg gross, 2.398 kg net) describe the same drug, not two packets.
+        sentence_lower = sentence.lower()
+        gross_keywords = {'gross weight', 'total gross weight', 'gross wt', 'gross wt.'}
+        net_keywords   = {'net weight', 'net wt', 'net wt.', 'actual weight'}
+        has_gross = any(kw in sentence_lower for kw in gross_keywords)
+        has_net   = any(kw in sentence_lower for kw in net_keywords)
+        if has_gross and has_net:
+            # Let _resolve_net_vs_gross_weight() handle this sentence, not packet expander
+            continue
+
         seen_quantities = set()
         for packet_index, match in enumerate(qty_matches, start=1):
             qty = float(match.group('qty'))
@@ -456,6 +467,11 @@ def _extract_segmented_accused_rows(text: str, kb_lookup: Dict[str, str]) -> Lis
     Expand clauses that explicitly mention an accused code (A1, A2, ...) and a
     seizure quantity into one row per accused. This keeps per-accused packet
     quantities separate even when the narrative is written as a single paragraph.
+
+    Key safeguard: Each segment is capped at 600 chars from the A-N anchor and
+    takes ONLY the FIRST quantity match found after the anchor. This prevents
+    the last accused's segment from consuming quantities belonging to subsequent
+    accused who are mentioned without the 'A-' prefix (e.g. '3) Mohammad Sohail').
     """
     if not text:
         return []
@@ -467,12 +483,23 @@ def _extract_segmented_accused_rows(text: str, kb_lookup: Dict[str, str]) -> Lis
     rows = []
     for index, match in enumerate(accused_matches):
         start = match.start()
-        end = accused_matches[index + 1].start() if index + 1 < len(accused_matches) else len(text)
+        # Cap segment at next A-N anchor OR 600 chars (whichever is shorter)
+        # 600 chars is enough for one accused's full seizure description
+        next_start = accused_matches[index + 1].start() if index + 1 < len(accused_matches) else len(text)
+        end = min(next_start, start + 600)
         segment = text[start:end].strip()
         if not segment:
             continue
 
-        if not _PACKET_CONTEXT_RE.search(segment) and not re.search(r'\bganja\b|\bcannabis\b|\bcharas\b|\bmarijuana\b', segment, re.IGNORECASE):
+        if not _PACKET_CONTEXT_RE.search(segment) and not re.search(
+            r'\bganja\b|\bcannabis\b|\bcharas\b|\bmarijuana\b|\bheroin\b|\bcocaine\b|\balprazolam\b|\btramadol\b',
+            segment, re.IGNORECASE,
+        ):
+            continue
+
+        # Skip segments that look like the accused introduction block
+        # (before any seizure has happened e.g. "A-2) Mohammad Sami s/o...")
+        if re.search(r'\bapprehended\b|\barrested\b|\bseized\b|\bconfession\b|\brecovered\b|\bpossession\b', segment, re.IGNORECASE) is None:
             continue
 
         qty_match = _SEGMENT_QUANTITY_PATTERN.search(segment)
@@ -508,7 +535,7 @@ def _extract_segmented_accused_rows(text: str, kb_lookup: Dict[str, str]) -> Lis
             'destination': None,
             'purchase_price_per_unit': None,
             'extraction_metadata': {
-                'source_sentence': segment,
+                'source_sentence': segment[:300],  # cap source_sentence to avoid mega-strings
                 'accused_ref': accused_ref,
                 'explicit_segment_row': True,
             },
@@ -593,6 +620,101 @@ def _drop_redundant_total_rows(drugs: List[DrugExtraction], packet_rows: List[di
     kept = [d for d in drugs if id(d) not in drugs_to_remove]
     kept.extend(new_consolidated_drugs)
     return kept
+
+
+def _drop_llm_total_when_per_accused_exist(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
+    """
+    When the LLM produces BOTH per-accused rows AND a total row for the same drug,
+    the total row is redundant and must be dropped to prevent quantity inflation in db.py.
+
+    Pattern (confession-based seizures):
+        LLM extracts:
+          [A-2: 45.20g Ganja], [A-3: 44.80g Ganja], [null: 90g Ganja, W/Rs.2250]
+        Expected DB output:
+          [A-2: 45.20g, worth=1130], [A-3: 44.80g, worth=1120]
+        Problem:
+          Without this fix, db.py assigns the 90g total row to BOTH A-2 and A-3,
+          creating duplicate entries and inflating total quantity.
+
+    Fix:
+        1. Group rows by primary_drug_name.
+        2. If a drug group has BOTH attributed rows (accused_ref != null) with >=2 different
+           accused AND an unattributed total row (accused_ref=null), check whether the
+           total row's quantity roughly equals the sum of attributed rows.
+        3. If yes: transfer the total row's seizure_worth to attributed rows
+           (set worth_scope=drug_total on each), then drop the total row.
+    """
+    if not drugs:
+        return drugs
+
+    from collections import defaultdict
+
+    # Group by drug name
+    drug_groups: dict = defaultdict(list)
+    for drug in drugs:
+        key = (drug.primary_drug_name or drug.raw_drug_name or '').lower().strip()
+        drug_groups[key].append(drug)
+
+    drugs_to_drop = set()
+
+    for drug_key, group in drug_groups.items():
+        # Separate attributed rows (has accused_ref) from total/unattributed rows
+        attributed = []
+        unattributed = []
+        for d in group:
+            meta = d.extraction_metadata if isinstance(d.extraction_metadata, dict) else {}
+            accused_ref = (
+                meta.get('accused_ref')
+                or _normalize_accused_ref(meta.get('accused_ref'))
+            )
+            # Also check via _extract_dedup_accused_ref
+            ref = _extract_dedup_accused_ref(d)
+            if ref:
+                attributed.append((d, ref))
+            else:
+                unattributed.append(d)
+
+        # Only act when there are 2+ different attributed accused AND at least 1 total row
+        if len(attributed) < 2 or not unattributed:
+            continue
+
+        # Check that attributed rows have 2+ distinct accused codes
+        distinct_refs = {ref for _, ref in attributed}
+        if len(distinct_refs) < 2:
+            continue
+
+        # Sum of attributed quantities (in weight_g after standardize_units)
+        attributed_sum_g = sum(
+            float(d.weight_g or 0.0) for d, _ in attributed
+        )
+
+        for total_row in unattributed:
+            total_qty_g = float(total_row.weight_g or 0.0)
+            if total_qty_g <= 0:
+                continue
+
+            # Tolerance: total should match sum of parts within 5%
+            if attributed_sum_g > 0 and abs(total_qty_g - attributed_sum_g) / attributed_sum_g <= 0.05:
+                # Transfer worth to attributed rows
+                worth = float(total_row.seizure_worth or 0.0)
+                if worth > 0:
+                    for d, _ in attributed:
+                        if (d.seizure_worth or 0.0) == 0.0:
+                            d.seizure_worth = worth
+                            d.worth_scope = 'drug_total'
+                    logger.info(
+                        f"[TotalDrop] Transferred worth Rs.{worth} from total row to "
+                        f"{len(attributed)} attributed rows (drug={drug_key})"
+                    )
+
+                drugs_to_drop.add(id(total_row))
+                logger.info(
+                    f"[TotalDrop] Dropped redundant LLM total row: "
+                    f"{drug_key} {total_row.raw_quantity}{total_row.raw_unit} "
+                    f"({attributed_sum_g:.1f}g sum from {len(attributed)} accused matched)"
+                )
+
+    return [d for d in drugs if id(d) not in drugs_to_drop]
 
 
 def _normalize_accused_ref(value: Optional[str]) -> Optional[str]:
@@ -898,9 +1020,32 @@ Rules:
       - "Apprehended with 1kg Ganja, seized at arrest."
       - "A-1 caught with 50g, A-2 apprehended with 30g."
 
+R30:net-vs-gross-weight|When a sentence mentions BOTH a gross weight ("gross weight", "total gross weight", "gross wt") AND a net weight ("net weight", "net wt", "actual weight") for the SAME drug seizure:
+   - Use ONLY the NET weight as raw_quantity (net = actual drug substance, excludes packaging/tape/covers).
+   - Do NOT create two rows for gross and net — they describe the SAME seizure.
+   - If ONLY gross weight is mentioned (no net stated), use the gross weight.
+   - Example: "total gross weight 2.592 kg, net weight 2.398 kg" → raw_quantity=2.398, raw_unit="kilograms"
+   - NDPS quantity classification (small/intermediate/commercial) is always based on NET weight.
+R31:confession-seizure-attribution|"On the strength of confession of A-N, seized X grams [drug]" means the seizure is ATTRIBUTED to A-N.
+   - Create a SEPARATE row per accused for their individual seizure quantity.
+   - Example: "On strength of confession of A-2 seized 45.20g Ganja, on strength of confession of A-3 seized 44.80g Ganja. Total 90g W/Rs.2250/-"
+     → Row 1: accused_ref=A-2, qty=45.20, unit=grams, worth_scope=drug_total, seizure_worth=2250
+     → Row 2: accused_ref=A-3, qty=44.80, unit=grams, worth_scope=drug_total, seizure_worth=2250
+     → Do NOT create a third row for the 90g total — it is the sum of the above two.
+   - Total worth ("W/Rs.") applies to ALL per-accused rows with worth_scope=drug_total.
+
+### Example 7 — confession-based per-accused seizure with total worth (R31)
+Input: "On the strength of the confession of A-2 seized 45.20 grams dry Ganja marked as M-1. On the strength of the confession of A-3 seized 44.80 grams dry Ganja marked as M-3. Total GANJA 90 grams W/Rs. 2250/-"
+{"drugs":[
+  {"raw_drug_name":"Dry Ganja","raw_quantity":45.20,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":2250.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{"source_sentence":"On the strength of the confession of A-2 seized 45.20 grams dry Ganja marked as M-1","accused_ref":"A-2"}},
+  {"raw_drug_name":"Dry Ganja","raw_quantity":44.80,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":2250.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{"source_sentence":"On the strength of the confession of A-3 seized 44.80 grams dry Ganja marked as M-3","accused_ref":"A-3"}}
+]}
+NOTE: Do NOT create a third row for 90g total — it equals A-2 + A-3 quantities. Worth 2250 is drug_total distributed by post-processing.
+
 Input text:
 {text}
 """
+
 
 # =============================================================================
 # Post-processing Step 1 (NEW): Resolve primary_drug_name via KB lookup
@@ -1867,6 +2012,120 @@ def _mark_sample_entries(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
 
 
 # =============================================================================
+# Post-processing Step: Net vs Gross Weight Resolution
+# =============================================================================
+
+# Regex to detect gross/net weight sentences
+_GROSS_WEIGHT_RE = re.compile(
+    r'(?P<context>(?:total\s+)?gross\s+(?:weight|wt\.?))'
+    r'[^\d]{0,30}(?P<qty>[\d]+(?:[.,][\d]+)?)\s*'
+    r'(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams)',
+    re.IGNORECASE,
+)
+_NET_WEIGHT_RE = re.compile(
+    r'(?P<context>(?:actual|net)\s+(?:weight|wt\.?))'
+    r'[^\d]{0,30}(?P<qty>[\d]+(?:[.,][\d]+)?)\s*'
+    r'(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams)',
+    re.IGNORECASE,
+)
+
+
+def _resolve_net_vs_gross_weight(drugs: List[DrugExtraction], text: str) -> List[DrugExtraction]:
+    """
+    RULE R30: Net vs Gross Weight Resolution.
+
+    In NDPS FIRs, officers routinely report TWO weights for the same seizure:
+      - Gross weight: total physical weight including packaging (tape, covers, bags).
+      - Net weight: actual drug substance recovered (used for NDPS classification).
+
+    Sentence pattern:
+        "The total gross weight of the seized material was 2.592 kilograms
+         and the net weight was 2.398 kilograms."
+
+    Problem: The _extract_explicit_packet_rows() detector sees two qty values
+    in the sentence and expands them into 2 separate drug rows (2.592 and 2.398).
+    The LLM may also produce both rows.
+
+    Fix:
+      1. Scan all drug entries for gross/net pairs from the SAME sentence.
+      2. Keep ONLY the net-weight row. Drop the gross-weight row.
+      3. If only a gross row exists with no net counterpart, keep it unchanged.
+
+    Args:
+        drugs: List of DrugExtraction objects after standardize_units().
+        text:  Original brief_facts text (for context — not used for extraction).
+
+    Returns:
+        Filtered list with gross-weight-only rows removed when net exists.
+    """
+    if not drugs:
+        return drugs
+
+    # Scan the full text for sentences containing BOTH gross and net weight
+    # Collect (drug_name, gross_qty_rounded, unit) tuples to drop
+    gross_to_drop: set = set()
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', text)
+    for sentence in sentences:
+        sl = sentence.lower()
+        if not (any(kw in sl for kw in ('gross weight', 'total gross weight', 'gross wt')) and
+                any(kw in sl for kw in ('net weight', 'net wt', 'actual weight'))):
+            continue
+
+        gross_match = _GROSS_WEIGHT_RE.search(sentence)
+        net_match   = _NET_WEIGHT_RE.search(sentence)
+        if not gross_match or not net_match:
+            continue
+
+        gross_qty_str = gross_match.group('qty').replace(',', '.')
+        gross_unit    = gross_match.group('unit').lower()
+        gross_qty     = round(float(gross_qty_str), 3)
+
+        # Normalize unit to the same category used after standardize_units()
+        if gross_unit in ('kg', 'kgs', 'kilogram', 'kilograms'):
+            gross_qty_g = gross_qty * 1000.0
+        elif gross_unit in ('g', 'gm', 'gms', 'gram', 'grams'):
+            gross_qty_g = gross_qty
+        else:
+            continue  # unrecognized unit — skip
+
+        gross_to_drop.add(round(gross_qty_g, 1))
+        logger.info(
+            f"[NetGross] Detected gross/net pair in sentence. "
+            f"Gross={gross_qty}{gross_unit} ({gross_qty_g}g) will be dropped in favour of net weight."
+        )
+
+    if not gross_to_drop:
+        return drugs  # No gross/net sentence found — nothing to do
+
+    # Now filter: drop any drug row whose weight_g rounds to a gross-to-drop value
+    # AND whose source_sentence contains gross-weight keywords.
+    kept = []
+    for drug in drugs:
+        meta = drug.extraction_metadata if isinstance(drug.extraction_metadata, dict) else {}
+        source = (meta.get('source_sentence') or '').lower()
+
+        is_gross_source = any(kw in source for kw in (
+            'gross weight', 'total gross weight', 'gross wt'
+        ))
+        wg = round(drug.weight_g or 0.0, 1)
+
+        if is_gross_source and wg in gross_to_drop:
+            logger.info(
+                f"[NetGross] Dropped gross-weight row: "
+                f"{drug.raw_drug_name} {drug.raw_quantity}{drug.raw_unit} "
+                f"(weight_g={drug.weight_g}) — net-weight row retained instead."
+            )
+            continue
+
+        kept.append(drug)
+
+    dropped = len(drugs) - len(kept)
+    if dropped:
+        logger.info(f"[NetGross] Removed {dropped} gross-weight row(s). Retained net-weight row(s).")
+    return kept
+
+
+# =============================================================================
 # Main extraction entry point
 # =============================================================================
 def extract_drug_info(
@@ -2030,6 +2289,9 @@ def extract_drug_info(
             except Exception as e:
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
 
+        # ── Inline total-row cleanup: drop LLM total when per-accused rows cover it ──
+        valid_drugs = _drop_llm_total_when_per_accused_exist(valid_drugs)
+
         # Expand explicit accused-linked clauses first so per-accused quantities
         # remain separate even when the LLM collapses them into a total row.
         segmented_packet_rows = _extract_segmented_accused_rows(filtered_text, kb_lookup)
@@ -2063,9 +2325,10 @@ def extract_drug_info(
         # ── Step 5: Drop non-drug entries (ignore list + safety net) ──
         filtered = filter_non_drug_entries(consumption_filtered, ignore_set)
 
-        # ── Steps 6-9: Unit standardization → Worth distribution → Commercial check → Sample detection → Dedup ──
+        # ── Steps 6-9: Unit standardization → Net/Gross → Worth distribution → Commercial check → Sample detection → Dedup ──
         standardized       = standardize_units(filtered)
-        worth_distributed  = _distribute_seizure_worth(standardized)
+        net_resolved       = _resolve_net_vs_gross_weight(standardized, text)  # R30: drop gross rows when net exists
+        worth_distributed  = _distribute_seizure_worth(net_resolved)
         commercial_checked = _apply_commercial_quantity_check(worth_distributed)
         sample_marked      = _mark_sample_entries(commercial_checked)
         return deduplicate_extractions(sample_marked)
