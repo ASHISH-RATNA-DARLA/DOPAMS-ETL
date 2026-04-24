@@ -1132,9 +1132,10 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             status = "arrested"
 
         # Confessional-only or absconding accused
-        if accused_type and accused_type != "unknown" and (status == "absconding" or _is_confessional_only_accused(clean_name, text)):
-            if not accused_type.endswith(" (Suspect)"):
-                accused_type = accused_type + " (Suspect)"
+        if status == "absconding" or _is_confessional_only_accused(clean_name, text):
+            base_role = role_desc or "peddler"
+            if not base_role.endswith(" (Suspect)"):
+                role_desc = base_role + " (Suspect)"
 
         obj = AccusedExtraction(
             full_name=clean_name,

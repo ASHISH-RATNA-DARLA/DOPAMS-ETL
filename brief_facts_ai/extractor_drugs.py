@@ -1342,12 +1342,7 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
 
             # 1. Base classification on Unit first (most reliable)
             if unit in {'g', 'gm', 'gms', 'gram', 'grams', 'grm', 'grms', 'gr'}:
-                # FIR unit sanity: Some FIRs write "Wg. 24.925 grms" when the value is
-                # effectively kilograms (worth and context imply kg, not grams).
-                #
-                # NDPS officer policy: prefer avoiding false negatives. If a grams unit
-                # would imply an absurd Rs/gram (e.g. > 1000 Rs/g) AND the sentence is a
-                # weight ("Wg.") style seizure line, treat qty as kilograms.
+                # FIR unit sanity check: treat 'wg' as KG if Rs/gram is absurd
                 source = (drug.extraction_metadata or {}).get("source_sentence", "") if isinstance(drug.extraction_metadata, dict) else ""
                 source_l = str(source).lower()
                 worth = float(drug.seizure_worth or 0.0)
@@ -1363,18 +1358,44 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 else:
                     drug.weight_g = qty
                     drug.weight_kg = qty / 1000.0
+                
+                # Strict Unit Isolation: Null out volume and count
+                drug.volume_ml = None
+                drug.volume_l = None
+                drug.count_total = None
+
             elif unit in {'kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'}:
                 drug.weight_g = qty * 1000.0
                 drug.weight_kg = qty
+                # Strict Unit Isolation
+                drug.volume_ml = None
+                drug.volume_l = None
+                drug.count_total = None
+
             elif unit in {'mg', 'milligram', 'milligrams'}:
                 drug.weight_g = qty / 1000.0
                 drug.weight_kg = qty / 1_000_000.0
+                # Strict Unit Isolation
+                drug.volume_ml = None
+                drug.volume_l = None
+                drug.count_total = None
+
             elif unit in {'l', 'ltr', 'ltrs', 'liter', 'liters', 'litre', 'litres'}:
                 drug.volume_l = qty
                 drug.volume_ml = qty * 1000.0
+                # Strict Unit Isolation
+                drug.weight_g = None
+                drug.weight_kg = None
+                drug.count_total = None
+
             elif unit in {'ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres'}:
                 drug.volume_ml = qty
                 drug.volume_l = qty / 1000.0
+                # Strict Unit Isolation
+                drug.weight_g = None
+                drug.weight_kg = None
+                drug.count_total = None
+
             elif unit in {
                 'no', 'nos', 'number', 'numbers', 'piece', 'pieces', 'pcs',
                 'tablet', 'tablets', 'pill', 'pills', 'strip', 'strips',
@@ -1383,13 +1404,17 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 'unit', 'units', 'count', 'counts',
                 'plant', 'plants', 'tree', 'trees', 'sapling', 'saplings',
                 'seedling', 'seedlings', 'bush', 'bushes',
-                # Additional FIR-specific container units seen in NDPS cases
                 'cover', 'covers', 'polythene', 'wrap', 'bundle', 'bundles',
                 'puri', 'puris', 'katta', 'kattas', 'pouch', 'pouches',
                 'vial', 'vials', 'ampule', 'ampules', 'ampoule', 'ampoules',
                 'injection', 'injections', 'capsule', 'capsules',
             }:
                 drug.count_total = qty
+                # Strict Unit Isolation
+                drug.weight_g = None
+                drug.weight_kg = None
+                drug.volume_ml = None
+                drug.volume_l = None
 
             # 2. Fallback to Form if unit is unknown but qty > 0
             if qty > 0 and drug.weight_g is None and drug.volume_ml is None and drug.count_total is None:
@@ -1404,34 +1429,15 @@ def standardize_units(drugs: List[DrugExtraction]) -> List[DrugExtraction]:
                 else:
                     drug.count_total = qty
 
-            # 3. LIQUID CROSS-CHECK: If drug_form is liquid but values ended up in
-            #    weight fields (because source said "grams"/"kg"), reclassify to volume.
-            #    Assumption: density ≈ 1 g/ml (standard for drug seizure reporting).
-            if form in DRUG_FORM_LIQUID or form == 'liquid':
-                if drug.weight_g is not None and drug.weight_g > 0 and (drug.volume_ml is None or drug.volume_ml == 0):
-                    logger.debug(
-                        f"Liquid cross-check: {drug.raw_drug_name} — moving "
-                        f"{drug.weight_g}g → {drug.weight_g}ml (density≈1)"
-                    )
-                    drug.volume_ml = drug.weight_g
-                    drug.volume_l = drug.weight_kg
-                    drug.weight_g = None
-                    drug.weight_kg = None
-
-            # 4. AUTO-DETECT LIQUID FORM from drug name if form was not set correctly.
+            # 3. AUTO-DETECT LIQUID FORM from drug name if form was not set correctly.
+            # Removed the gram->ml cross-check to strictly adhere to raw unit as requested by user.
             _LIQUID_DRUG_NAMES = {
                 'hash oil', 'hashish oil', 'weed oil', 'cannabis oil',
                 'opium solution', 'poppy husk solution', 'codeine syrup',
                 'cough syrup', 'phensedyl', 'corex',
             }
             if name in _LIQUID_DRUG_NAMES or 'oil' in name or 'syrup' in name or 'solution' in name:
-                if drug.weight_g is not None and drug.weight_g > 0 and (drug.volume_ml is None or drug.volume_ml == 0):
-                    logger.debug(f"Auto-liquid: {drug.raw_drug_name} detected as liquid by name")
-                    drug.volume_ml = drug.weight_g
-                    drug.volume_l = drug.weight_kg
-                    drug.weight_g = None
-                    drug.weight_kg = None
-                    drug.drug_form = "liquid"
+                drug.drug_form = "liquid"
 
             # 5. Ensure constraint check_has_measurements is met for 0 qty extractions
             if drug.weight_g is None and drug.weight_kg is None and drug.volume_l is None and drug.volume_ml is None and drug.count_total is None:
@@ -1708,15 +1714,16 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
     seen = {}
     for drug in drugs:
         meta = drug.extraction_metadata if isinstance(drug.extraction_metadata, dict) else {}
-        # Dedup key: (drug_name, raw_name, supplier, location) — NO accused_ref.
-        # Accused assignment happens in write_drugs_by_accused_in_memory() AFTER dedup,
-        # so that the same drug consolidated here can be assigned to the right accused(s)
-        # based on source_sentence analysis.
+        # Dedup key: (drug_name, raw_name, supplier, location, source_sentence, accused)
+        # Adding source_sentence prevents merging separate packets that have the same drug
+        # name and location but are described in different sentences/clauses.
+        source_sentence = str(meta.get('source_sentence') or '').lower().strip()
         key = (
             (drug.primary_drug_name or '').lower().strip(),
             (drug.raw_drug_name or '').lower().strip(),
             (drug.supplier_name or '').lower().strip(),        # Different supplier = different seizure
             (drug.source_location or '').lower().strip(),      # Different location = different seizure
+            source_sentence,                                   # Different source sentence = different packet/seizure
             _extract_dedup_accused_ref(drug),                  # Case A: Explicit accused mapping keeps rows separate
         )
 
