@@ -810,6 +810,20 @@ Rules:
 10. Extract seizure_worth from worth phrases such as "worth Rs.", "W/Rs:", "market value", or "valued at". If one worth covers all rows of the same drug, use worth_scope="drug_total". If one worth covers all drugs, use worth_scope="overall_total". If no worth is stated, set seizure_worth=0 and worth_scope="individual".
 11. Never extract vehicles, phones, SIM cards, cash, alcohol, empty covers, weighing scales, or other non-drug property as drug rows.
 12. Use the actual NDPS drug name for primary_drug_name whenever identifiable.
+13. CRITICAL CONSUMPTION-ONLY FILTER: If the text mentions drug consumption/detection
+    (tested positive, drug test, positive test, urine test, detected in test, found positive,
+    smoked, consumed, ingestion) BUT does NOT contain seizure indicators (seized, confiscated,
+    recovered, found with, apprehended with, caught with, arrested with, possessed of,
+    in possession of), then return EMPTY drugs array: {"drugs":[]}
+
+    Examples (return empty):
+    - "Accused tested positive for ganja in urine test. No drugs seized."
+    - "All accused found positive in drug detection test."
+    - "Urine test showed heroin. No narcotics confiscated."
+
+    Examples (extract normally - seizure mentioned):
+    - "Tested positive AND 2kg ganja was seized."
+    - "Urine positive for heroin, 50 tablets confiscated."
 
 Input text:
 {text}
@@ -924,6 +938,87 @@ def resolve_primary_drug_name(
             )
 
     return drugs
+
+
+# =============================================================================
+# Post-processing Step 1b (NEW): Filter consumption-only entries (no seizure)
+# =============================================================================
+def filter_consumption_only_drugs(
+    drugs: List[DrugExtraction],
+    text: str,
+) -> List[DrugExtraction]:
+    """
+    Filter out drug entries where the source_sentence indicates CONSUMPTION
+    (tested positive, drug test, urine test) BUT NO SEIZURE occurred.
+
+    This is a safety net to prevent false extraction of drug references that
+    are not actual seizures. The LLM should follow Rule 13 in EXTRACTION_PROMPT,
+    but this post-filter catches any misses.
+
+    Examples filtered:
+    - source_sentence: "tested positive for ganja"
+      text mentions "no drugs seized" or "no narcotics confiscated"
+      → SKIP this entry
+
+    Examples NOT filtered (seizure mentioned):
+    - source_sentence: "tested positive AND 2kg ganja was seized"
+      → KEEP this entry
+
+    Args:
+        drugs:  List of DrugExtraction objects from LLM.
+        text:   Original brief_facts text (for context).
+
+    Returns:
+        Filtered list with consumption-only entries removed.
+    """
+    consumption_markers = {
+        'tested positive', 'positive for', 'urine test', 'drug test',
+        'detected in test', 'found positive', 'positive in test',
+        'smoked', 'consumed', 'ingested', 'consumption'
+    }
+    seizure_markers = {
+        'seized', 'confiscated', 'recovered', 'found with',
+        'apprehended with', 'caught with', 'arrested with',
+        'in possession of', 'possessed of', 'possession'
+    }
+
+    kept = []
+    text_lower = text.lower()
+
+    for drug in drugs:
+        metadata = (drug.extraction_metadata or {}) if hasattr(drug, 'extraction_metadata') else {}
+        source_sentence = (metadata.get('source_sentence') or '').lower() if isinstance(metadata, dict) else ''
+
+        # Determine if this specific entry is consumption-only
+        has_consumption_marker = any(marker in source_sentence for marker in consumption_markers)
+        has_seizure_marker = any(marker in source_sentence for marker in seizure_markers)
+
+        # Additional context check: look in full text for seizure indicators
+        # This handles cases where source_sentence is incomplete
+        has_seizure_in_text = any(marker in text_lower for marker in seizure_markers)
+
+        # Filter logic:
+        # - If consumption marker present AND no seizure markers → SKIP (consumption-only)
+        # - Otherwise → KEEP
+        if has_consumption_marker and not has_seizure_marker and not has_seizure_in_text:
+            drug_name = getattr(drug, 'primary_drug_name', '?')
+            logger.info(
+                f"[ConsumptionFilter] Filtered '{drug_name}': "
+                f"consumption-only (tested positive, no seizure mentioned). "
+                f"source_sentence='{source_sentence}'"
+            )
+            continue
+
+        kept.append(drug)
+
+    filtered_count = len(drugs) - len(kept)
+    if filtered_count > 0:
+        logger.info(
+            f"[ConsumptionFilter] Removed {filtered_count} consumption-only drug entries. "
+            f"Kept {len(kept)} seizure-based entries."
+        )
+
+    return kept
 
 
 # =============================================================================
@@ -1712,8 +1807,11 @@ def extract_drug_info(
         # ── Step 4: Deterministic KB name resolution ──
         kb_resolved = resolve_primary_drug_name(valid_drugs, kb_lookup, conn=conn)
 
+        # ── Step 4b: Filter consumption-only entries (no seizure) ──
+        consumption_filtered = filter_consumption_only_drugs(kb_resolved, text)
+
         # ── Step 5: Drop non-drug entries (ignore list + safety net) ──
-        filtered = filter_non_drug_entries(kb_resolved, ignore_set)
+        filtered = filter_non_drug_entries(consumption_filtered, ignore_set)
 
         # ── Steps 6-9: Unit standardization → Worth distribution → Commercial check → Sample detection → Dedup ──
         standardized       = standardize_units(filtered)

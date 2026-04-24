@@ -186,8 +186,7 @@ def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limi
                 conditions = [
                         "bfa.crime_id != %s",
                         "bfa.full_name IS NOT NULL",
-                        "(SOUNDEX(bfa.full_name) = SOUNDEX(%s)
-                                 OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s))",
+                        "(SOUNDEX(bfa.full_name) = SOUNDEX(%s) OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s))",
                         "COALESCE(c.date_modified, c.date_created) >= NOW() - INTERVAL '6 months'",
                 ]
                 params = [current_crime_id, full_name or '', full_name or '']
@@ -211,7 +210,7 @@ def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limi
                             END
                         LIMIT %s
                 """, (*params, full_name or '', full_name or '', limit))
-        return cur.fetchall()
+                return cur.fetchall()
 
 def fetch_crime_profile(conn, crime_id):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
