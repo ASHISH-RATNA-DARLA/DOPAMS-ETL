@@ -1247,6 +1247,7 @@ def process_crimes_parallel(crimes):
     max_workers = config_obj.parallel_llm_workers
     batch_size_limit = config_obj.batch_size
     batch_commit_size = config_obj.batch_commit_size
+    llm_task_wait_timeout_sec = float(os.environ.get('LLM_TASK_WAIT_TIMEOUT_SEC', '120'))
     logging.info(f"🚀 Batch processing with {max_workers} LLM workers, batch_size={batch_size_limit}")
 
     # Fetch drug KB once — shared read-only across all worker threads.
@@ -1312,7 +1313,11 @@ def process_crimes_parallel(crimes):
                 # ── Queue LLM extraction and wait for result ──
                 llm_task = LLMTask(crime_id, facts_text, threading.Event())
                 llm_queue.put(llm_task)
-                llm_task.result_event.wait()  # Block until LLM worker completes
+                if not llm_task.result_event.wait(timeout=llm_task_wait_timeout_sec):
+                    llm_task.error = (
+                        f"LLM task timeout after {llm_task_wait_timeout_sec:.0f}s "
+                        f"(no result from LLM worker)"
+                    )
 
                 # Handle LLM result or error
                 if llm_task.error:

@@ -165,9 +165,21 @@ def get_llm(task_type: str) -> LLMService:
 
 # --- Retry Loop Wrapper for Extraction ---
 
-# Shared single-thread executor for LLM timeout enforcement.
-# Created once at module load; avoids spawning a new thread pool per LLM call.
-_llm_timeout_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm_timeout")
+# Shared executor for LLM timeout enforcement.
+# Keep >1 workers so parallel ETL workers do not get serialized through this wrapper.
+_llm_timeout_workers = max(
+    1,
+    int(
+        os.getenv(
+            "LLM_TIMEOUT_EXECUTOR_WORKERS",
+            os.getenv("PARALLEL_LLM_WORKERS", "4"),
+        )
+    ),
+)
+_llm_timeout_executor = ThreadPoolExecutor(
+    max_workers=_llm_timeout_workers,
+    thread_name_prefix="llm_timeout",
+)
 atexit.register(_llm_timeout_executor.shutdown, wait=False)
 
 
