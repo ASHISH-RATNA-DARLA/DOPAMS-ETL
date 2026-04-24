@@ -496,19 +496,71 @@ def _pick_primary_row(rows):
 def _extract_person_codes(drug_data):
     """Extract person codes from drug_data, filtering out downstream transaction references.
 
+    Handles both single source_sentence and consolidated_sources (from deduped drugs).
+
     Downstream keywords indicate the person received/bought the drug (not the seized person):
     - "sell to", "sold to", "buyer", "customer", "purchase from", "bought by"
 
     This prevents attributing seized drugs to downstream sellers/buyers who weren't
     part of the seizure event. E.g., "seized 405g and sell to A-3" → extract seizure for A1,
     not for A-3 who is only a downstream buyer.
+
+    For consolidated sources, prioritizes:
+    1. If all sources mention the SAME accused → use that accused
+    2. If sources mention DIFFERENT accused → use primary (first) accused
+    3. If no accused mentioned → empty set (will trigger fallback to A1)
     """
     if not isinstance(drug_data, dict):
         try: drug_data = drug_data.model_dump()
         except BaseException: pass
     codes = set()
     meta = drug_data.get('extraction_metadata') or {}
+
+    # Check for consolidated_sources first (from dedup consolidation)
+    consolidated_sources = meta.get('consolidated_sources', [])
+    if consolidated_sources:
+        # Analyze each consolidated source to extract its accused codes
+        all_source_codes = []
+        for source_sentence in consolidated_sources:
+            source_codes = _extract_codes_from_source(source_sentence)
+            if source_codes:
+                all_source_codes.append(source_codes)
+
+        if all_source_codes:
+            # Strategy: if all sources mention the SAME accused(s), use it
+            # Otherwise, use the first source's codes (primary mention)
+            first_codes = all_source_codes[0]
+            same_in_all = all(src_codes == first_codes for src_codes in all_source_codes)
+
+            if same_in_all:
+                codes.update(first_codes)
+                logger.debug(f"[DrugAttrib] Consolidated sources all mention: {first_codes}")
+            else:
+                # Different sources mention different accused — use primary (first) mention
+                codes.update(first_codes)
+                logger.debug(f"[DrugAttrib] Consolidated sources mention different accused; using primary: {first_codes}")
+        return codes
+
+    # Fallback: single source_sentence (non-consolidated)
     source_sentence = str(meta.get('source_sentence') or '')
+    codes = _extract_codes_from_source(source_sentence)
+
+    # Also check accused_ref directly (usually already clean from LLM)
+    accused_ref = meta.get('accused_ref')
+    if accused_ref:
+        normalized = _norm_person_code(accused_ref)
+        if normalized: codes.add(normalized)
+
+    return codes
+
+
+def _extract_codes_from_source(source_sentence: str) -> set:
+    """Extract person codes from a single source sentence, filtering downstream references.
+
+    Returns set of normalized A-codes (e.g., {'A-1', 'A-3'}).
+    """
+    codes = set()
+    source_sentence = str(source_sentence or '')
 
     # Define downstream transaction keywords - codes after these shouldn't be attributed
     downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received)\s+(?:to|by|from)?\s*'
@@ -533,12 +585,6 @@ def _extract_person_codes(drug_data):
             continue
 
         codes.add(normalized)
-
-    # Also check accused_ref directly (usually already clean from LLM)
-    accused_ref = meta.get('accused_ref')
-    if accused_ref:
-        normalized = _norm_person_code(accused_ref)
-        if normalized: codes.add(normalized)
 
     return codes
 
