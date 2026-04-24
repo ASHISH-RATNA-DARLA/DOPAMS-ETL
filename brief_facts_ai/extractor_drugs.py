@@ -797,6 +797,11 @@ Return VALID JSON ONLY with this exact shape:
 {"drugs":[{"raw_drug_name":str,"raw_quantity":float,"raw_unit":str,"primary_drug_name":str,"drug_form":"solid|liquid|count","seizure_worth":float,"worth_scope":"individual|drug_total|overall_total","is_commercial":bool,"confidence_score":int,"supplier_name":str|null,"source_location":str|null,"destination":str|null,"purchase_price_per_unit":float|null,"extraction_metadata":{"source_sentence":str,"accused_ref":str|null}}]}
 
 Rules:
+0. **SEIZURE-ONLY RULE (CRITICAL)**: Extract ONLY drugs physically seized at the crime spot during arrest/apprehension.
+   DO NOT extract: sold quantities (e.g., "sold 1kg to A-3"), consumed quantities (e.g., "tested positive"),
+   or historical purchases (e.g., "purchased 6kg before arrest"). Only extract what was seized/confiscated/recovered
+   from accused's possession at the time of arrest.
+
 1. One row per actual seizure incident. Different accused with the same drug are separate rows.
 2. If per-person quantities are stated, create one row per person. Example: A1 has 800g Ganja and A2 has 50g Ganja -> 2 rows.
 3. If multiple people share one common total with NO per-person split, create exactly 1 collective row for that total.
@@ -810,20 +815,21 @@ Rules:
 10. Extract seizure_worth from worth phrases such as "worth Rs.", "W/Rs:", "market value", or "valued at". If one worth covers all rows of the same drug, use worth_scope="drug_total". If one worth covers all drugs, use worth_scope="overall_total". If no worth is stated, set seizure_worth=0 and worth_scope="individual".
 11. Never extract vehicles, phones, SIM cards, cash, alcohol, empty covers, weighing scales, or other non-drug property as drug rows.
 12. Use the actual NDPS drug name for primary_drug_name whenever identifiable.
-13. CRITICAL CONSUMPTION-ONLY FILTER: If the text mentions drug consumption/detection
-    (tested positive, drug test, positive test, urine test, detected in test, found positive,
-    smoked, consumed, ingestion) BUT does NOT contain seizure indicators (seized, confiscated,
-    recovered, found with, apprehended with, caught with, arrested with, possessed of,
-    in possession of), then return EMPTY drugs array: {"drugs":[]}
-
-    Examples (return empty):
-    - "Accused tested positive for ganja in urine test. No drugs seized."
-    - "All accused found positive in drug detection test."
-    - "Urine test showed heroin. No narcotics confiscated."
-
-    Examples (extract normally - seizure mentioned):
-    - "Tested positive AND 2kg ganja was seized."
-    - "Urine positive for heroin, 50 tablets confiscated."
+13. CRITICAL SEIZURE-VERIFICATION FILTER:
+    - **Consumption-only (NO seizure)**: If text mentions drug consumption/detection (tested positive, drug test,
+      positive test, urine test, detected in test, found positive, smoked, consumed, ingestion) BUT does NOT contain
+      seizure indicators (seized, confiscated, recovered, found with, apprehended with, caught with, arrested with,
+      possessed of, in possession of) → return EMPTY drugs array: {"drugs":[]}
+    - **Sold-only (NO seizure)**: If text mentions sold/transaction (sold to, sold by, buyer, customers, purchased by,
+      transaction, dealt to, distributed to) BUT does NOT contain seizure indicators → return EMPTY drugs array
+    - Examples to SKIP (return empty):
+      - "Accused tested positive for ganja in urine test. No drugs seized."
+      - "A-1 sold 1kg to A-3. No seizure at arrest location."
+      - "All accused purchased drugs 2 weeks before arrest. Nothing seized during apprehension."
+    - Examples to EXTRACT (seizure mentioned):
+      - "Tested positive AND 2kg ganja was seized."
+      - "Apprehended with 1kg Ganja, seized at arrest."
+      - "A-1 caught with 50g, A-2 apprehended with 30g."
 
 Input text:
 {text}
@@ -948,38 +954,57 @@ def filter_consumption_only_drugs(
     text: str,
 ) -> List[DrugExtraction]:
     """
-    Filter out drug entries where the source_sentence indicates CONSUMPTION
-    (tested positive, drug test, urine test) BUT NO SEIZURE occurred.
+    Filter out drug entries where the source_sentence indicates CONSUMPTION or SOLD
+    (tested positive, drug test, urine test, sold to buyer) BUT NO SEIZURE occurred.
+
+    RULE: Extract ONLY physically seized drugs at crime spot. Filter out:
+    - Consumption-only (tested positive, smoked, ingested) without seizure
+    - Sold/transaction drugs (sold to, buyer, transaction) without seizure mention
+    - Historical purchases without seizure mention
 
     This is a safety net to prevent false extraction of drug references that
-    are not actual seizures. The LLM should follow Rule 13 in EXTRACTION_PROMPT,
+    are not actual seizures. The LLM should follow Rule 7 in EXTRACTION_PROMPT,
     but this post-filter catches any misses.
 
-    Examples filtered:
-    - source_sentence: "tested positive for ganja"
-      text mentions "no drugs seized" or "no narcotics confiscated"
-      → SKIP this entry
+    Seizure-based examples (KEEP):
+    - "seized 2kg ganja" → KEEP (explicit seizure)
+    - "tested positive AND 2kg ganja was seized" → KEEP (seizure mentioned)
+    - "A-1 apprehended with 50g" → KEEP (possession at arrest)
+    - "A-3 caught with drug contraband" → KEEP (caught with implies seizure)
 
-    Examples NOT filtered (seizure mentioned):
-    - source_sentence: "tested positive AND 2kg ganja was seized"
-      → KEEP this entry
+    Non-seizure examples (FILTER):
+    - "tested positive for ganja" (no seizure) → SKIP
+    - "sold 1kg to buyer" (no seizure) → SKIP
+    - "purchased 6kg before arrest" (no seizure) → SKIP
+    - "buyer was A-3" (downstream transaction only) → SKIP
 
     Args:
         drugs:  List of DrugExtraction objects from LLM.
         text:   Original brief_facts text (for context).
 
     Returns:
-        Filtered list with consumption-only entries removed.
+        Filtered list with non-seizure entries removed.
     """
+    # Consumption/test markers (no seizure = consumption-only)
     consumption_markers = {
         'tested positive', 'positive for', 'urine test', 'drug test',
         'detected in test', 'found positive', 'positive in test',
         'smoked', 'consumed', 'ingested', 'consumption'
     }
+
+    # Sold/transaction markers (no seizure = sold, not seized)
+    sold_markers = {
+        'sold to', 'sold by', 'sold for', 'selling to',
+        'buyer', 'customers', 'purchased by', 'transaction',
+        'transacted', 'dealt to', 'given to', 'distributed to'
+    }
+
+    # Seizure indicators (presence = this IS a seizure)
     seizure_markers = {
         'seized', 'confiscated', 'recovered', 'found with',
         'apprehended with', 'caught with', 'arrested with',
-        'in possession of', 'possessed of', 'possession'
+        'in possession of', 'possessed of', 'possession',
+        'contraband', 'apprehended', 'confiscated'
     }
 
     kept = []
@@ -989,33 +1014,63 @@ def filter_consumption_only_drugs(
         metadata = (drug.extraction_metadata or {}) if hasattr(drug, 'extraction_metadata') else {}
         source_sentence = (metadata.get('source_sentence') or '').lower() if isinstance(metadata, dict) else ''
 
-        # Determine if this specific entry is consumption-only
+        # Check markers in source_sentence
         has_consumption_marker = any(marker in source_sentence for marker in consumption_markers)
+        has_sold_marker = any(marker in source_sentence for marker in sold_markers)
         has_seizure_marker = any(marker in source_sentence for marker in seizure_markers)
 
         # Additional context check: look in full text for seizure indicators
         # This handles cases where source_sentence is incomplete
         has_seizure_in_text = any(marker in text_lower for marker in seizure_markers)
 
-        # Filter logic:
-        # - If consumption marker present AND no seizure markers → SKIP (consumption-only)
-        # - Otherwise → KEEP
-        if has_consumption_marker and not has_seizure_marker and not has_seizure_in_text:
+        # FILTER LOGIC:
+        # Only KEEP if it has a seizure marker (in source OR in broader text)
+        # SKIP if:
+        #  1. Has consumption marker AND no seizure marker (consumption-only)
+        #  2. Has sold marker AND no seizure marker (sold, not seized)
+        #  3. No seizure marker anywhere (no seizure evidence)
+
+        is_consumption_only = has_consumption_marker and not has_seizure_marker and not has_seizure_in_text
+        is_sold_only = has_sold_marker and not has_seizure_marker and not has_seizure_in_text
+        is_no_seizure = not has_seizure_marker and not has_seizure_in_text
+
+        if is_consumption_only:
             drug_name = getattr(drug, 'primary_drug_name', '?')
             logger.info(
-                f"[ConsumptionFilter] Filtered '{drug_name}': "
-                f"consumption-only (tested positive, no seizure mentioned). "
+                f"[SeizureFilter] Filtered '{drug_name}': "
+                f"consumption-only (no seizure mentioned). "
                 f"source_sentence='{source_sentence}'"
             )
             continue
 
+        if is_sold_only:
+            drug_name = getattr(drug, 'primary_drug_name', '?')
+            logger.info(
+                f"[SeizureFilter] Filtered '{drug_name}': "
+                f"sold/transaction (no seizure at crime spot). "
+                f"source_sentence='{source_sentence}'"
+            )
+            continue
+
+        if is_no_seizure and (source_sentence or '').strip():
+            # Has source_sentence but no seizure markers — likely not a seizure
+            drug_name = getattr(drug, 'primary_drug_name', '?')
+            logger.info(
+                f"[SeizureFilter] Filtered '{drug_name}': "
+                f"no seizure markers found. "
+                f"source_sentence='{source_sentence}'"
+            )
+            continue
+
+        # If we get here, entry has seizure markers → KEEP it
         kept.append(drug)
 
     filtered_count = len(drugs) - len(kept)
     if filtered_count > 0:
         logger.info(
-            f"[ConsumptionFilter] Removed {filtered_count} consumption-only drug entries. "
-            f"Kept {len(kept)} seizure-based entries."
+            f"[SeizureFilter] Removed {filtered_count} non-seizure drug entries "
+            f"(consumption-only, sold, or no seizure evidence). "
+            f"Kept {len(kept)} crime-spot seizure entries."
         )
 
     return kept
