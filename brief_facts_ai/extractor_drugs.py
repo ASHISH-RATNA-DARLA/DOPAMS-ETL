@@ -552,9 +552,10 @@ Rules:
 4. Per-accused rows are NOT duplicates. Example: 6 accused each having 50g Ganja from their own possession -> 6 rows.
 5. Skip customers or buyers mentioned only in confession history when nothing is seized from them.
 6. Critical edge case: if a person is called a buyer/customer but is later apprehended and contraband is seized from that person's possession, that person IS a valid seizure row and must be extracted.
+6b. Joint possession: If A1 and CCL jointly purchased/transported drugs and they were seized as a group, create ONE row with accused_ref=null (collective seizure). DO NOT create separate rows for each person or duplicate the same quantity for multiple accused. Do NOT include the downstream buyer/seller in the seizure row (they are NOT part of the seizure event).
 7. Extract only the quantity physically seized at arrest. Skip historical purchase quantities, already-sold quantities, samples S1/S2, and remaining property breakdowns like P1 when they are subsets of the seized total.
 8. When a row belongs to one accused, extraction_metadata.accused_ref MUST contain the accused code from the roster (A1, A2, etc.). If no code exists, use the exact accused name. For collective unattributed totals, set accused_ref to null.
-9. extraction_metadata.source_sentence must be the verbatim clause or sentence supporting that row.
+9. extraction_metadata.source_sentence must be ONLY the verbatim clause describing the SEIZURE event (who had/possessed the drug at arrest). EXCLUDE downstream transactions like "and sold to A-3" or "buyer was X" which are not part of the seizure. This prevents misattributing drugs to downstream sellers/buyers.
 10. Extract seizure_worth from worth phrases such as "worth Rs.", "W/Rs:", "market value", or "valued at". If one worth covers all rows of the same drug, use worth_scope="drug_total". If one worth covers all drugs, use worth_scope="overall_total". If no worth is stated, set seizure_worth=0 and worth_scope="individual".
 11. Never extract vehicles, phones, SIM cards, cash, alcohol, empty covers, weighing scales, or other non-drug property as drug rows.
 12. Use the actual NDPS drug name for primary_drug_name whenever identifiable.

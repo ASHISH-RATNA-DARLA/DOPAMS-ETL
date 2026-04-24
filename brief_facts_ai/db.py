@@ -486,19 +486,52 @@ def _pick_primary_row(rows):
     return sorted(rows, key=_bfai_row_sort_key)[0]
 
 def _extract_person_codes(drug_data):
+    """Extract person codes from drug_data, filtering out downstream transaction references.
+
+    Downstream keywords indicate the person received/bought the drug (not the seized person):
+    - "sell to", "sold to", "buyer", "customer", "purchase from", "bought by"
+
+    This prevents attributing seized drugs to downstream sellers/buyers who weren't
+    part of the seizure event. E.g., "seized 405g and sell to A-3" → extract seizure for A1,
+    not for A-3 who is only a downstream buyer.
+    """
     if not isinstance(drug_data, dict):
         try: drug_data = drug_data.model_dump()
         except BaseException: pass
     codes = set()
     meta = drug_data.get('extraction_metadata') or {}
     source_sentence = str(meta.get('source_sentence') or '')
-    for raw in re.findall(r'\bA\s*[-.]?\s*\d+\b', source_sentence, flags=re.IGNORECASE):
-        normalized = _norm_person_code(raw)
-        if normalized: codes.add(normalized)
+
+    # Define downstream transaction keywords - codes after these shouldn't be attributed
+    downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received)\s+(?:to|by|from)?\s*'
+
+    # Find all A-codes and their positions
+    all_matches = list(re.finditer(r'\bA\s*[-.]?\s*\d+\b', source_sentence, flags=re.IGNORECASE))
+
+    for match in all_matches:
+        code_pos = match.start()
+        normalized = _norm_person_code(match.group())
+        if not normalized:
+            continue
+
+        # Check if this code appears after a downstream keyword
+        # Search backwards from the code position for downstream keywords
+        lookback_window = max(0, code_pos - 100)  # Look back up to 100 chars
+        text_before = source_sentence[lookback_window:code_pos].lower()
+
+        # If downstream keyword found in the preceding text, skip this code
+        if re.search(downstream_keywords, text_before):
+            logger.debug(f"[DrugAttrib] Filtered out {normalized} - appears in downstream transaction context")
+            continue
+
+        codes.add(normalized)
+
+    # Also check accused_ref directly (usually already clean from LLM)
     accused_ref = meta.get('accused_ref')
     if accused_ref:
         normalized = _norm_person_code(accused_ref)
         if normalized: codes.add(normalized)
+
     return codes
 
 def _match_rows_by_name(source_sentence, bfai_rows):

@@ -254,6 +254,32 @@ def _alias_score(current_alias, candidate_alias):
     return 1.0 if _normalize_name(current_alias) == _normalize_name(candidate_alias) else 0.0
 
 
+def _token_fuzzy_similarity(a, b):
+    """Fuzzy matching on individual name tokens to handle reordering and spelling variants.
+    E.g., 'Afeez Amaan Sayed' vs 'Syed Afeez Aman' should match despite token reordering and 'Amaan'/'Aman' variant."""
+    ta = set(_normalize_name(a).split())
+    tb = set(_normalize_name(b).split())
+    if not ta or not tb:
+        return 0.0
+
+    matched = 0
+    threshold = 0.85
+
+    for token_a in ta:
+        best_match = 0.0
+        for token_b in tb:
+            sim = _name_similarity(token_a, token_b)
+            if sim > best_match:
+                best_match = sim
+        if best_match >= threshold:
+            matched += 1
+
+    if matched == 0:
+        return 0.0
+
+    return (2.0 * matched) / (len(ta) + len(tb))
+
+
 def _crime_tokens(value):
     return set(re.findall(r'[a-z0-9]+', (value or '').lower()))
 
@@ -264,18 +290,20 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
 
     prefix_similarity = _name_similarity(name_a, name_b)
     token_similarity = _token_set_similarity(name_a, name_b)
+    fuzzy_token_similarity = _token_fuzzy_similarity(name_a, name_b)
     phonetic_similarity = _phonetic_overlap(name_a, name_b)
     addr_similarity = _address_similarity(current.get('address'), candidate.get('address'))
     age_similarity = _age_score(current.get('age'), candidate.get('age'))
     alias_similarity = _alias_score(current.get('alias_name'), candidate.get('alias_name'))
 
     score = (
-        0.35 * prefix_similarity +
-        0.20 * token_similarity +
+        0.30 * prefix_similarity +
+        0.10 * token_similarity +
+        0.20 * fuzzy_token_similarity +
         0.15 * phonetic_similarity +
         0.12 * addr_similarity +
         0.10 * age_similarity +
-        0.08 * alias_similarity
+        0.03 * alias_similarity
     )
 
     # Layer 4 contextual boosts
@@ -293,6 +321,18 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
 
     if current_assoc_codes and candidate_assoc_codes and (current_assoc_codes & candidate_assoc_codes):
         score += 0.06
+
+    # Contextual boost: age and gender both match in same crime (only if name already has overlap)
+    # Only apply when there's already some name similarity to avoid false positives
+    current_age = current.get('age')
+    current_gender = current.get('gender')
+    candidate_age = candidate.get('age')
+    candidate_gender = candidate.get('gender')
+    if (fuzzy_token_similarity > 0 and current_age and candidate_age and
+        current_gender and candidate_gender and
+        str(current_age) == str(candidate_age) and
+        str(current_gender).lower() == str(candidate_gender).lower()):
+        score += 0.12
 
     normalized = _normalize_name(name_a)
     if len(normalized.split()) == 1 and normalized in _COMMON_NAME_TOKENS:
@@ -362,10 +402,10 @@ def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
             best_score = score
             best_cand = cand
 
-    if best_cand and best_score >= 0.82 and best_cand.get('canonical_person_id'):
+    if best_cand and best_score >= 0.70 and best_cand.get('canonical_person_id'):
         return best_cand.get('canonical_person_id'), best_score, 1, False
 
-    if best_score >= 0.60:
+    if best_score >= 0.45:
         return fallback_canonical, best_score, 2, True
 
     return fallback_canonical, (best_score if best_score >= 0 else 0.0), 3, False
