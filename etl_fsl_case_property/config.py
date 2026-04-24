@@ -119,5 +119,5 @@ TABLE_CONFIG = {
     'ir_interrogation_report_refs': _table_name('IR_INTERROGATION_REPORT_REFS_TABLE', 'ir_interrogation_report_refs'),
     'ir_dopams_links': _table_name('IR_DOPAMS_LINKS_TABLE', 'ir_dopams_links'),
     'fsl_case_property': _table_name('FSL_CASE_PROPERTY_TABLE', 'fsl_case_property'),
-    'fsl_case_property_media': _table_name('FSL_CASE_PROPERTY_MEDIA_TABLE', 'case_property_media'),
+    'fsl_case_property_media': _table_name('FSL_CASE_PROPERTY_MEDIA_TABLE', 'fsl_case_property_media'),
 }

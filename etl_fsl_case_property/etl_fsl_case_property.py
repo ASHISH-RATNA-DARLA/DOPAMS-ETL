@@ -75,6 +75,7 @@ FSL_CASE_PROPERTY_TABLE = TABLE_CONFIG.get('fsl_case_property', 'fsl_case_proper
 FSL_CASE_PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('fsl_case_property_media', 'fsl_case_property_media')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
+ALT_FSL_MEDIA_TABLE = 'case_property_media'
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -287,6 +288,92 @@ class FSLCasePropertyETL:
         except Exception as e:
             logger.error(f"Error getting table columns for {table_name}: {e}")
             return set()
+
+    def ensure_media_table_ready(self):
+        """Ensure configured media table exists and backfill from alternate table when available."""
+        try:
+            self.db_cursor.execute("SELECT to_regclass(%s)", (f"public.{FSL_CASE_PROPERTY_MEDIA_TABLE}",))
+            target_exists = self.db_cursor.fetchone()[0] is not None
+
+            self.db_cursor.execute("SELECT to_regclass(%s)", (f"public.{ALT_FSL_MEDIA_TABLE}",))
+            alt_exists = self.db_cursor.fetchone()[0] is not None
+
+            if not target_exists:
+                logger.warning(
+                    "⚠️  Media table %s is missing. Creating it now.",
+                    FSL_CASE_PROPERTY_MEDIA_TABLE,
+                )
+                self.db_cursor.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (
+                        case_property_id character varying(255) NOT NULL,
+                        media_index integer NOT NULL,
+                        file_id character varying(255),
+                        media_payload jsonb,
+                        created_at timestamptz NOT NULL DEFAULT now(),
+                        updated_at timestamptz NOT NULL DEFAULT now(),
+                        CONSTRAINT {FSL_CASE_PROPERTY_MEDIA_TABLE}_pkey PRIMARY KEY (case_property_id, media_index)
+                    )
+                    """
+                )
+                self.db_cursor.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS idx_{FSL_CASE_PROPERTY_MEDIA_TABLE}_case_property_id
+                    ON public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (case_property_id)
+                    """
+                )
+                self.db_cursor.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS idx_{FSL_CASE_PROPERTY_MEDIA_TABLE}_file_id
+                    ON public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (file_id)
+                    """
+                )
+
+                if alt_exists and ALT_FSL_MEDIA_TABLE != FSL_CASE_PROPERTY_MEDIA_TABLE:
+                    logger.info(
+                        "ℹ️  Backfilling media rows from %s -> %s",
+                        ALT_FSL_MEDIA_TABLE,
+                        FSL_CASE_PROPERTY_MEDIA_TABLE,
+                    )
+                    self.db_cursor.execute(
+                        f"""
+                        INSERT INTO public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (case_property_id, media_index, file_id, media_payload)
+                        SELECT
+                            case_property_id,
+                            COALESCE(media_index, 0) AS media_index,
+                            NULLIF(BTRIM(file_id), '') AS file_id,
+                            media_payload
+                        FROM public.{ALT_FSL_MEDIA_TABLE}
+                        ON CONFLICT (case_property_id, media_index) DO NOTHING
+                        """
+                    )
+
+                self.db_conn.commit()
+
+                # Add FK only when parent key supports it (some prod schemas are missing PK/UNIQUE).
+                try:
+                    self.db_cursor.execute(
+                        f"""
+                        ALTER TABLE public.{FSL_CASE_PROPERTY_MEDIA_TABLE}
+                        ADD CONSTRAINT {FSL_CASE_PROPERTY_MEDIA_TABLE}_case_property_id_fkey
+                        FOREIGN KEY (case_property_id)
+                        REFERENCES public.{FSL_CASE_PROPERTY_TABLE}(case_property_id)
+                        ON DELETE CASCADE
+                        """
+                    )
+                    self.db_conn.commit()
+                except Exception as fk_error:
+                    self.db_conn.rollback()
+                    logger.warning(
+                        "⚠️  FK skipped for %s.case_property_id -> %s.case_property_id: %s",
+                        FSL_CASE_PROPERTY_MEDIA_TABLE,
+                        FSL_CASE_PROPERTY_TABLE,
+                        fk_error,
+                    )
+
+        except Exception as e:
+            self.db_conn.rollback()
+            logger.warning("⚠️  Could not auto-prepare media table %s: %s", FSL_CASE_PROPERTY_MEDIA_TABLE, e)
     
     def get_effective_start_date(self) -> str:
         """
@@ -1036,6 +1123,36 @@ class FSLCasePropertyETL:
             
             return inserted_count
             
+        except psycopg2.errors.UndefinedTable:
+            self.db_conn.rollback()
+            logger.warning(
+                "⚠️  Media table %s missing at runtime; attempting auto-recovery",
+                FSL_CASE_PROPERTY_MEDIA_TABLE,
+            )
+            self.ensure_media_table_ready()
+            try:
+                self.db_cursor.execute(
+                    f"DELETE FROM {FSL_CASE_PROPERTY_MEDIA_TABLE} WHERE case_property_id = %s",
+                    (case_property_id,)
+                )
+                inserted_count = 0
+                for media_item in media_files:
+                    media_index = media_item.get('media_index', inserted_count)
+                    file_id = media_item.get('file_id')
+                    media_payload = media_item.get('media_payload')
+                    self.db_cursor.execute(
+                        f"""
+                        INSERT INTO {FSL_CASE_PROPERTY_MEDIA_TABLE}
+                            (case_property_id, media_index, file_id, media_payload)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (case_property_id, media_index, file_id, Json(media_payload) if media_payload is not None else None)
+                    )
+                    inserted_count += 1
+                return inserted_count
+            except Exception as retry_error:
+                logger.error("Error inserting media files after auto-recovery: %s", retry_error)
+                return 0
         except Exception as e:
             logger.error(f"Error inserting media files: {e}")
             return 0
@@ -1599,6 +1716,9 @@ class FSLCasePropertyETL:
         if not self.connect_db():
             logger.error("Failed to connect to database. Exiting.")
             return False
+
+        # Ensure media table is present before processing chunks.
+        self.ensure_media_table_ready()
 
         # Retry any FSL case property records queued from previous runs due to FK misses.
         if _drain_fk_queue is not None:
