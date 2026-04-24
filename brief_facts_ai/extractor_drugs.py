@@ -337,6 +337,221 @@ class CrimeReportExtraction(BaseModel):
 
 
 _ACCUSED_REF_PATTERN = re.compile(r'\bA\s*[-.]?\s*(\d+)\b', flags=re.IGNORECASE)
+_SEGMENT_QUANTITY_PATTERN = re.compile(
+    r'(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams|grm|grms|mg|ml|l|ltr|litre|litres)\b',
+    flags=re.IGNORECASE,
+)
+_PACKET_QUANTITY_PATTERN = re.compile(
+    r'(?P<idx>\d+)\s*[\)\.:\-]?\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams|grm|grms|mg|ml|l|ltr|litre|litres|packet|packets|piece|pieces|cover|covers|bundle|bundles)\b',
+    flags=re.IGNORECASE,
+)
+_PACKET_CONTEXT_RE = re.compile(r'\b(packet|packets|cover|covers|bundle|bundles|transparent|polythene|plastic)\b', re.IGNORECASE)
+
+
+def _best_drug_keyword_match(text: str, kb_lookup: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
+    if not text:
+        return None, None
+
+    lowered = text.lower()
+    best_raw = None
+    best_standard = None
+    best_len = 0
+
+    for raw_name, standard_name in (kb_lookup or {}).items():
+        raw = (raw_name or '').lower().strip()
+        std = (standard_name or '').strip()
+        if not raw:
+            continue
+        if raw in lowered and len(raw) > best_len:
+            best_raw = raw_name
+            best_standard = standard_name
+            best_len = len(raw)
+
+    return best_raw, best_standard
+
+
+def _infer_unique_accused_ref(text: str) -> Optional[str]:
+    if not text:
+        return None
+
+    matches = []
+    for match in _ACCUSED_REF_PATTERN.finditer(text):
+        normalized = f"A-{int(match.group(1))}"
+        if normalized not in matches:
+            matches.append(normalized)
+
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _extract_explicit_packet_rows(text: str, kb_lookup: Dict[str, str]) -> List[dict]:
+    """
+    Deterministically expand packet lists like "1) 2.130 KGs 2) 3.090 KGs" into
+    explicit packet rows so the extractor does not collapse them into a single total.
+    """
+    if not text:
+        return []
+
+    rows = []
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', text)
+    for sentence in sentences:
+        if not sentence:
+            continue
+        qty_matches = list(_PACKET_QUANTITY_PATTERN.finditer(sentence))
+        if len(qty_matches) < 2:
+            continue
+        if not _PACKET_CONTEXT_RE.search(sentence):
+            continue
+
+        drug_raw, drug_standard = _best_drug_keyword_match(sentence, kb_lookup)
+        if not drug_standard and not drug_raw:
+            continue
+
+        accused_ref = _infer_unique_accused_ref(sentence)
+
+        seen_quantities = set()
+        for packet_index, match in enumerate(qty_matches, start=1):
+            qty = float(match.group('qty'))
+            unit = match.group('unit')
+            qty_key = (round(qty, 3), unit.lower())
+            if qty_key in seen_quantities:
+                continue
+            seen_quantities.add(qty_key)
+
+            raw_name = drug_raw or drug_standard or 'Unknown'
+            standard_name = drug_standard or drug_raw or 'Unknown'
+            if isinstance(raw_name, str):
+                raw_name = raw_name.title() if raw_name.islower() else raw_name
+            if isinstance(standard_name, str):
+                standard_name = standard_name.title() if standard_name.islower() else standard_name
+
+            rows.append({
+                'raw_drug_name': raw_name,
+                'raw_quantity': qty,
+                'raw_unit': unit,
+                'primary_drug_name': standard_name,
+                'drug_form': 'solid',
+                'confidence_score': 95,
+                'seizure_worth': 0.0,
+                'worth_scope': 'individual',
+                'supplier_name': None,
+                'source_location': None,
+                'destination': None,
+                'purchase_price_per_unit': None,
+                'extraction_metadata': {
+                    'source_sentence': sentence.strip(),
+                    'packet_index': packet_index,
+                    'accused_ref': accused_ref,
+                    'explicit_packet_row': True,
+                },
+            })
+
+    return rows
+
+
+def _extract_segmented_accused_rows(text: str, kb_lookup: Dict[str, str]) -> List[dict]:
+    """
+    Expand clauses that explicitly mention an accused code (A1, A2, ...) and a
+    seizure quantity into one row per accused. This keeps per-accused packet
+    quantities separate even when the narrative is written as a single paragraph.
+    """
+    if not text:
+        return []
+
+    accused_matches = list(_ACCUSED_REF_PATTERN.finditer(text))
+    if not accused_matches:
+        return []
+
+    rows = []
+    for index, match in enumerate(accused_matches):
+        start = match.start()
+        end = accused_matches[index + 1].start() if index + 1 < len(accused_matches) else len(text)
+        segment = text[start:end].strip()
+        if not segment:
+            continue
+
+        if not _PACKET_CONTEXT_RE.search(segment) and not re.search(r'\bganja\b|\bcannabis\b|\bcharas\b|\bmarijuana\b', segment, re.IGNORECASE):
+            continue
+
+        qty_match = _SEGMENT_QUANTITY_PATTERN.search(segment)
+        if not qty_match:
+            continue
+
+        drug_raw, drug_standard = _best_drug_keyword_match(segment, kb_lookup)
+        if not drug_standard and not drug_raw:
+            continue
+
+        qty = float(qty_match.group('qty'))
+        unit = qty_match.group('unit')
+        accused_ref = f"A-{int(match.group(1))}"
+
+        raw_name = drug_raw or drug_standard or 'Unknown'
+        standard_name = drug_standard or drug_raw or 'Unknown'
+        if isinstance(raw_name, str):
+            raw_name = raw_name.title() if raw_name.islower() else raw_name
+        if isinstance(standard_name, str):
+            standard_name = standard_name.title() if standard_name.islower() else standard_name
+
+        rows.append({
+            'raw_drug_name': raw_name,
+            'raw_quantity': qty,
+            'raw_unit': unit,
+            'primary_drug_name': standard_name,
+            'drug_form': 'solid',
+            'confidence_score': 96,
+            'seizure_worth': 0.0,
+            'worth_scope': 'individual',
+            'supplier_name': None,
+            'source_location': None,
+            'destination': None,
+            'purchase_price_per_unit': None,
+            'extraction_metadata': {
+                'source_sentence': segment,
+                'accused_ref': accused_ref,
+                'explicit_segment_row': True,
+            },
+        })
+
+    return rows
+
+
+def _drop_redundant_total_rows(drugs: List[DrugExtraction], packet_rows: List[dict]) -> List[DrugExtraction]:
+    """
+    Remove confession-style total rows when explicit packet rows already exist for
+    the same drug and their quantities sum to the total.
+    """
+    if not drugs or not packet_rows:
+        return drugs
+
+    from collections import defaultdict
+
+    packet_sums = defaultdict(float)
+    packet_counts = defaultdict(int)
+    for packet in packet_rows:
+        key = (str(packet.get('primary_drug_name') or '').lower().strip())
+        packet_sums[key] += float(packet.get('raw_quantity') or 0.0)
+        packet_counts[key] += 1
+
+    kept = []
+    for drug in drugs:
+        drug_key = (drug.primary_drug_name or '').lower().strip()
+        total_qty = float(drug.raw_quantity or 0.0)
+        source_sentence = str((drug.extraction_metadata or {}).get('source_sentence') or '').lower()
+
+        if packet_counts.get(drug_key, 0) >= 2:
+            packet_total = round(packet_sums[drug_key], 3)
+            if packet_total > 0 and abs(round(total_qty, 3) - packet_total) <= 0.01:
+                if any(marker in source_sentence for marker in ('total', 'about', 'approx', 'approximately', 'purchased', 'came to', 'came with', 'confessed')):
+                    logger.info(
+                        f"Dropped redundant total drug row: {drug.raw_drug_name} qty={drug.raw_quantity} "
+                        f"because explicit packet rows total {packet_total} already exist"
+                    )
+                    continue
+
+        kept.append(drug)
+
+    return kept
 
 
 def _normalize_accused_ref(value: Optional[str]) -> Optional[str]:
@@ -370,6 +585,42 @@ def _extract_dedup_accused_ref(drug: DrugExtraction) -> Optional[str]:
 
     if len(matches) == 1:
         return matches[0]
+
+    return None
+
+
+_MONEY_HINT_RE = re.compile(r'(?i)(?:\b(?:rs\.?|rupees|₹)\b|for\s+rs\.?|purchased\s+for|bought\s+for|sold\s+for|price|cost|worth)')
+
+
+def _looks_like_monetary_amount(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    raw_unit = str(item.get('raw_unit') or '').strip().lower()
+    source_sentence = str((item.get('extraction_metadata') or {}).get('source_sentence') or '').strip().lower()
+
+    if raw_unit in {'rs', 'rs.', 'rupees', 'rupee', 'inr', '₹'}:
+        return True
+    return bool(_MONEY_HINT_RE.search(source_sentence))
+
+
+def _parse_monetary_amount(item: dict) -> Optional[float]:
+    if not isinstance(item, dict):
+        return None
+
+    for field in ('purchase_price_per_unit', 'seizure_worth'):
+        value = item.get(field)
+        if isinstance(value, (int, float)) and float(value) > 0:
+            return float(value)
+
+    source_sentence = str((item.get('extraction_metadata') or {}).get('source_sentence') or '')
+    match = re.search(r'(?:rs\.?|rupees|₹)\s*([0-9][0-9,]*(?:\.\d+)?)', source_sentence, flags=re.IGNORECASE)
+    if match:
+        return float(match.group(1).replace(',', ''))
+
+    match = re.search(r'([0-9][0-9,]*(?:\.\d+)?)\s*(?:rs\.?|rupees|₹)', source_sentence, flags=re.IGNORECASE)
+    if match:
+        return float(match.group(1).replace(',', ''))
 
     return None
 
@@ -1139,6 +1390,7 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
 
     seen = {}
     for drug in drugs:
+        meta = drug.extraction_metadata if isinstance(drug.extraction_metadata, dict) else {}
         # Dedup key keeps same-drug rows separate across different accused, while
         # still consolidating alternate unit representations for the same seizure.
         key = (
@@ -1413,6 +1665,18 @@ def extract_drug_info(
                 elif d.get('seizure_worth') is None:
                     d['seizure_worth'] = 0.0
 
+                # Monetary values are transaction metadata, not seizure quantities.
+                if _looks_like_monetary_amount(d):
+                    amount = _parse_monetary_amount(d)
+                    if amount is not None:
+                        d['purchase_price_per_unit'] = amount if d.get('purchase_price_per_unit') is None else d.get('purchase_price_per_unit')
+                    d['raw_quantity'] = 0.0
+                    if not d.get('raw_unit') or str(d.get('raw_unit')).strip().lower() in {'rs', 'rs.', 'rupees', 'rupee', 'inr', '₹'}:
+                        d['raw_unit'] = 'Unknown'
+                    # Monetary-only rows are not seizure-worth rows.
+                    d['seizure_worth'] = 0.0
+                    d['worth_scope'] = 'individual'
+
                 valid_scopes = {'individual', 'drug_total', 'overall_total'}
                 ws = str(d.get('worth_scope', 'individual')).lower().strip()
                 d['worth_scope'] = ws if ws in valid_scopes else 'individual'
@@ -1420,6 +1684,30 @@ def extract_drug_info(
                 valid_drugs.append(DrugExtraction(**d))
             except Exception as e:
                 logger.warning(f"Skipping invalid drug entry: {e} | data: {d}")
+
+        # Expand explicit accused-linked clauses first so per-accused quantities
+        # remain separate even when the LLM collapses them into a total row.
+        segmented_packet_rows = _extract_segmented_accused_rows(filtered_text, kb_lookup)
+        if segmented_packet_rows:
+            logger.info(f"Segmented accused expansion found {len(segmented_packet_rows)} explicit rows.")
+            for packet_row in segmented_packet_rows:
+                try:
+                    valid_drugs.append(DrugExtraction(**packet_row))
+                except Exception as e:
+                    logger.warning(f"Skipping invalid segmented accused row: {e} | data: {packet_row}")
+
+        # Expand numbered packet lists found in the source text so packet-level
+        # quantities survive even when the LLM collapses them into a total row.
+        explicit_packet_rows = _extract_explicit_packet_rows(filtered_text, kb_lookup)
+        if explicit_packet_rows:
+            logger.info(f"Packet expansion found {len(explicit_packet_rows)} explicit packet rows.")
+            for packet_row in explicit_packet_rows:
+                try:
+                    valid_drugs.append(DrugExtraction(**packet_row))
+                except Exception as e:
+                    logger.warning(f"Skipping invalid explicit packet row: {e} | data: {packet_row}")
+
+            valid_drugs = _drop_redundant_total_rows(valid_drugs, explicit_packet_rows)
 
         # ── Step 4: Deterministic KB name resolution ──
         kb_resolved = resolve_primary_drug_name(valid_drugs, kb_lookup, conn=conn)

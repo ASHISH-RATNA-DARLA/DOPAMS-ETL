@@ -234,6 +234,317 @@ def _address_similarity(a, b):
     return len(ta & tb) / len(ta | tb)
 
 
+def _normalize_phone_digits(value):
+    if not value:
+        return ''
+    digits = re.sub(r'\D', '', str(value))
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _is_same_crime_duplicate_accused(row_a, row_b):
+    """
+    Conservative duplicate detector for source accused rows within ONE crime.
+    Only merges when name is effectively the same person (often token reorder)
+    plus corroborating identity fields.
+    """
+    name_a = row_a.get('full_name') or ''
+    name_b = row_b.get('full_name') or ''
+    norm_a = _normalize_name(name_a)
+    norm_b = _normalize_name(name_b)
+    if not norm_a or not norm_b:
+        return False
+
+    tokens_a = set(norm_a.split())
+    tokens_b = set(norm_b.split())
+    if len(tokens_a) < 2 or len(tokens_b) < 2:
+        return False
+
+    same_tokens_reordered = tokens_a == tokens_b
+    strong_name_similarity = _name_similarity(name_a, name_b) >= 0.93
+    if not (same_tokens_reordered or strong_name_similarity):
+        return False
+
+    phone_a = _normalize_phone_digits(row_a.get('phone_numbers'))
+    phone_b = _normalize_phone_digits(row_b.get('phone_numbers'))
+    same_phone = bool(phone_a and phone_b and phone_a == phone_b)
+
+    age_a = row_a.get('age')
+    age_b = row_b.get('age')
+    same_age = age_a is not None and age_b is not None and str(age_a) == str(age_b)
+
+    gender_a = (row_a.get('gender') or '').strip().lower()
+    gender_b = (row_b.get('gender') or '').strip().lower()
+    same_gender = bool(gender_a and gender_b and gender_a == gender_b)
+
+    addr_sim = _address_similarity(row_a.get('address'), row_b.get('address'))
+
+    # Require either exact phone match, or age+gender+address corroboration.
+    return same_phone or (same_age and same_gender and addr_sim >= 0.45)
+
+
+def _is_supplier_context(name: str, text: str) -> bool:
+    if not name or not text:
+        return False
+
+    lowered_text = text.lower()
+    lowered_name = name.lower().strip()
+    idx = lowered_text.find(lowered_name)
+    while idx >= 0:
+        start = max(0, idx - 100)
+        end = min(len(lowered_text), idx + len(lowered_name) + 50)
+        window = lowered_text[start:end]
+        if any(
+            marker in window
+            for marker in (
+                # Direct purchase/obtain markers
+                'purchased from', 'purchase from', 'purchase ganja from',
+                'procured from', 'obtain from', 'obtained from',
+                'bought from', 'buy from', 'buy ganja from',
+                'brought from', 'get from', 'got from', 'sourced from',
+                # Supplier relationship markers
+                'supplied by', 'supplier', 'selling ganja', 'sell the ganja',
+                'deliver the ganja', 'supply ganja', 'supply ', 'from the supplier',
+                'used to purchase', 'used to buy', 'use to purchase', 'use to buy'
+            )
+        ):
+            return True
+        idx = lowered_text.find(lowered_name, idx + 1)
+
+    return False
+
+
+def _is_absconding_context(name: str, text: str) -> bool:
+    """Detect if name appears only in absconding/evading context, not as apprehended accused."""
+    if not name or not text:
+        return False
+
+    lowered_text = text.lower()
+    lowered_name = name.lower().strip()
+    idx = lowered_text.find(lowered_name)
+    while idx >= 0:
+        start = max(0, idx - 100)
+        end = min(len(lowered_text), idx + len(lowered_name) + 100)
+        window = lowered_text[start:end]
+        if any(
+            marker in window
+            for marker in (
+                'absconding', 'absconded', 'on the run', 'evading', 'evaded',
+                'fled', 'escaped', 'not traceable', 'untraceable', 'whereabouts unknown',
+                'at large', 'in hiding', 'fugitive', 'not apprehended', 'not arrested'
+            )
+        ):
+            # Check that accused is NOT also mentioned as apprehended in same context
+            if not any(marker in window for marker in ('caught', 'apprehended', 'arrested', 'confessed')):
+                return True
+        idx = lowered_text.find(lowered_name, idx + 1)
+
+    return False
+
+
+def _is_associate_only_context(name: str, text: str) -> bool:
+    """Detect if name appears only as associate/reference, not primary accused."""
+    if not name or not text:
+        return False
+
+    lowered_text = text.lower()
+    lowered_name = name.lower().strip()
+    idx = lowered_text.find(lowered_name)
+    while idx >= 0:
+        start = max(0, idx - 100)
+        end = min(len(lowered_text), idx + len(lowered_name) + 100)
+        window = lowered_text[start:end]
+        if any(
+            marker in window
+            for marker in (
+                'along with', 'accompanied by', 'together with', 'in company with',
+                'associate', 'associates of', 'known associates', 'friend of', 'friends of',
+                'relative of', 'relatives of', 'in association with'
+            )
+        ):
+            # Exclude if also mentioned as directly involved
+            if not any(marker in window for marker in ('caught', 'apprehended', 'arrested', 'possession', 'seized')):
+                return True
+        idx = lowered_text.find(lowered_name, idx + 1)
+
+    return False
+
+
+def _is_harbourer_context(name: str, text: str) -> bool:
+    """Detect if name appears only as someone who provided shelter/safe house."""
+    if not name or not text:
+        return False
+
+    lowered_text = text.lower()
+    lowered_name = name.lower().strip()
+    idx = lowered_text.find(lowered_name)
+    while idx >= 0:
+        start = max(0, idx - 100)
+        end = min(len(lowered_text), idx + len(lowered_name) + 100)
+        window = lowered_text[start:end]
+        if any(
+            marker in window
+            for marker in (
+                'harboured', 'harbored', 'provided shelter', 'safe house', 'hideout',
+                'protected', 'shelter to', 'allowed to stay', 'hide', 'hiding place'
+            )
+        ):
+            return True
+        idx = lowered_text.find(lowered_name, idx + 1)
+
+    return False
+
+
+def _is_financier_context(name: str, text: str) -> bool:
+    """Detect if name appears only as financier/funder."""
+    if not name or not text:
+        return False
+
+    lowered_text = text.lower()
+    lowered_name = name.lower().strip()
+    idx = lowered_text.find(lowered_name)
+    while idx >= 0:
+        start = max(0, idx - 100)
+        end = min(len(lowered_text), idx + len(lowered_name) + 100)
+        window = lowered_text[start:end]
+        if any(
+            marker in window
+            for marker in (
+                'financed', 'financer', 'financier', 'provided funds', 'funded',
+                'paid for', 'financial support', 'money provider', 'funded the operation'
+            )
+        ):
+            return True
+        idx = lowered_text.find(lowered_name, idx + 1)
+
+    return False
+
+
+
+def _should_skip_role_only_mention(name: str, facts_text: str) -> tuple:
+    """
+    Detect if name should be skipped or reassigned due to specific role context.
+    Returns (should_skip, corrected_status, corrected_accused_type, reason).
+    """
+    # Check contexts in order of severity (skip most reference-only mentions)
+    if _is_supplier_context(name, facts_text):
+        return (False, None, "supplier", "supplier-only context")
+    if _is_associate_only_context(name, facts_text):
+        return (True, None, None, "associate-only reference")
+    if _is_absconding_context(name, facts_text):
+        return (False, "absconding", None, "absconding accused")
+    if _is_harbourer_context(name, facts_text):
+        return (False, None, "harbourer", "harbourer-only context")
+    if _is_financier_context(name, facts_text):
+        return (False, None, "financier", "financier-only context")
+
+    return (False, None, None, None)
+
+def _match_extracted_name_to_db_accused(extracted_name: str, db_name_variants: list) -> bool:
+    """
+    Conservative matching to detect when extracted text name already exists in DB accused
+    as a variant (spelling, order, phonetic, partial). Returns True if a match is found.
+    """
+    if not extracted_name or not db_name_variants:
+        return False
+
+    extracted_lower = extracted_name.lower().strip()
+    extracted_tokens = set(extracted_lower.split())
+
+    for db_name in db_name_variants:
+        if not db_name:
+            continue
+        db_lower = db_name.lower().strip()
+        db_tokens = set(db_lower.split())
+
+        # 1. Exact match (after normalization)
+        if extracted_lower == db_lower:
+            return True
+
+        # 2. Name-order reversal: "Muniraju Gollari" vs "Gollari Muniraju"
+        if extracted_tokens == db_tokens:
+            return True
+
+        # 3. Substring match: single extracted name is part of DB name
+        # E.g., "Prakash" in "Prakash Pawar", "Ramesh" in "Ramesh Margel"
+        if len(extracted_tokens) == 1:
+            extracted_word = list(extracted_tokens)[0]
+            if any(extracted_word == token for token in db_tokens):
+                return True
+
+        # 4. Phonetic component matching: "Majji" vs "Majhi", "Naini" vs "Nainu"
+        # Use dmetaphone on name tokens
+        try:
+            from metaphone import doublemetaphone
+            extracted_phones = set()
+            for token in extracted_tokens:
+                primary, secondary = doublemetaphone(token)
+                if primary:
+                    extracted_phones.add(primary)
+            db_phones = set()
+            for token in db_tokens:
+                primary, secondary = doublemetaphone(token)
+                if primary:
+                    db_phones.add(primary)
+            if extracted_phones and db_phones and extracted_phones & db_phones:
+                return True
+        except Exception:
+            pass
+
+        # 5. High fuzzy similarity on full names (85% threshold for shorter names)
+        if _name_similarity(extracted_name, db_name) >= 0.85:
+            return True
+
+        # 6. High token overlap (2+ tokens in common, at least 50% of smaller name)
+        overlap = len(extracted_tokens & db_tokens)
+        min_tokens = min(len(extracted_tokens), len(db_tokens))
+        if overlap >= 2 and (min_tokens == 0 or overlap / min_tokens >= 0.5):
+            return True
+
+    return False
+
+
+def _accused_row_priority(row):
+    score = 0
+    if row.get('person_id'):
+        score += 2
+    if row.get('accused_code'):
+        score += 2
+    accused_type_db = (row.get('accused_type_db') or '').strip().lower()
+    if accused_type_db in {'accused', 'ccl'}:
+        score += 2
+    status = (row.get('accused_status') or '').lower()
+    if any(k in status for k in ('arrest', 'apprehend', 'detain', 'caught')):
+        score += 1
+    return score
+
+
+def _dedupe_same_crime_accused_rows(rows):
+    if not rows:
+        return [], []
+
+    kept = []
+    dropped = []
+    for row in rows:
+        match_index = None
+        for idx, existing in enumerate(kept):
+            if _is_same_crime_duplicate_accused(existing, row):
+                match_index = idx
+                break
+
+        if match_index is None:
+            kept.append(row)
+            continue
+
+        existing = kept[match_index]
+        if _accused_row_priority(row) > _accused_row_priority(existing):
+            kept[match_index] = row
+            dropped.append(existing)
+        else:
+            dropped.append(row)
+
+    return kept, dropped
+
+
 def _age_score(current_age, candidate_age):
     if current_age is None or candidate_age is None:
         return 0.5
@@ -342,7 +653,8 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
 
 
 def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
-                                _crime_profile_cache=None, _assoc_cache=None):
+                                _crime_profile_cache=None, _assoc_cache=None,
+                                _dedup_candidate_cache=None):
     """
     _crime_profile_cache and _assoc_cache are caller-owned dicts passed in so
     repeated calls within the same crime reuse already-fetched data instead of
@@ -353,6 +665,8 @@ def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
         _crime_profile_cache = {}
     if _assoc_cache is None:
         _assoc_cache = {}
+    if _dedup_candidate_cache is None:
+        _dedup_candidate_cache = {}
 
     current_accused_id = payload.get('accused_id')
     current_person_code = payload.get('person_code')
@@ -377,7 +691,12 @@ def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
             return row['canonical_person_id'], None, 0, False
 
     # Layer 1: exact accused_id match within candidate pool (phonetic neighbours)
-    candidates = fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code)
+    cache_key = (current_crime_id, full_name, ps_code)
+    if cache_key not in _dedup_candidate_cache:
+        _dedup_candidate_cache[cache_key] = fetch_dedup_candidates(
+            conn, current_crime_id, full_name, ps_code
+        )
+    candidates = _dedup_candidate_cache[cache_key]
     for cand in candidates:
         if current_accused_id and cand.get('accused_id') and str(current_accused_id) == str(cand.get('accused_id')):
             return cand.get('canonical_person_id') or fallback_canonical, None, 1, False
@@ -629,7 +948,13 @@ def main():
 
     try:
         from db_pooling import PostgreSQLConnectionPool
-        pool = PostgreSQLConnectionPool()
+        from brief_facts_ai.etl_config import get_config as get_brief_facts_config
+
+        config_obj = get_brief_facts_config()
+        pool = PostgreSQLConnectionPool(
+            minconn=config_obj.db_pool_min_conn,
+            maxconn=config_obj.db_pool_max_conn,
+        )
         pool.reset()
         logging.info("Connection pool reset for fresh start")
 
@@ -846,6 +1171,7 @@ def process_crimes_parallel(crimes):
                         enriched_rows = db_module.write_drugs_by_accused_in_memory(branch_records, extractions)
 
                     db_module.bulk_upsert_brief_facts_ai(conn, enriched_rows)
+                    logging.info(f"Crime {crime_id}: {len(enriched_rows)} rows written to brief_facts_ai")
 
                 if unified_mode and run_id:
                     complete_crime_processing_run(conn, run_id, rows_written)
@@ -856,9 +1182,14 @@ def process_crimes_parallel(crimes):
                 should_commit = (crime_count % batch_commit_size == 0)
 
                 if should_commit:
+                    batch_start = crime_count - batch_commit_size + 1
+                    batch_end = crime_count
                     conn.commit()
                     commit_count += 1
-                    logging.debug(f"Batch commit #{commit_count} after {batch_commit_size} crimes")
+                    logging.info(
+                        f"Batch commit #{commit_count}: crimes {batch_start}-{batch_end}, "
+                        f"total_rows_written={rows_written}"
+                    )
                 else:
                     # Use SAVEPOINT for per-crime rollback within batch
                     sp_name = f"sp_crime_{crime_id}"
@@ -924,8 +1255,22 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
       - 'Accused' / 'CCL': person_code = accused_code (direct from DB)
       - 'Known' / 'Respondent' / 'Suspect': LLM assigns person_code (A1, A2 by mention)
     """
-    # Process all DB accused rows; no silent dropping.
-    valid_accused = list(db_accused)
+    # Process DB accused rows with a conservative same-crime duplicate collapse
+    # for reordered-name identity duplicates (e.g. "Dharo Kumar" vs "Kumar Dharo").
+    valid_accused, dropped_duplicates = _dedupe_same_crime_accused_rows(list(db_accused))
+    if dropped_duplicates:
+        logging.info(
+            "Branch A duplicate-collapse for Crime %s: dropped=%s",
+            crime_id,
+            [
+                {
+                    'accused_id': r.get('accused_id'),
+                    'accused_code': r.get('accused_code'),
+                    'full_name': r.get('full_name'),
+                }
+                for r in dropped_duplicates
+            ],
+        )
     if not valid_accused:
         logging.info(f"Branch A: No accused rows found for Crime {crime_id}")
         return 0, []
@@ -982,6 +1327,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     count = 0
     _cp_cache: dict = {}   # crime_profile cache — shared across all accused in this crime
     _ac_cache: dict = {}   # associate codes cache — shared across all accused in this crime
+    _dedup_cache: dict = {}  # dedup candidate cache — shared across all accused in this crime
     for i, row in enumerate(valid_accused, start=1):
         accused_id    = row.get('accused_id')
         person_id     = row.get('person_id')
@@ -1104,6 +1450,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             ps_code,
             _crime_profile_cache=_cp_cache,
             _assoc_cache=_ac_cache,
+            _dedup_candidate_cache=_dedup_cache,
         )
 
         row_data = {
@@ -1135,20 +1482,24 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             'etl_run_id'           : run_id,
         }
         branch_records.append(row_data)
-        insert_accused_facts(conn, row_data)
         count += 1
 
     # ── Branch A gap-fill: text-only accused not in DB ──────────────────────
+
+
     # FIRs sometimes name accused (suppliers, absconders, associates) who are
     # not registered in the accused/persons tables yet. Branch A would silently
     # drop them. We detect them via Pass 1 name extraction, diff against DB
     # names, and create LLM-sourced rows so they still appear in output.
     try:
-        db_names_norm = {
-            _normalize_name(row.get('full_name'))
-            for row in valid_accused
-            if row.get('full_name')
-        }
+        db_name_variants = []
+        db_names_norm = set()
+        for row in valid_accused:
+            for name_variant in (row.get('full_name'), row.get('alias_name')):
+                if not name_variant:
+                    continue
+                db_name_variants.append(str(name_variant))
+                db_names_norm.add(_normalize_name(name_variant))
 
         text_names = extract_accused_names_pass1(facts_text)
         if text_names:
@@ -1161,17 +1512,12 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 if _is_police_name(raw, facts_text) or _is_police_name(clean, facts_text):
                     logging.info(f"Branch A gap-fill: police guard dropped '{clean}'")
                     continue
-                norm = _normalize_name(clean)
-                # Skip if this name already matched a DB accused (exact or
-                # 2-token overlap to handle "Rahul Singh" vs "Singh Rahul").
-                if norm in db_names_norm:
+                if _is_supplier_context(clean, facts_text):
+                    logging.info(f"Branch A gap-fill: supplier guard dropped '{clean}'")
                     continue
-                norm_tokens = set(norm.split())
-                if any(
-                    len(norm_tokens & set(dn.split())) >= 2
-                    for dn in db_names_norm
-                    if dn
-                ):
+                # Comprehensive DB guard: detect name variants (spelling, order, phonetic, partial)
+                if _match_extracted_name_to_db_accused(clean, db_name_variants):
+                    logging.info(f"Branch A gap-fill: DB guard matched '{clean}' to existing accused")
                     continue
                 new_names.append(raw)
 
@@ -1218,6 +1564,23 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                     if accused_type_extra == "unknown":
                         accused_type_extra = None
 
+                    # Defensive fix: if name appears only in supplier context, override type to supplier
+                    if _is_supplier_context(clean, facts_text):
+                        accused_type_extra = "supplier"
+                        logging.info(f"Branch A gap-fill: '{clean}' detected as supplier-only context, classified as supplier")
+
+                        # Check for role-specific context that affects skip, status, or type
+                        should_skip_role, status_override, type_override, reason = _should_skip_role_only_mention(clean, facts_text)
+                        if should_skip_role:
+                            logging.info(f"Branch A gap-fill: '{clean}' skipped due to {reason}")
+                            continue
+                        if status_override:
+                            status_extra = status_override
+                            logging.info(f"Branch A gap-fill: '{clean}' status set to {status_override} ({reason})")
+                        if type_override:
+                            accused_type_extra = type_override
+                            logging.info(f"Branch A gap-fill: '{clean}' type set to {type_override} ({reason})")
+
                     gender_extra = detect_gender(facts_text, clean, gender_extra)
                     status_extra = resolve_status_for_insert(None, facts_text, clean)
                     is_ccl_extra = detect_ccl(clean, role_desc or "")
@@ -1238,6 +1601,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                             ps_code,
                             _crime_profile_cache=_cp_cache,
                             _assoc_cache=_ac_cache,
+                            _dedup_candidate_cache=_dedup_cache,
                         )
 
                     extra_row = {
@@ -1292,6 +1656,12 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     except Exception as gap_err:
         logging.warning(f"Branch A gap-fill failed for Crime {crime_id}: {gap_err}", exc_info=True)
 
+    dedup_tiers = {}
+    for row in branch_records:
+        tier = row.get('dedup_match_tier')
+        dedup_tiers[tier] = dedup_tiers.get(tier, 0) + 1
+    logging.info(f"Branch A Crime {crime_id}: dedup distribution={dedup_tiers}")
+
     logging.info(f"Branch A processed Crime {crime_id}. row_count={count}")
     return count, branch_records
 
@@ -1308,6 +1678,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
     )
     _cp_cache: dict = {}
     _ac_cache: dict = {}
+    _dedup_cache: dict = {}
 
     extractions = extract_accused_info(facts_text)
 
@@ -1392,6 +1763,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 ps_code,
                 _crime_profile_cache=_cp_cache,
                 _assoc_cache=_ac_cache,
+                _dedup_candidate_cache=_dedup_cache,
             )
             data['canonical_person_id'] = canonical_person_id
             data['dedup_confidence'] = dedup_confidence
@@ -1489,6 +1861,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                         ps_code,
                         _crime_profile_cache=_cp_cache,
                         _assoc_cache=_ac_cache,
+                        _dedup_candidate_cache=_dedup_cache,
                     )
 
                 stub_row = {
@@ -1558,6 +1931,11 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             exc_info=True
         )
 
+    dedup_tiers = {}
+    for row in branch_records:
+        tier = row.get('dedup_match_tier')
+        dedup_tiers[tier] = dedup_tiers.get(tier, 0) + 1
+    logging.info(f"Branch B Crime {crime_id}: dedup distribution={dedup_tiers}")
     logging.info(f"Branch B processed Crime {crime_id}. row_count={count}")
     return count, branch_records
 
@@ -1588,6 +1966,7 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
     count = 0
     _cp_cache: dict = {}
     _ac_cache: dict = {}
+    _dedup_cache: dict = {}
 
     if not extractions:
         logging.info(f"Branch C: No accused found for Crime {crime_id}.")
@@ -1633,6 +2012,7 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
                 ps_code,
                 _crime_profile_cache=_cp_cache,
                 _assoc_cache=_ac_cache,
+                _dedup_candidate_cache=_dedup_cache,
             )
             data['canonical_person_id'] = canonical_person_id
             data['dedup_confidence'] = dedup_confidence
@@ -1642,6 +2022,12 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
             branch_records.append(data)
             insert_accused_facts(conn, data)
             count += 1
+
+    dedup_tiers = {}
+    for row in branch_records:
+        tier = row.get('dedup_match_tier')
+        dedup_tiers[tier] = dedup_tiers.get(tier, 0) + 1
+    logging.info(f"Branch C Crime {crime_id}: dedup distribution={dedup_tiers}")
 
     logging.info(f"Branch C processed Crime {crime_id}. row_count={count}")
     return count, branch_records

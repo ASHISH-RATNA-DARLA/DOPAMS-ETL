@@ -183,25 +183,34 @@ def fetch_canonical_by_accused_id(conn, accused_id, current_crime_id):
 
 def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limit=200):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("""
-            SELECT bfa.bf_accused_id, bfa.canonical_person_id, bfa.accused_id, bfa.person_code, bfa.full_name,
-                   bfa.alias_name, bfa.age, bfa.gender, bfa.address, bfa.source_accused_fields, bfa.crime_id,
-                   c.major_head, c.minor_head, c.crime_type, c.acts_sections
-            FROM public.brief_facts_ai bfa
-            LEFT JOIN public.crimes c ON c.crime_id = bfa.crime_id
-            WHERE bfa.crime_id != %s AND bfa.full_name IS NOT NULL
-              AND (SOUNDEX(bfa.full_name) = SOUNDEX(%s)
-                   OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s)
-                   OR bfa.source_accused_fields->>'ps_code' = %s)
-            ORDER BY
-              CASE
-                WHEN SOUNDEX(bfa.full_name) = SOUNDEX(%s) THEN 0
-                WHEN dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s) THEN 1
-                ELSE 2
-              END
-            LIMIT %s
-        """, (current_crime_id, full_name or '', full_name or '', ps_code,
-              full_name or '', full_name or '', limit))
+                conditions = [
+                        "bfa.crime_id != %s",
+                        "bfa.full_name IS NOT NULL",
+                        "(SOUNDEX(bfa.full_name) = SOUNDEX(%s)
+                                 OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s))",
+                        "COALESCE(c.date_modified, c.date_created) >= NOW() - INTERVAL '6 months'",
+                ]
+                params = [current_crime_id, full_name or '', full_name or '']
+
+                if ps_code:
+                        conditions.insert(2, "bfa.source_accused_fields->>'ps_code' = %s")
+                        params.insert(2, ps_code)
+
+                cur.execute(f"""
+                        SELECT bfa.bf_accused_id, bfa.canonical_person_id, bfa.accused_id, bfa.person_code, bfa.full_name,
+                                     bfa.alias_name, bfa.age, bfa.gender, bfa.address, bfa.source_accused_fields, bfa.crime_id,
+                                     c.major_head, c.minor_head, c.crime_type, c.acts_sections
+                        FROM public.brief_facts_ai bfa
+                        LEFT JOIN public.crimes c ON c.crime_id = bfa.crime_id
+                        WHERE {' AND '.join(conditions)}
+                        ORDER BY
+                            CASE
+                                WHEN SOUNDEX(bfa.full_name) = SOUNDEX(%s) THEN 0
+                                WHEN dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s) THEN 1
+                                ELSE 2
+                            END
+                        LIMIT %s
+                """, (*params, full_name or '', full_name or '', limit))
         return cur.fetchall()
 
 def fetch_crime_profile(conn, crime_id):
@@ -766,13 +775,39 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
             _add_or_consolidate_drug(matched_rows[0], drug_data, 'COLLECTIVE_TOTAL', drug_label, qty_label)
 
         else:
-            # ── Case 4: no attribution found — assign to A1/primary ──
-            fallback_code = primary_row.get('person_code') or 'A1'
-            logger.info(
-                f"[DrugAttrib] FALLBACK_A1: {drug_label} ({qty_label}) "
-                f"no code/name in source → {fallback_code}"
+            # ── Case 4A: unattributed collective consumption — assign to all accused ──
+            sentence_lower = source_sentence.lower()
+            consumption_markers = (
+                'smoked', 'smoking', 'consumed', 'consuming', 'consumption',
+                'urine test', 'tested positive', 'drug detection test',
+                'positive'
             )
-            _add_or_consolidate_drug(primary_row, drug_data, 'UNATTRIBUTED_FALLBACK_A1', drug_label, qty_label)
+            collective_markers = (
+                'accused persons', 'they', 'all accused', 'all of them'
+            )
+            is_collective_consumption = (
+                len(ordered_real_rows) > 1
+                and sentence_lower
+                and any(marker in sentence_lower for marker in consumption_markers)
+                and any(marker in sentence_lower for marker in collective_markers)
+            )
+
+            if is_collective_consumption:
+                all_codes = [r.get('person_code') or r.get('full_name') or '?' for r in ordered_real_rows]
+                logger.info(
+                    f"[DrugAttrib] COLLECTIVE_CONSUMPTION: {drug_label} ({qty_label}) "
+                    f"unattributed collective use sentence → {all_codes}"
+                )
+                for row in ordered_real_rows:
+                    _add_or_consolidate_drug(row, drug_data, 'COLLECTIVE_CONSUMPTION', drug_label, qty_label)
+            else:
+                # ── Case 4B: no attribution found — assign to A1/primary ──
+                fallback_code = primary_row.get('person_code') or 'A1'
+                logger.info(
+                    f"[DrugAttrib] FALLBACK_A1: {drug_label} ({qty_label}) "
+                    f"no code/name in source → {fallback_code}"
+                )
+                _add_or_consolidate_drug(primary_row, drug_data, 'UNATTRIBUTED_FALLBACK_A1', drug_label, qty_label)
 
     return bfai_rows
 

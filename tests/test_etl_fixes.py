@@ -17,6 +17,7 @@ from datetime import datetime
 # Import modules under test
 from brief_facts_ai.etl_config import ETLConfig, get_config, reset_config
 from brief_facts_ai.metrics import BatchMetrics, MetricsCollector
+from brief_facts_ai import db as brief_facts_db
 from db_pooling import get_singleton_pool, PostgreSQLConnectionPool
 
 
@@ -274,6 +275,29 @@ class TestConfigNoHardcodes:
             # Pool would be initialized with these values
             assert config.db_pool_min_conn == 15
             assert config.db_pool_max_conn == 30
+
+
+class TestDedupCandidateQuery:
+    """Validate dedup candidate query narrowing uses live crimes timestamps and ps_code filter."""
+
+    def test_fetch_dedup_candidates_uses_same_ps_and_recent_window(self):
+        cursor = MagicMock()
+        cursor.__enter__.return_value = cursor
+        cursor.fetchall.return_value = []
+
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+
+        brief_facts_db.fetch_dedup_candidates(conn, 'CRIME-1', 'John Doe', 'PS-123', limit=25)
+
+        executed_sql = cursor.execute.call_args[0][0]
+        executed_params = cursor.execute.call_args[0][1]
+
+        assert "COALESCE(c.date_modified, c.date_created) >= NOW() - INTERVAL '6 months'" in executed_sql
+        assert "bfa.source_accused_fields->>'ps_code' = %s" in executed_sql
+        assert executed_params[0] == 'CRIME-1'
+        assert executed_params[2] == 'PS-123'
+        assert executed_params[-1] == 25
 
 
 if __name__ == '__main__':
