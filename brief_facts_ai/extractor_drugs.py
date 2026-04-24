@@ -810,6 +810,7 @@ Rules:
 6. Critical edge case: if a person is called a buyer/customer but is later apprehended and contraband is seized from that person's possession, that person IS a valid seizure row and must be extracted.
 6b. Joint possession: If A1 and CCL jointly purchased/transported drugs and they were seized as a group, create ONE row with accused_ref=null (collective seizure). DO NOT create separate rows for each person or duplicate the same quantity for multiple accused. Do NOT include the downstream buyer/seller in the seizure row (they are NOT part of the seizure event).
 7. Extract only the quantity physically seized at arrest. Skip historical purchase quantities, already-sold quantities, samples S1/S2, and remaining property breakdowns like P1 when they are subsets of the seized total.
+    raw_quantity/raw_unit must describe the drug itself, not a container or paraphernalia measurement (for example, do NOT use bottle/ml from a Thums Up bottle, kit volume, or other non-drug container size).
 8. When a row belongs to one accused, extraction_metadata.accused_ref MUST contain the accused code from the roster (A1, A2, etc.). If no code exists, use the exact accused name. For collective unattributed totals, set accused_ref to null.
 9. extraction_metadata.source_sentence must be ONLY the verbatim clause describing the SEIZURE event (who had/possessed the drug at arrest). EXCLUDE downstream transactions like "and sold to A-3" or "buyer was X" which are not part of the seizure. This prevents misattributing drugs to downstream sellers/buyers.
 10. Extract seizure_worth from worth phrases such as "worth Rs.", "W/Rs:", "market value", or "valued at". If one worth covers all rows of the same drug, use worth_scope="drug_total". If one worth covers all drugs, use worth_scope="overall_total". If no worth is stated, set seizure_worth=0 and worth_scope="individual".
@@ -985,11 +986,36 @@ def filter_consumption_only_drugs(
     Returns:
         Filtered list with non-seizure entries removed.
     """
+    def _has_strong_drug_seizure_phrase(source_sentence: str, drug_name: str) -> bool:
+        """Return True only when the drug name itself appears in a seizure clause."""
+        if not source_sentence or not drug_name:
+            return False
+
+        seizure_terms = (
+            r"seized|confiscated|recovered|found with|apprehended with|caught with|"
+            r"arrested with|in possession of|possessed of|possession of|possessed"
+        )
+        escaped_name = re.escape(drug_name.strip())
+        patterns = [
+            rf"(?:{seizure_terms})[^.\n]{{0,80}}\b{escaped_name}\b",
+            rf"\b{escaped_name}\b[^.\n]{{0,80}}(?:{seizure_terms})",
+        ]
+        return any(re.search(pattern, source_sentence, flags=re.IGNORECASE) for pattern in patterns)
+
     # Consumption/test markers (no seizure = consumption-only)
     consumption_markers = {
         'tested positive', 'positive for', 'urine test', 'drug test',
         'detected in test', 'found positive', 'positive in test',
         'smoked', 'consumed', 'ingested', 'consumption'
+    }
+
+    # Paraphernalia / testing markers that should not survive unless the drug
+    # itself is tied to a seizure clause.
+    paraphernalia_markers = {
+        'urine sample', 'drug testing kit', 'test kit', 'testing kit',
+        'positive indication', 'positive result', 'matchbox', 'matchsticks',
+        'hollow pen tube', 'thums up bottle', 'plastic bottle', 'bottle fitted',
+        'panchanama', 'photographs and videography', 'nearby bushes'
     }
 
     # Sold/transaction markers (no seizure = sold, not seized)
@@ -1016,6 +1042,7 @@ def filter_consumption_only_drugs(
 
         # Check markers in source_sentence
         has_consumption_marker = any(marker in source_sentence for marker in consumption_markers)
+        has_paraphernalia_marker = any(marker in source_sentence for marker in paraphernalia_markers)
         has_sold_marker = any(marker in source_sentence for marker in sold_markers)
         has_seizure_marker = any(marker in source_sentence for marker in seizure_markers)
 
@@ -1033,6 +1060,10 @@ def filter_consumption_only_drugs(
         is_consumption_only = has_consumption_marker and not has_seizure_marker and not has_seizure_in_text
         is_sold_only = has_sold_marker and not has_seizure_marker and not has_seizure_in_text
         is_no_seizure = not has_seizure_marker and not has_seizure_in_text
+        is_paraphernalia_only = (
+            has_paraphernalia_marker
+            and not _has_strong_drug_seizure_phrase(source_sentence, getattr(drug, 'primary_drug_name', '') or getattr(drug, 'raw_drug_name', ''))
+        )
 
         if is_consumption_only:
             drug_name = getattr(drug, 'primary_drug_name', '?')
@@ -1058,6 +1089,15 @@ def filter_consumption_only_drugs(
             logger.info(
                 f"[SeizureFilter] Filtered '{drug_name}': "
                 f"no seizure markers found. "
+                f"source_sentence='{source_sentence}'"
+            )
+            continue
+
+        if is_paraphernalia_only and (has_consumption_marker or has_paraphernalia_marker):
+            drug_name = getattr(drug, 'primary_drug_name', '?')
+            logger.info(
+                f"[SeizureFilter] Filtered '{drug_name}': "
+                f"paraphernalia/test context without a direct drug seizure phrase. "
                 f"source_sentence='{source_sentence}'"
             )
             continue
@@ -1113,9 +1153,56 @@ def filter_non_drug_entries(
         'kite string', 'manja', 'chinese manja',
     }
 
+    CONTAINER_UNIT_MARKERS = {
+        'ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres',
+        'l', 'ltr', 'ltrs', 'liter', 'liters', 'litre', 'litres',
+        'bottle', 'bottles', 'vial', 'vials', 'ampule', 'ampules',
+        'ampoule', 'ampoules', 'kit', 'kits', 'container', 'containers',
+    }
+
+    LIQUID_DRUG_NAME_HINTS = {
+        'codeine syrup', 'phensedyl', 'corex', 'hash oil', 'hashish oil',
+        'weed oil', 'cannabis oil', 'opium solution', 'poppy husk solution',
+    }
+
     kept = []
     for drug in drugs:
         primary = (drug.primary_drug_name or '').lower().strip()
+        raw_unit = (drug.raw_unit or '').lower().strip()
+        drug_form = (drug.drug_form or '').lower().strip()
+        source_sentence = ''
+        if isinstance(drug.extraction_metadata, dict):
+            source_sentence = str(drug.extraction_metadata.get('source_sentence') or '').lower()
+
+        looks_like_liquid_drug = (
+            drug_form in {'liquid'}
+            or primary in LIQUID_DRUG_NAME_HINTS
+            or any(token in primary for token in {'syrup', 'oil', 'solution', 'tincture', 'extract', 'concentrate', 'fluid'})
+        )
+
+        # Hard reject container-only units for non-liquid drugs. This prevents
+        # bottle/ml or kit volume from being treated as the drug's own quantity.
+        if raw_unit in CONTAINER_UNIT_MARKERS and not looks_like_liquid_drug:
+            logger.info(
+                f"[IgnoreFilter] Dropped '{drug.raw_drug_name}' "
+                f"(primary='{drug.primary_drug_name}') — container/unit '{raw_unit}' is not a drug quantity"
+            )
+            continue
+
+        # If the source sentence is clearly paraphernalia/test context and the
+        # unit is container-like, keep only bona fide liquid drugs.
+        if raw_unit in CONTAINER_UNIT_MARKERS and not looks_like_liquid_drug and source_sentence:
+            paraphernalia_context = any(token in source_sentence for token in {
+                'urine sample', 'drug testing kit', 'test kit', 'testing kit',
+                'hollow pen tube', 'thums up bottle', 'plastic bottle', 'bottle fitted',
+                'matchbox', 'matchsticks', 'panchanama', 'urinate in the kit',
+            })
+            if paraphernalia_context:
+                logger.info(
+                    f"[IgnoreFilter] Dropped '{drug.raw_drug_name}' "
+                    f"(primary='{drug.primary_drug_name}') — paraphernalia/test context with container unit '{raw_unit}'"
+                )
+                continue
 
         # Check 1: exact match against DB ignore list
         if primary in ignore_set:
