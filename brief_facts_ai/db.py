@@ -582,7 +582,7 @@ def _extract_codes_from_source(source_sentence: str) -> set:
     source_sentence = str(source_sentence or '')
 
     # Define downstream transaction keywords - codes after these shouldn't be attributed
-    downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received)\s+(?:to|by|from)?\s*'
+    downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received|consume|consumed|consumption)\s+(?:to|by|from|by|of)?\s*'
 
     # Find all A-codes and their positions
     all_matches = list(re.finditer(r'\bA\s*[-.]?\s*\d+\b', source_sentence, flags=re.IGNORECASE))
@@ -618,7 +618,7 @@ def _match_rows_by_name(source_sentence, bfai_rows):
     if not source_sentence or not bfai_rows:
         return []
     sentence_lower = source_sentence.lower()
-    downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received)\s+(?:to|by|from)?\s*'
+    downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received|consume|consumed|consumption)\s+(?:to|by|from|by|of)?\s*'
     
     matched = []
     for row in bfai_rows:

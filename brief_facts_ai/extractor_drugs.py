@@ -868,6 +868,7 @@ Rules:
 6b. Joint possession: If A1 and CCL jointly purchased/transported drugs and they were seized as a group, create ONE row with accused_ref=null (collective seizure). DO NOT create separate rows for each person or duplicate the same quantity for multiple accused. Do NOT include the downstream buyer/seller in the seizure row (they are NOT part of the seizure event).
 7. Extract only the quantity physically seized at arrest. Skip historical purchase quantities, already-sold quantities, samples S1/S2, and remaining property breakdowns like P1 when they are subsets of the seized total.
     raw_quantity/raw_unit must describe the drug itself, not a container or paraphernalia measurement (for example, do NOT use bottle/ml from a Thums Up bottle, kit volume, or other non-drug container size).
+7b. If no exact total weight is given, but a packet count is stated (e.g. "13 packets", even if a rough range like "each weighing 3-4 grams" is mentioned), extract the count as raw_quantity, set raw_unit="packets", and set drug_form="count". Do not attempt to calculate or multiply ranges.
 8. When a row belongs to one accused, extraction_metadata.accused_ref MUST contain the accused code from the roster (A1, A2, etc.). If no code exists, use the exact accused name. For collective unattributed totals, set accused_ref to null.
 9. extraction_metadata.source_sentence must be ONLY the verbatim clause describing the SEIZURE event (who had/possessed the drug at arrest). EXCLUDE downstream transactions like "and sold to A-3" or "buyer was X" which are not part of the seizure. This prevents misattributing drugs to downstream sellers/buyers.
 10. Extract seizure_worth from worth phrases such as "worth Rs.", "W/Rs:", "market value", or "valued at". If one worth covers all rows of the same drug, use worth_scope="drug_total". If one worth covers all drugs, use worth_scope="overall_total". If no worth is stated, set seizure_worth=0 and worth_scope="individual".
@@ -880,6 +881,7 @@ Rules:
       possessed of, in possession of) → return EMPTY drugs array: {"drugs":[]}
     - **Sold-only (NO seizure)**: If text mentions sold/transaction (sold to, sold by, buyer, customers, purchased by,
       transaction, dealt to, distributed to) BUT does NOT contain seizure indicators → return EMPTY drugs array
+    - **Consumer Physical Seizures (CRITICAL)**: Even with consumers, if they HAVE physical seizure drugs (e.g. they tested positive AND were found with drugs), THEN ADD their drug entries with existing extraction rules. Do not skip valid physical seizures just because the person is also a consumer.
     - Examples to SKIP (return empty):
       - "Accused tested positive for ganja in urine test. No drugs seized."
       - "A-1 sold 1kg to A-3. No seizure at arrest location."
@@ -1063,7 +1065,8 @@ def filter_consumption_only_drugs(
     consumption_markers = {
         'tested positive', 'positive for', 'urine test', 'drug test',
         'detected in test', 'found positive', 'positive in test',
-        'smoked', 'consumed', 'ingested', 'consumption'
+        'smoked', 'consumed', 'ingested', 'consumption',
+        'drank', 'drink', 'drinking'
     }
 
     # Paraphernalia / testing markers that should not survive unless the drug
@@ -1079,7 +1082,8 @@ def filter_consumption_only_drugs(
     sold_markers = {
         'sold to', 'sold by', 'sold for', 'selling to',
         'buyer', 'customers', 'purchased by', 'transaction',
-        'transacted', 'dealt to', 'given to', 'distributed to'
+        'transacted', 'dealt to', 'given to', 'distributed to',
+        'bought', 'purchased', 'purchased from'
     }
 
     # Seizure indicators (presence = this IS a seizure)

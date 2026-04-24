@@ -1903,14 +1903,16 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                     if accused_type_extra == "unknown":
                         accused_type_extra = None
 
-                    # Confessional-only accused: named in another accused's confession as
-                    # source/supplier but not physically present at the scene.
+                    status_extra = resolve_status_for_insert(None, facts_text, clean)
+                    
+                    # Confessional-only or Absconding accused:
                     # Include them but append (Suspect) so downstream can distinguish.
-                    if _is_confessional_only_accused(clean, facts_text):
-                        base_type = accused_type_extra or "supplier"
+                    from extractor_accused import _is_confessional_only_accused
+                    if status_extra == 'Absconding' or _is_confessional_only_accused(clean, facts_text):
+                        base_type = accused_type_extra or "peddler"
                         if not base_type.endswith(" (Suspect)"):
                             accused_type_extra = base_type + " (Suspect)"
-                        logging.info(f"Branch A gap-fill: '{clean}' tagged as confessional-only suspect")
+                        logging.info(f"Branch A gap-fill: '{clean}' tagged as suspect (status: {status_extra})")
 
                     _tmp_identity_extra = {
                         'address': address_extra,
@@ -1935,7 +1937,7 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                     gender_extra = _tmp_identity_extra.get('gender')
 
                     gender_extra = detect_gender(facts_text, clean, gender_extra)
-                    status_extra = resolve_status_for_insert(None, facts_text, clean)
+                    # status_extra is already resolved above
                     is_ccl_extra = detect_ccl_from_age(age_extra) or detect_ccl(clean, role_desc or "")
 
                     canonical_extra, dedup_conf_extra, dedup_tier_extra, dedup_flag_extra = \
@@ -2096,6 +2098,13 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                 data['accused_type'] = None
             if data.get('status') == 'unknown':
                 data['status'] = None
+                
+            from extractor_accused import _is_confessional_only_accused
+            if data.get('status') == 'Absconding' or _is_confessional_only_accused(accused.full_name, facts_text):
+                base_type = data.get('accused_type') or "peddler"
+                if not base_type.endswith(" (Suspect)"):
+                    data['accused_type'] = base_type + " (Suspect)"
+
 
             _source_person_override = {}
             _source_summary_override = {}
@@ -2204,8 +2213,14 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                 if accused_type_s == 'unknown':
                     accused_type_s = None
 
-                gender_s  = detect_gender(facts_text, stub_name, gender_s)
                 status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
+                from extractor_accused import _is_confessional_only_accused
+                if status_s == 'Absconding' or _is_confessional_only_accused(stub_name, facts_text):
+                    base_type = accused_type_s or "peddler"
+                    if not base_type.endswith(" (Suspect)"):
+                        accused_type_s = base_type + " (Suspect)"
+                        
+                gender_s  = detect_gender(facts_text, stub_name, gender_s)
                 is_ccl_s  = bool(stub_is_ccl) or detect_ccl_from_age(age_s) or detect_ccl(stub_name, role_desc or '')
 
                 _tmp_identity_stub = {'address': addr_s, 'gender': gender_s}

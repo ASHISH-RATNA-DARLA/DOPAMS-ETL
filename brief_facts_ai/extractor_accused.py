@@ -1093,9 +1093,6 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
 
         classification_text = role_desc + (" " + key_details if key_details else "")
         accused_type = classify_accused_type(classification_text)
-        # Confessional-only accused (supplier named in another's confession, not at scene)
-        if accused_type and accused_type != "unknown" and _is_confessional_only_accused(clean_name, text):
-            accused_type = accused_type + " (Suspect)"
         is_ccl = detect_ccl(clean_name, role_desc)
 
         # Gender cues usually live in the raw extracted name before cleanup strips relations.
@@ -1133,6 +1130,11 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
             status = "absconding"
         elif any(k in _combined for k in _arrested_keywords):
             status = "arrested"
+
+        # Confessional-only or absconding accused
+        if accused_type and accused_type != "unknown" and (status == "absconding" or _is_confessional_only_accused(clean_name, text)):
+            if not accused_type.endswith(" (Suspect)"):
+                accused_type = accused_type + " (Suspect)"
 
         obj = AccusedExtraction(
             full_name=clean_name,
