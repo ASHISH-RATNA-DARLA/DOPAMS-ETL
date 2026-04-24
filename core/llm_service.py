@@ -2,6 +2,8 @@ import os
 import re
 import json
 import logging
+import atexit
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Dict, Any, Optional
 from functools import lru_cache
 
@@ -163,30 +165,33 @@ def get_llm(task_type: str) -> LLMService:
 
 # --- Retry Loop Wrapper for Extraction ---
 
+# Shared single-thread executor for LLM timeout enforcement.
+# Created once at module load; avoids spawning a new thread pool per LLM call.
+_llm_timeout_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm_timeout")
+atexit.register(_llm_timeout_executor.shutdown, wait=False)
+
+
 def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) -> dict:
     """
     Executes a LangChain extraction chain with retry on ANY error.
     Catches both JSON parsing errors and connection/HTTP errors.
     Includes timeout protection to prevent hanging.
     """
+    import time as _time
     from langchain_core.exceptions import OutputParserException
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-    
+
     retries = 0
     last_error = None
     timeout_seconds = float(os.getenv("LLM_TIMEOUT", "300"))
-    
-    import time as _time
-    
+
     def _invoke_with_timeout(chain_obj, data):
-        """Invoke chain with timeout using ThreadPoolExecutor."""
+        future = _llm_timeout_executor.submit(chain_obj.invoke, data)
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(chain_obj.invoke, data)
-                return future.result(timeout=timeout_seconds)
+            return future.result(timeout=timeout_seconds)
         except FuturesTimeoutError:
+            future.cancel()
             raise TimeoutError(f"LLM chain.invoke() timed out after {timeout_seconds}s")
-    
+
     # Run once normally
     try:
         logger.info(f"[LLM] Invoking chain (attempt 1)...")
@@ -205,29 +210,26 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) 
     except Exception as e:
         logger.warning(f"LLM invocation failed on first attempt ({type(e).__name__}): {e}")
         last_error = e
-    
+
     retries += 1
-        
+
+    correction_instruction = (
+        "\n\n[SYSTEM OVERRIDE: Your previous response was INVALID JSON. "
+        "You MUST fix the JSON formatting to exactly match the requested schema. "
+        "Ensure all brackets are closed and keys are properly quoted.]"
+    )
+
     # Retry loop
     while retries <= max_retries:
         logger.info(f"Retry {retries}/{max_retries} for JSON Extraction")
-        
-        # Append a strong system override to force correct JSON formatting.
-        correction_instruction = (
-            "\n\n[SYSTEM OVERRIDE: Your previous response was INVALID JSON. "
-            "You MUST fix the JSON formatting to exactly match the requested schema. "
-            "Ensure all brackets are closed and keys are properly quoted.]"
-        )
-        
+
         retry_data = input_data.copy()
         for key in retry_data:
             if isinstance(retry_data[key], str):
                 retry_data[key] = retry_data[key] + correction_instruction
                 break
-                
+
         try:
-            import time
-            time.sleep(1 * retries)   # Back-off: 1s, 2s, ...
             result = _invoke_with_timeout(chain, retry_data)
             if result:
                 logger.info(f"Retry {retries} succeeded.")
@@ -241,9 +243,9 @@ def invoke_extraction_with_retry(chain, input_data: dict, max_retries: int = 2) 
         except Exception as e:
             logger.error(f"LLM invocation failed on retry {retries} ({type(e).__name__}): {e}")
             last_error = e
-        
+
         retries += 1
-            
+
     # If we get here, all retries failed
     logger.error(f"All {max_retries + 1} extraction attempts failed. Last error: {last_error}")
     return {}

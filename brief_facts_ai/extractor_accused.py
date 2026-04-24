@@ -66,6 +66,110 @@ _POLICE_TITLE_RE = re.compile(
 )
 
 
+def _is_confessional_only_accused(name: str, text: str) -> bool:
+    """
+    Returns True when a name appears ONLY in another accused's confessional narrative
+    as a source/supplier — never as a directly apprehended person at the scene.
+
+    Example: "he purchased ganja from his known person Amjad" → Amjad is confessional-only.
+    These accused are included in extraction but tagged accused_type + " (Suspect)".
+
+    Strategy: uses DIRECTIONAL windows so that Om Yadav's confessional panchanama
+    header ("panchanama of Om Yadav ...") does not bleed into the confession body
+    where Amjad is mentioned 120+ chars later.
+    """
+    if not name or not text:
+        return False
+
+    lowered = text.lower()
+    lowered_name = name.lower().strip()
+
+    if lowered.find(lowered_name) < 0:
+        return False
+
+    # --- Direct-presence markers (tight: name must appear AFTER marker within 90 chars) ---
+    # These patterns introduce the accused: "panchanama of [NAME]", "his name as [NAME]"
+    # A 90-char right-window prevents Om Yadav's panchanama from reaching Amjad
+    # (who appears 120+ chars later in the confession body).
+    intro_markers = [
+        'revealed his name as', 'revealed her name as',
+        'disclosed his name as', 'disclosed her name as',
+        'confessional panchanama of the accused',
+        'confessional-cum-seizure panchanama of the accused',
+        'confessional cum seizure panchanama of the accused',
+        'seizure panchanama of the accused',
+        'panchanama of the accused',
+        'confessional statement of',
+    ]
+    for marker in intro_markers:
+        pos = lowered.find(marker)
+        while pos >= 0:
+            after = lowered[pos + len(marker): pos + len(marker) + 90]
+            if lowered_name in after:
+                return False
+            pos = lowered.find(marker, pos + 1)
+
+    # Broader apprehension markers — name must be within ±80 chars
+    apprehension_markers = [
+        'apprehended', 'arrested', 'caught', 'nabbed', 'detained',
+        'taken into custody', 'taken in to the custody', 'taken into the custody',
+        'remanded', 'produced before court', 'surrendered',
+        'introduced himself', 'introduced herself',
+    ]
+    for marker in apprehension_markers:
+        pos = lowered.find(marker)
+        while pos >= 0:
+            window = lowered[max(0, pos - 80): pos + len(marker) + 80]
+            if lowered_name in window:
+                return False
+            pos = lowered.find(marker, pos + 1)
+
+    # --- Confessional-source markers: name must appear AFTER marker within 120 chars ---
+    # "known person by name Amjad", "purchased from Amjad", etc.
+    forward_confessional = [
+        ('known person by name', 120),
+        ('known person named', 100),
+        ('known person called', 100),
+        ('person by name', 100),
+        ('person named', 80),
+        ('person called', 80),
+        ('individual by name', 80),
+        ('individual named', 80),
+        ('purchased from', 80),
+        ('procured from', 80),
+        ('obtained from', 80),
+        ('bought from', 80),
+        ('received from', 80),
+        ('sourced from', 80),
+        ('supplied by', 80),
+        ('from whom', 80),
+        ('his known', 120),
+        ('her known', 120),
+        ('their known', 120),
+    ]
+    for marker, window_size in forward_confessional:
+        pos = lowered.find(marker)
+        while pos >= 0:
+            after = lowered[pos: pos + len(marker) + window_size]
+            if lowered_name in after:
+                return True
+            pos = lowered.find(marker, pos + 1)
+
+    # Name appears BEFORE reverse markers: "Amjad who is the native of..."
+    reverse_confessional = [
+        'who is the native of', 'who is a native of', 'hails from',
+    ]
+    for marker in reverse_confessional:
+        pos = lowered.find(marker)
+        while pos >= 0:
+            before = lowered[max(0, pos - 80): pos]
+            if lowered_name in before:
+                return True
+            pos = lowered.find(marker, pos + 1)
+
+    return False
+
+
 def _is_police_name(name: str, text: str) -> bool:
     """
     Returns True when `name` appears in `text` immediately adjacent to a police
@@ -945,6 +1049,9 @@ def extract_accused_info(text: str) -> Optional[List[AccusedExtraction]]:
 
         classification_text = role_desc + (" " + key_details if key_details else "")
         accused_type = classify_accused_type(classification_text)
+        # Confessional-only accused (supplier named in another's confession, not at scene)
+        if accused_type and accused_type != "unknown" and _is_confessional_only_accused(clean_name, text):
+            accused_type = accused_type + " (Suspect)"
         is_ccl = detect_ccl(clean_name, role_desc)
 
         # Gender cues usually live in the raw extracted name before cleanup strips relations.

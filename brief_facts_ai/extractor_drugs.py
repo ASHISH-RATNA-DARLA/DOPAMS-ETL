@@ -1461,24 +1461,30 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
     Remove duplicate drug extractions and consolidate multi-unit seizures into single entries.
 
     Deduplication strategy:
-    1. PRIMARY DEDUP: By (primary_drug_name, raw_drug_name) only — ignores quantity/unit.
+    1. PRIMARY DEDUP: By (primary_drug_name, raw_drug_name, supplier, location) — ignores quantity/unit AND accused.
        Rationale: Same drug with different unit representations (32 tablets vs 19.648g)
-       are the SAME seizure, just measured differently.
+       are the SAME seizure, just measured differently. Multiple mentions of the same drug
+       across different accused (e.g., "A-1 has 6 Kg Ganja, A-3 sold 1 Kg, A-4 is supplier")
+       are quantity EVENTS for the same drug, not separate drugs.
+       Accused assignment happens later in write_drugs_by_accused_in_memory().
 
     2. CONSOLIDATION: For duplicates, merge measurements and keep highest confidence.
        - weight_g, weight_kg, volume_ml, volume_l, count_total are normalized forms.
        - Keep the entry with highest confidence_score.
        - Preserve all source data for audit trail (raw_quantity, raw_unit, extraction_metadata).
+       - Collect all source sentences from each extraction (different mentions) for audit.
 
     3. EDGE CASES:
        - Different suppliers/locations for same drug → keep separate (different seizures).
        - Same drug, same quantities, different units (e.g., 32 tablets = 19.648g) → consolidate.
+       - Same drug mentioned with different accused → consolidate here, assign later.
 
     Example:
-       Input:  [{primary_drug_name: 'Spasmo Proxyvon', raw_quantity: 32, raw_unit: 'tablets', confidence: 0.95},
-                {primary_drug_name: 'Spasmo Proxyvon', raw_quantity: 19.648, raw_unit: 'grams', confidence: 0.95}]
-       Output: [{primary_drug_name: 'Spasmo Proxyvon', raw_quantity: 32, raw_unit: 'tablets',
-                 weight_g: 19.648, count_total: 32, confidence: 0.95}]
+       Input:  [{primary_drug_name: 'Ganja', raw_quantity: 6, raw_unit: 'kg', source: "A-1 has 6 Kg"},
+                {primary_drug_name: 'Ganja', raw_quantity: 1, raw_unit: 'kg', source: "A-3 sold 1 Kg"},
+                {primary_drug_name: 'Ganja', raw_quantity: 5, raw_unit: 'kg', source: "5 Kg remaining"}]
+       Output: [{primary_drug_name: 'Ganja', raw_quantity: 6 (from highest confidence), all_sources: [...]
+                 consolidated_sources track all 3 mentions}]
     """
     if not drugs:
         return drugs
@@ -1486,21 +1492,27 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
     seen = {}
     for drug in drugs:
         meta = drug.extraction_metadata if isinstance(drug.extraction_metadata, dict) else {}
-        # Dedup key keeps same-drug rows separate across different accused, while
-        # still consolidating alternate unit representations for the same seizure.
+        # Dedup key: (drug_name, raw_name, supplier, location) — NO accused_ref.
+        # Accused assignment happens in write_drugs_by_accused_in_memory() AFTER dedup,
+        # so that the same drug consolidated here can be assigned to the right accused(s)
+        # based on source_sentence analysis.
         key = (
             (drug.primary_drug_name or '').lower().strip(),
             (drug.raw_drug_name or '').lower().strip(),
-            (_extract_dedup_accused_ref(drug) or '').lower().strip(),
             (drug.supplier_name or '').lower().strip(),        # Different supplier = different seizure
             (drug.source_location or '').lower().strip(),      # Different location = different seizure
         )
 
         existing = seen.get(key)
         if not existing:
+            # Initialize consolidated_sources list for audit trail
+            if isinstance(drug.extraction_metadata, dict):
+                source_sentence = drug.extraction_metadata.get('source_sentence', '')
+                if source_sentence:
+                    drug.extraction_metadata['consolidated_sources'] = [source_sentence]
             seen[key] = drug
         else:
-            # Consolidation logic: keep higher confidence, merge measurements
+            # Consolidation logic: keep higher confidence, merge measurements and source sentences
             if (drug.confidence_score or 0) > (existing.confidence_score or 0):
                 # Preserve measurement data from new entry, but keep raw fields from existing if missing
                 if not drug.raw_quantity or drug.raw_quantity == 0:
@@ -1518,13 +1530,18 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
                     drug.volume_l = existing.volume_l
                 if drug.count_total is None:
                     drug.count_total = existing.count_total
-                # Keep metadata from both (append source_sentence if different)
+                # Merge metadata: collect all source sentences for audit trail
                 if isinstance(drug.extraction_metadata, dict) and isinstance(existing.extraction_metadata, dict):
-                    existing_source = (existing.extraction_metadata or {}).get('source_sentence', '')
+                    existing_sources = (existing.extraction_metadata or {}).get('consolidated_sources', [])
                     drug_source = (drug.extraction_metadata or {}).get('source_sentence', '')
-                    if existing_source and drug_source and existing_source != drug_source:
-                        # Store alternate measurement source for audit trail
-                        drug.extraction_metadata['alternate_source_sentence'] = existing_source
+                    if drug_source:
+                        if not existing_sources:
+                            existing_source = (existing.extraction_metadata or {}).get('source_sentence', '')
+                            if existing_source:
+                                existing_sources = [existing_source]
+                        if drug_source not in existing_sources:
+                            existing_sources.append(drug_source)
+                        drug.extraction_metadata['consolidated_sources'] = existing_sources
                 seen[key] = drug
             else:
                 # Existing entry has higher/equal confidence, merge new measurements into it
@@ -1542,12 +1559,18 @@ def deduplicate_extractions(drugs: List[DrugExtraction], max_per_crime: int = 10
                     existing.volume_l = drug.volume_l
                 if drug.count_total is not None and (existing.count_total is None or existing.count_total == 0):
                     existing.count_total = drug.count_total
-                # Merge metadata
+                # Merge metadata: collect all source sentences for audit trail
                 if isinstance(drug.extraction_metadata, dict) and isinstance(existing.extraction_metadata, dict):
+                    existing_sources = (existing.extraction_metadata or {}).get('consolidated_sources', [])
                     drug_source = (drug.extraction_metadata or {}).get('source_sentence', '')
-                    existing_source = (existing.extraction_metadata or {}).get('source_sentence', '')
-                    if drug_source and existing_source and existing_source != drug_source:
-                        existing.extraction_metadata['alternate_source_sentence'] = drug_source
+                    if drug_source:
+                        if not existing_sources:
+                            existing_source = (existing.extraction_metadata or {}).get('source_sentence', '')
+                            if existing_source:
+                                existing_sources = [existing_source]
+                        if drug_source not in existing_sources:
+                            existing_sources.append(drug_source)
+                        existing.extraction_metadata['consolidated_sources'] = existing_sources
 
     deduped = list(seen.values())
 

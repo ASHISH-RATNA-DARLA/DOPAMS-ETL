@@ -2,10 +2,12 @@ import sys
 import re
 import logging
 import threading
+import queue
 import uuid
 import os
 import unicodedata
 from difflib import SequenceMatcher
+from dataclasses import dataclass
 # Allow imports from sibling ETL modules (e.g., env_utils from parent)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -58,6 +60,7 @@ from extractor_accused import (
     _is_procedural_role,
     clean_accused_name,
     _is_police_name,
+    _is_confessional_only_accused,
 )
 
 # Configure logging
@@ -77,7 +80,9 @@ def _synthetic_accused_id(crime_id, full_name, seq_num):
 
 
 def _canonical_person_id(full_name, gender, ps_code):
-    base = f"{(full_name or '').strip().lower()}|{(gender or '').strip().lower()}|{(ps_code or '').strip().lower()}"
+    # Sort tokens so "Ashish Ratna" and "Ratna Ashish" produce the same UUID.
+    name_key = ' '.join(sorted((full_name or '').strip().lower().split()))
+    base = f"{name_key}|{(gender or '').strip().lower()}|{(ps_code or '').strip().lower()}"
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, base))
 
 
@@ -218,12 +223,17 @@ def _phonetic_overlap(a, b):
     nb = _normalize_name(b)
     if not na or not nb:
         return 0.0
-    # Compare SOUNDEX of the first (primary) name token — matches PostgreSQL
-    first_a = na.split()[0]
-    first_b = nb.split()[0]
-    if _soundex(first_a) == _soundex(first_b) and _soundex(first_a) != '0000':
+    tokens_a = na.split()
+    tokens_b = nb.split()
+    # Sorted soundex set equality catches name-order reversals:
+    # "Ashish Ratna" vs "Ratna Ashish" → same sorted codes → 1.0
+    sdx_a = sorted(s for s in (_soundex(t) for t in tokens_a) if s != '0000')
+    sdx_b = sorted(s for s in (_soundex(t) for t in tokens_b) if s != '0000')
+    if sdx_a and sdx_b and sdx_a == sdx_b:
         return 1.0
-    # Fallback: 3-char prefix for very short names
+    # Fallback: first-token soundex (original behaviour for non-reversed names)
+    if _soundex(tokens_a[0]) == _soundex(tokens_b[0]) and _soundex(tokens_a[0]) != '0000':
+        return 1.0
     return 1.0 if na[:3] == nb[:3] else 0.0
 
 
@@ -1099,20 +1109,127 @@ def main():
 
 
 # ---------------------------------------------------------------------------
+# LLM Task Queue — for parallel LLM extraction with queue-based processing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LLMTask:
+    """Work item for LLM extraction queue."""
+    crime_id: str
+    facts_text: str
+    result_event: threading.Event
+    result: dict = None
+    error: str = None
+
+
+@dataclass
+class DBTask:
+    """Work item for DB insertion queue. Queued immediately after LLM completes."""
+    crime_id: str
+    enriched_rows: list
+    run_id: str = None
+    result_event: threading.Event = None
+    error: str = None
+
+
+def _llm_worker_loop(llm_queue: queue.Queue, max_retries: int = 2):
+    """
+    Dedicated LLM worker thread. Pulls tasks from queue, executes LLM extraction,
+    signals result via Event. If LLM fails after retries, records error.
+    Exits when sentinel (None) received.
+    """
+    while True:
+        task = llm_queue.get()
+        if task is None:  # Sentinel: shutdown
+            llm_queue.task_done()
+            break
+
+        for attempt in range(max_retries):
+            try:
+                task.result = extract_accused_info(task.facts_text)
+                task.error = None
+                break
+            except Exception as e:
+                task.error = str(e)
+                if attempt < max_retries - 1:
+                    logging.warning(
+                        f"[LLM Worker] Attempt {attempt+1}/{max_retries} failed for Crime {task.crime_id}: {e}"
+                    )
+                else:
+                    logging.error(
+                        f"[LLM Worker] All {max_retries} attempts failed for Crime {task.crime_id}: {e}"
+                    )
+
+        task.result_event.set()  # Signal that result (or error) is ready
+        llm_queue.task_done()
+
+
+def _db_worker_loop(db_queue: queue.Queue):
+    """
+    Dedicated DB worker thread. Pulls DB tasks from queue, performs bulk upsert,
+    commits, and signals completion via Event. No waiting — processes immediately
+    as soon as LLM worker queues a task.
+
+    Uses connection pool safely: each worker gets its own connection from pool.
+    """
+    import db as db_module
+
+    while True:
+        task = db_queue.get()
+        if task is None:  # Sentinel: shutdown
+            db_queue.task_done()
+            break
+
+        crime_id = task.crime_id
+        pool = get_singleton_pool()
+
+        try:
+            with pool.get_connection_context() as conn:
+                # Bulk upsert: all enriched rows for this crime at once
+                db_module.bulk_upsert_brief_facts_ai(conn, task.enriched_rows)
+                logging.info(f"[DB Worker] Crime {crime_id}: {len(task.enriched_rows)} rows upserted")
+
+                # Mark processing complete if in unified mode
+                if task.run_id:
+                    try:
+                        complete_crime_processing_run(conn, task.run_id, len(task.enriched_rows))
+                    except Exception as e:
+                        logging.warning(f"[DB Worker] Failed to mark complete for Crime {crime_id}: {e}")
+
+                conn.commit()
+                logging.info(f"[DB Worker] Crime {crime_id}: ✅ committed")
+                task.error = None
+        except Exception as e:
+            logging.error(f"[DB Worker] Crime {crime_id}: ❌ DB insertion failed: {e}", exc_info=True)
+            task.error = str(e)
+        finally:
+            if task.result_event:
+                task.result_event.set()  # Signal that DB operation is done
+            db_queue.task_done()
+
+
+# ---------------------------------------------------------------------------
 # Per-crime dispatcher — commits per crime (safe for production)
 # ---------------------------------------------------------------------------
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def process_crimes_parallel(crimes):
-    """Processes a list of crimes in parallel using thread pool and connection pool."""
-    # Load configuration from environment (fail-fast on missing vars)
+    """
+    Processes crimes in batches with queue-based LLM worker pool.
+
+    Architecture:
+    - Crime workers (N threads) perform non-LLM processing and queue LLM tasks
+    - LLM workers (N threads) pull from queue and execute extraction
+    - Batch synchronization: all crimes in batch must complete before next batch
+    - Resilience: LLM failures marked as sentinels, pipeline continues (no pending crimes)
+    """
     from brief_facts_ai.etl_config import get_config
     config_obj = get_config()
     max_workers = config_obj.parallel_llm_workers
     batch_size_limit = config_obj.batch_size
     batch_commit_size = config_obj.batch_commit_size
-    logging.info(f"🚀 Scaling accused extraction with {max_workers} parallel workers (commit every {batch_commit_size} crimes)")
+    logging.info(f"🚀 Batch processing with {max_workers} LLM workers, batch_size={batch_size_limit}")
 
     # Fetch drug KB once — shared read-only across all worker threads.
     # Previously fetched+rebuilt inside every worker (3 DB queries + 379KB parse per crime).
@@ -1131,17 +1248,32 @@ def process_crimes_parallel(crimes):
     _dynamic_keywords = build_drug_keywords(_drug_categories)
     logging.info(f"Drug KB loaded once: {len(_dynamic_keywords)} keywords, {len(_drug_categories)} categories")
 
-    # Track batch commits for performance monitoring
-    crime_count = 0
-    commit_count = 0
+    _stats = {'success': 0, 'failure': 0, 'db_pending': 0}
+    _stats_lock = threading.Lock()
 
-    def worker(crime):
-        nonlocal crime_count, commit_count
+    # Create LLM task queue and start LLM worker threads
+    llm_queue = queue.Queue()
+    llm_threads = []
+    for i in range(max_workers):
+        t = threading.Thread(target=_llm_worker_loop, args=(llm_queue,), daemon=False, name=f"LLMWorker-{i+1}")
+        t.start()
+        llm_threads.append(t)
+    logging.info(f"Started {max_workers} LLM worker threads")
+
+    # Create DB task queue and start DB worker threads (use same N workers for parallelism)
+    db_queue = queue.Queue()
+    db_threads = []
+    for i in range(max_workers):
+        t = threading.Thread(target=_db_worker_loop, args=(db_queue,), daemon=False, name=f"DBWorker-{i+1}")
+        t.start()
+        db_threads.append(t)
+    logging.info(f"Started {max_workers} DB worker threads (connection pool will manage per-worker connections)")
+
+    def crime_worker(crime):
+        """Process a single crime. Queues LLM work and waits for result."""
         crime_id = crime['crime_id']
         ps_code = crime.get('ps_code')
         facts_text = (crime['brief_facts'] or "").strip()
-
-        # Get connection from singleton pool (not recreated per crime)
         pool = get_singleton_pool()
 
         with pool.get_connection_context() as conn:
@@ -1149,23 +1281,52 @@ def process_crimes_parallel(crimes):
             rows_written = 0
             unified_mode = (config.ACCUSED_TABLE_NAME or "").lower() == UNIFIED_TABLE_NAME
             try:
+                # Pre-LLM: branch classification and DB setup
                 db_accused = fetch_existing_accused_for_crime(conn, crime_id)
                 branch = _classify_db_accused(db_accused)
 
                 if unified_mode:
-                    # Record branch in the log so Branch C entries can be
-                    # invalidated later when accused records arrive.
                     run_id = start_crime_processing_run(conn, crime_id, branch=branch)
                     delete_brief_facts_for_crime(conn, crime_id)
 
-                
-                if branch == 'A':
-                    rows_written, branch_records = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id)
-                elif branch == 'B':
-                    rows_written, branch_records = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id)
-                else:
-                    rows_written, branch_records = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id)
+                # ── Queue LLM extraction and wait for result ──
+                llm_task = LLMTask(crime_id, facts_text, threading.Event())
+                llm_queue.put(llm_task)
+                llm_task.result_event.wait()  # Block until LLM worker completes
 
+                # Handle LLM result or error
+                if llm_task.error:
+                    logging.error(f"Crime {crime_id}: LLM extraction failed: {llm_task.error}")
+                    # Queue DB task for failure sentinel (immediate insertion, no waiting)
+                    failure_row = {
+                        'crime_id'        : crime_id,
+                        'full_name'       : None,
+                        'accused_type'    : None,
+                        'status'          : None,
+                        'existing_accused': False,
+                        'role_in_crime'   : 'LLM_EXTRACTION_FAILED',
+                        'source_summary_fields': {'error': llm_task.error},
+                        'etl_run_id'      : run_id,
+                    }
+                    db_event = threading.Event()
+                    db_task = DBTask(crime_id, [failure_row], run_id, db_event)
+                    db_queue.put(db_task)
+                    with _stats_lock:
+                        _stats['failure'] += 1
+                        _stats['db_pending'] += 1
+                    logging.info(f"Crime {crime_id}: queued for DB insertion (LLM failed)")
+                    return False, crime_id, branch
+
+                # Post-LLM: branch-specific processing (extractions already obtained from queue)
+                if branch == 'A':
+                    rows_written, branch_records = _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, llm_task.result)
+                elif branch == 'B':
+                    rows_written, branch_records = _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, llm_task.result)
+                else:
+                    rows_written, branch_records = _process_branch_c(conn, crime_id, ps_code, facts_text, run_id, llm_task.result)
+
+                # Post-LLM: drug extraction and unified mode processing
+                enriched_rows = []
                 if unified_mode:
                     augmented_text = _inject_accused_roster(
                         facts_text,
@@ -1179,11 +1340,9 @@ def process_crimes_parallel(crimes):
                     )
 
                     if not extractions and branch_records:
-                        # Accused exist but no drugs found — stamp NO_DRUGS_DETECTED on each accused row
                         extractions = [{'raw_drug_name': 'NO_DRUGS_DETECTED'}]
 
                     if not branch_records and extractions:
-                        # Drugs found but no accused — upgrade sentinel and attach each drug individually
                         update_sentinel_role(conn, crime_id, 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY')
                         update_sentinel_role(conn, crime_id, 'LLM_EXTRACTION_FAILED', 'NO_ACCUSED_DRUGS_ONLY')
                         orphan_row = {
@@ -1219,86 +1378,90 @@ def process_crimes_parallel(crimes):
                     else:
                         enriched_rows = db_module.write_drugs_by_accused_in_memory(branch_records, extractions)
 
-                    db_module.bulk_upsert_brief_facts_ai(conn, enriched_rows)
-                    logging.info(f"Crime {crime_id}: {len(enriched_rows)} rows written to brief_facts_ai")
-
-                if unified_mode and run_id:
-                    complete_crime_processing_run(conn, run_id, rows_written)
-
-                # Batch commit strategy: commit every N crimes, use SAVEPOINT for per-crime rollback
-                # This reduces fsync overhead (~50%) while preserving per-crime atomicity
-                crime_count += 1
-                should_commit = (crime_count % batch_commit_size == 0)
-
-                if should_commit:
-                    batch_start = crime_count - batch_commit_size + 1
-                    batch_end = crime_count
-                    conn.commit()
-                    commit_count += 1
-                    logging.info(
-                        f"Batch commit #{commit_count}: crimes {batch_start}-{batch_end}, "
-                        f"total_rows_written={rows_written}"
-                    )
-                else:
-                    # Use SAVEPOINT for per-crime rollback within batch
-                    sp_name = f"sp_crime_{crime_id}"
-                    try:
-                        with conn.cursor() as cur:
-                            cur.execute(f"SAVEPOINT {sp_name}")
-                    except Exception:
-                        pass  # Savepoint not critical, proceed without it
-
+                # ── Queue DB task for immediate insertion (don't wait, don't commit here) ──
+                db_event = threading.Event()
+                db_task = DBTask(crime_id, enriched_rows, run_id, db_event)
+                db_queue.put(db_task)
+                with _stats_lock:
+                    _stats['success'] += 1
+                    _stats['db_pending'] += 1
+                logging.info(f"Crime {crime_id}: ⚡ queued {len(enriched_rows)} rows for DB insertion (LLM done, no waiting)")
                 return True, crime_id, branch
             except Exception as e:
-                try:
-                    # Try to rollback to savepoint first (per-crime rollback)
-                    sp_name = f"sp_crime_{crime_id}"
+                conn.rollback()
+                if unified_mode and run_id:
                     try:
-                        with conn.cursor() as cur:
-                            cur.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                    except Exception:
-                        # Fallback to full transaction rollback
-                        conn.rollback()
-
-                    if unified_mode and run_id:
                         fail_crime_processing_run(conn, run_id, str(e))
-                        # Don't commit failure marker - it will be in the batch commit
-                except Exception as inner_e:
-                    conn.rollback()
-                    logging.error(f"Failed to handle error for Crime {crime_id}: {inner_e}")
-
-                logging.error(f"Failed processing Crime {crime_id}: {e}")
+                        conn.commit()
+                    except Exception as inner_e:
+                        conn.rollback()
+                        logging.error(f"Failed to write failure marker for Crime {crime_id}: {inner_e}")
+                logging.error(f"Crime {crime_id}: ❌ failed: {e}", exc_info=True)
+                with _stats_lock:
+                    _stats['failure'] += 1
                 return False, crime_id, None
-            # Connection automatically returned to pool via context manager
 
-    # Final commit for any remaining work not yet committed
-    final_conn = get_singleton_pool().get_connection()
-    try:
-        final_conn.commit()
-        logging.info(f"Final commit completed. Total commits: {commit_count}")
-    finally:
-        get_singleton_pool().return_connection(final_conn)
+    # Process crimes in batches (batch synchronization: all crimes + all DB tasks complete before next batch)
+    total_crimes = len(crimes)
+    for batch_idx, batch_start in enumerate(range(0, total_crimes, batch_size_limit)):
+        batch_crimes = crimes[batch_start:batch_start + batch_size_limit]
+        batch_num = batch_idx + 1
+        logging.info(f"📦 Batch {batch_num}: processing {len(batch_crimes)} crimes (crimes {batch_start+1}-{min(batch_start+len(batch_crimes), total_crimes)} of {total_crimes})")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_crime = {executor.submit(worker, crime): crime['crime_id'] for crime in crimes}
-        for future in as_completed(future_to_crime):
-            success, cid, branch = future.result()
-            if success:
-                logging.info(f"✅ Crime {cid} processed successfully (branch={branch}).")
-            else:
-                logging.error(f"❌ Crime {cid} processing failed (branch={branch}).")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(crime_worker, crime) for crime in batch_crimes]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Uncaught error in crime worker: {e}", exc_info=True)
+
+        # Wait for all DB workers to finish processing queued tasks from this batch
+        # This ensures batch synchronization: all DB inserts complete before next batch starts
+        logging.info(f"📦 Batch {batch_num}: crime workers done. Waiting for {_stats['db_pending']} DB tasks to complete...")
+        db_queue.join()  # Block until all DB tasks are processed
+        with _stats_lock:
+            _stats['db_pending'] = 0
+        logging.info(f"📦 Batch {batch_num} complete: success={_stats['success']}, failure={_stats['failure']}")
+
+    # Shutdown worker threads (wait for queues to drain and all threads to exit)
+    logging.info("Waiting for LLM queue to drain...")
+    llm_queue.join()  # Block until all LLM tasks are processed
+
+    logging.info("Waiting for DB queue to drain...")
+    db_queue.join()  # Block until all DB tasks are processed
+
+    logging.info("Shutting down worker threads...")
+    for _ in range(max_workers):
+        llm_queue.put(None)  # Sentinel: signal LLM workers to exit
+        db_queue.put(None)   # Sentinel: signal DB workers to exit
+
+    for t in llm_threads:
+        t.join(timeout=30)  # Wait max 30s for each thread to exit
+        if t.is_alive():
+            logging.warning(f"LLM worker thread {t.name} did not exit gracefully")
+
+    for t in db_threads:
+        t.join(timeout=30)  # Wait max 30s for each thread to exit
+        if t.is_alive():
+            logging.warning(f"DB worker thread {t.name} did not exit gracefully")
+
+    logging.info(f"✅ All {total_crimes} crimes processed: success={_stats['success']}, failure={_stats['failure']}")
 
 
 # ---------------------------------------------------------------------------
 # Branch A — DB has accused rows, at least one person_id IS NOT NULL
 # ---------------------------------------------------------------------------
 
-def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
+def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, llm_extractions):
     """
     DB is authoritative for identity. LLM extracts roles + fills missing fields.
     Skips accused rows where person_id IS NULL (spec SKIP RULE).
     Shared dedup caches passed to all _resolve_canonical_identity calls so
     crime_profile and co-accused lookups are fetched once per crime, not once per accused.
+
+    Args:
+        llm_extractions: Pre-extracted accused info from LLM (already queued and processed)
 
     person_code logic by accused.type:
       - 'Accused' / 'CCL': person_code = accused_code (direct from DB)
@@ -1561,9 +1724,6 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                 if _is_police_name(raw, facts_text) or _is_police_name(clean, facts_text):
                     logging.info(f"Branch A gap-fill: police guard dropped '{clean}'")
                     continue
-                if _is_supplier_context(clean, facts_text):
-                    logging.info(f"Branch A gap-fill: supplier guard dropped '{clean}'")
-                    continue
                 # Comprehensive DB guard: detect name variants (spelling, order, phonetic, partial)
                 if _match_extracted_name_to_db_accused(clean, db_name_variants):
                     logging.info(f"Branch A gap-fill: DB guard matched '{clean}' to existing accused")
@@ -1613,22 +1773,14 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                     if accused_type_extra == "unknown":
                         accused_type_extra = None
 
-                    # Defensive fix: if name appears only in supplier context, override type to supplier
-                    if _is_supplier_context(clean, facts_text):
-                        accused_type_extra = "supplier"
-                        logging.info(f"Branch A gap-fill: '{clean}' detected as supplier-only context, classified as supplier")
-
-                        # Check for role-specific context that affects skip, status, or type
-                        should_skip_role, status_override, type_override, reason = _should_skip_role_only_mention(clean, facts_text)
-                        if should_skip_role:
-                            logging.info(f"Branch A gap-fill: '{clean}' skipped due to {reason}")
-                            continue
-                        if status_override:
-                            status_extra = status_override
-                            logging.info(f"Branch A gap-fill: '{clean}' status set to {status_override} ({reason})")
-                        if type_override:
-                            accused_type_extra = type_override
-                            logging.info(f"Branch A gap-fill: '{clean}' type set to {type_override} ({reason})")
+                    # Confessional-only accused: named in another accused's confession as
+                    # source/supplier but not physically present at the scene.
+                    # Include them but append (Suspect) so downstream can distinguish.
+                    if _is_confessional_only_accused(clean, facts_text):
+                        base_type = accused_type_extra or "supplier"
+                        if not base_type.endswith(" (Suspect)"):
+                            accused_type_extra = base_type + " (Suspect)"
+                        logging.info(f"Branch A gap-fill: '{clean}' tagged as confessional-only suspect")
 
                     gender_extra = detect_gender(facts_text, clean, gender_extra)
                     status_extra = resolve_status_for_insert(None, facts_text, clean)
@@ -1700,7 +1852,6 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                         ] if v is not None
                     }
                     branch_records.append(extra_row)
-                    insert_accused_facts(conn, extra_row)
                     count += 1
     except Exception as gap_err:
         logging.warning(f"Branch A gap-fill failed for Crime {crime_id}: {gap_err}", exc_info=True)
@@ -1719,17 +1870,22 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id):
 # Branch B — ALL person_id IS NULL. Full LLM + pair accused_id from DB.
 # ---------------------------------------------------------------------------
 
-def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
-    """Full LLM pipeline + accused_id recovery from DB by code matching."""
+def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, llm_extractions):
+    """
+    Full LLM pipeline + accused_id recovery from DB by code matching.
+
+    Args:
+        llm_extractions: Pre-extracted accused info from LLM (already queued and processed)
+    """
     logging.info(
         f"Branch B: crime {crime_id} has {len(db_accused)} stub accused rows "
-        f"(person_id IS NULL). Running full LLM extraction."
+        f"(person_id IS NULL)."
     )
     _cp_cache: dict = {}
     _ac_cache: dict = {}
     _dedup_cache: dict = {}
 
-    extractions = extract_accused_info(facts_text)
+    extractions = llm_extractions
 
     if extractions is None:
         logging.error(f"Branch B: LLM extraction failed for Crime {crime_id}.")
@@ -1821,7 +1977,6 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
             data['etl_run_id'] = run_id
 
             branch_records.append(data)
-            insert_accused_facts(conn, data)
             count += 1
 
     # ── Branch B gap-fill: DB stubs LLM didn't extract ──────────────────────
@@ -1959,7 +2114,6 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
                     'etl_run_id'           : run_id,
                 }
                 branch_records.append(stub_row)
-                insert_accused_facts(conn, stub_row)
                 count += 1
 
         # Gap-fill wrote real accused — delete stale NO_ACCUSED_IN_TEXT sentinel
@@ -1993,9 +2147,14 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id):
 # Branch C — No accused rows in DB. Full LLM only.
 # ---------------------------------------------------------------------------
 
-def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
-    """Original full LLM flow. No DB reference at all."""
-    extractions = extract_accused_info(facts_text)
+def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id, llm_extractions):
+    """
+    Original full LLM flow. No DB reference at all.
+
+    Args:
+        llm_extractions: Pre-extracted accused info from LLM (already queued and processed)
+    """
+    extractions = llm_extractions
 
     if extractions is None:
         logging.error(f"Branch C: Extraction failed for Crime {crime_id}.")
@@ -2069,7 +2228,6 @@ def _process_branch_c(conn, crime_id, ps_code, facts_text, run_id):
             data['dedup_review_flag'] = dedup_review_flag
 
             branch_records.append(data)
-            insert_accused_facts(conn, data)
             count += 1
 
     dedup_tiers = {}

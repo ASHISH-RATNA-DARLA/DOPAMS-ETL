@@ -46,6 +46,7 @@ spacy>=3.7.2
 fuzzywuzzy
 python-Levenshtein
 dedupe>=2.0.0
+metaphone>=0.6
 
 # Utilities
 tqdm>=4.66.1
