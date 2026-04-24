@@ -560,15 +560,18 @@ def _extract_person_codes(drug_data):
                 logger.debug(f"[DrugAttrib] Consolidated sources mention different accused; using primary: {first_codes}")
         return codes
 
-    # Fallback: single source_sentence (non-consolidated)
-    source_sentence = str(meta.get('source_sentence') or '')
-    codes = _extract_codes_from_source(source_sentence)
-
-    # Also check accused_ref directly (usually already clean from LLM)
+    # Check accused_ref directly (usually already clean from LLM)
     accused_ref = meta.get('accused_ref')
     if accused_ref:
         normalized = _norm_person_code(accused_ref)
-        if normalized: codes.add(normalized)
+        if normalized:
+            # If the LLM explicitly provided an accused_ref, we ONLY return it!
+            # We shouldn't blindly merge it with ALL codes found in the source sentence!
+            return {normalized}
+
+    # Fallback ONLY if accused_ref is null: parse single source_sentence (non-consolidated)
+    source_sentence = str(meta.get('source_sentence') or '')
+    codes = _extract_codes_from_source(source_sentence)
 
     return codes
 

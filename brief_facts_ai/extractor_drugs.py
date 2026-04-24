@@ -613,16 +613,23 @@ def _normalize_accused_ref(value: Optional[str]) -> Optional[str]:
 def _extract_dedup_accused_ref(drug: DrugExtraction) -> Optional[str]:
     meta = drug.extraction_metadata if isinstance(drug.extraction_metadata, dict) else {}
 
-    accused_ref = _normalize_accused_ref(meta.get("accused_ref"))
-    if accused_ref:
-        return accused_ref
-
     source_sentence = str(meta.get("source_sentence") or "")
     matches = []
     for match in _ACCUSED_REF_PATTERN.finditer(source_sentence):
         normalized = f"A-{int(match.group(1))}"
         if normalized not in matches:
             matches.append(normalized)
+
+    # SAFETY NET: If the source sentence explicitly mentions MULTIPLE accused,
+    # it is highly likely a joint seizure (e.g., "Seized 1kg from A1 & A2").
+    # Even if the LLM explicitly assigned accused_ref, we ignore it and return None
+    # so that duplicate rows for the same joint seizure are merged together by quantity.
+    if len(matches) > 1:
+        return None
+
+    accused_ref = _normalize_accused_ref(meta.get("accused_ref"))
+    if accused_ref:
+        return accused_ref
 
     if len(matches) == 1:
         return matches[0]
@@ -865,7 +872,7 @@ Rules:
 4. Per-accused rows are NOT duplicates. Example: 6 accused each having 50g Ganja from their own possession -> 6 rows.
 5. Skip customers or buyers mentioned only in confession history when nothing is seized from them.
 6. Critical edge case: if a person is called a buyer/customer but is later apprehended and contraband is seized from that person's possession, that person IS a valid seizure row and must be extracted.
-6b. Joint possession: If A1 and CCL jointly purchased/transported drugs and they were seized as a group, create ONE row with accused_ref=null (collective seizure). DO NOT create separate rows for each person or duplicate the same quantity for multiple accused. Do NOT include the downstream buyer/seller in the seizure row (they are NOT part of the seizure event).
+6b. **JOINT/SHARED POSSESSION (CRITICAL)**: If the text states a single quantity was seized jointly from multiple people (e.g. "Seized 1.875 kg from A1 & A2"), you MUST create exactly ONE single row for that quantity. Set accused_ref=null. DO NOT create one row for A1 and another row for A2. Creating multiple rows for the same jointly seized packet will duplicate the drugs! Do NOT include the downstream buyer/seller in the seizure row (they are NOT part of the seizure event).
 7. Extract only the quantity physically seized at arrest. Skip historical purchase quantities, already-sold quantities, samples S1/S2, and remaining property breakdowns like P1 when they are subsets of the seized total.
     raw_quantity/raw_unit must describe the drug itself, not a container or paraphernalia measurement (for example, do NOT use bottle/ml from a Thums Up bottle, kit volume, or other non-drug container size).
 7b. If no exact total weight is given, but a packet count is stated (e.g. "13 packets", even if a rough range like "each weighing 3-4 grams" is mentioned), extract the count as raw_quantity, set raw_unit="packets", and set drug_form="count". Do not attempt to calculate or multiply ranges.
