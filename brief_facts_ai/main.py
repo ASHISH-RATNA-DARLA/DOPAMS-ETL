@@ -2230,10 +2230,10 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                 status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
 
                 if status_s == 'Absconding' or _is_confessional_only_accused(stub_name, facts_text):
-                    base_role = role_in_crime_s or "peddler"
+                    base_role = role_desc or "peddler"
                     if not base_role.endswith(" (Suspect)"):
-                        role_in_crime_s = base_role + " (Suspect)"
-                        
+                        role_desc = base_role + " (Suspect)"
+
                 gender_s  = detect_gender(facts_text, stub_name, gender_s)
                 is_ccl_s  = bool(stub_is_ccl) or detect_ccl_from_age(age_s) or detect_ccl(stub_name, role_desc or '')
 
