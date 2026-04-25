@@ -172,7 +172,7 @@ _llm_timeout_workers = max(
     int(
         os.getenv(
             "LLM_TIMEOUT_EXECUTOR_WORKERS",
-            os.getenv("PARALLEL_LLM_WORKERS", "4"),
+            str(int(os.getenv("PARALLEL_LLM_WORKERS", "4")) * 4),
         )
     ),
 )

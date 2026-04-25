@@ -1339,7 +1339,7 @@ def process_crimes_parallel(crimes):
     max_workers = config_obj.parallel_llm_workers
     batch_size_limit = config_obj.batch_size
     batch_commit_size = config_obj.batch_commit_size
-    llm_task_wait_timeout_sec = float(os.environ.get('LLM_TASK_WAIT_TIMEOUT_SEC', '120'))
+    llm_task_wait_timeout_sec = float(os.environ.get('LLM_TASK_WAIT_TIMEOUT_SEC', '900'))
     logging.info(f"🚀 Batch processing with {max_workers} LLM workers, batch_size={batch_size_limit}")
 
     # Fetch drug KB once — shared read-only across all worker threads.
