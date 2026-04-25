@@ -1913,14 +1913,8 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                             key_details_extra = shared_role_key_details
 
                     synth_id = _synthetic_accused_id(crime_id, clean, None)
-                    accused_type_extra = classify_accused_type(
-                        role_desc + (" " + key_details_extra if key_details_extra else "")
-                    ) if role_desc else None
-                    if accused_type_extra == "unknown":
-                        accused_type_extra = None
-
                     status_extra = resolve_status_for_insert(None, facts_text, clean)
-                    
+
                     # Confessional-only or Absconding accused:
                     # Include them but append (Suspect) so downstream can distinguish.
                     if status_extra == 'Absconding' or _is_confessional_only_accused(clean, facts_text):
@@ -1928,6 +1922,13 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                         if not base_role.endswith(" (Suspect)"):
                             role_desc = base_role + " (Suspect)"
                         logging.info(f"Branch A gap-fill: '{clean}' tagged as suspect (status: {status_extra})")
+
+                    # Classify AFTER (Suspect) tag so the type reflects the final role
+                    accused_type_extra = classify_accused_type(
+                        role_desc + (" " + key_details_extra if key_details_extra else "")
+                    ) if role_desc else None
+                    if accused_type_extra == "unknown":
+                        accused_type_extra = None
 
                     _tmp_identity_extra = {
                         'address': address_extra,
@@ -2221,18 +2222,19 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                     if not key_d and shared_b_kd:
                         key_d = shared_b_kd
 
-                accused_type_s = classify_accused_type(
-                    role_desc + (" " + key_d if key_d else "")
-                ) if role_desc else None
-                if accused_type_s == 'unknown':
-                    accused_type_s = None
-
                 status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
 
                 if status_s == 'Absconding' or _is_confessional_only_accused(stub_name, facts_text):
                     base_role = role_desc or "peddler"
                     if not base_role.endswith(" (Suspect)"):
                         role_desc = base_role + " (Suspect)"
+
+                # Classify AFTER (Suspect) tag so the type reflects the final role
+                accused_type_s = classify_accused_type(
+                    role_desc + (" " + key_d if key_d else "")
+                ) if role_desc else None
+                if accused_type_s == 'unknown':
+                    accused_type_s = None
 
                 gender_s  = detect_gender(facts_text, stub_name, gender_s)
                 is_ccl_s  = bool(stub_is_ccl) or detect_ccl_from_age(age_s) or detect_ccl(stub_name, role_desc or '')
