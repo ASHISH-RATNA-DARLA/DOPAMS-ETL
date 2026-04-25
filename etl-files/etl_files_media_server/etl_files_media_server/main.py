@@ -475,7 +475,7 @@ class FilesMediaServerETL:
             conditions.append("(download_attempts IS NULL OR download_attempts < %s)")
             query_params.append(MAX_TOTAL_ATTEMPTS)
             if not RETRY_PERMANENT_ERRORS:
-                conditions.append("(download_error IS NULL OR download_error NOT LIKE 'PERMANENT:%')")
+                conditions.append("(download_error IS NULL OR download_error NOT LIKE 'PERMANENT:%%')")
 
         logger.info(f"📥 Fetching file metadata from table: {FILES_TABLE}")
         if self.repair:
@@ -899,6 +899,13 @@ class FilesMediaServerETL:
             if not self.ensure_download_tracking_columns():
                 logger.error("Failed to set up download tracking columns. Exiting.")
                 return False
+
+            logger.info("🔄 Running database vs filesystem sync before starting downloads...")
+            try:
+                from .sync_files_state import sync
+                sync()
+            except Exception as e:
+                logger.error(f"⚠️  Sync script encountered an error: {e}. Proceeding anyway.")
 
             last_dates_per_source = self.get_last_processed_date_per_source_type()
             if last_dates_per_source:
