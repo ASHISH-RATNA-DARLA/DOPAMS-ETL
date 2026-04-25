@@ -576,13 +576,35 @@ def _extract_person_codes(drug_data):
     return codes
 
 
+_JOINT_RANGE_RE_DB = re.compile(
+    r'\bA\s*[-.]?\s*\d+\s+to\s+A\s*[-.]?\s*\d+\b',
+    re.IGNORECASE,
+)
+
 def _extract_codes_from_source(source_sentence: str) -> set:
     """Extract person codes from a single source sentence, filtering downstream references.
 
     Returns set of normalized A-codes (e.g., {'A-1', 'A-3'}).
+
+    JOINT-RANGE GUARD: If the sentence contains a pattern like \"possession of A2 to A4\"
+    or \"from A2 to A4\" (a range of accused in joint/shared possession), we return an
+    EMPTY set. This signals write_drugs_by_accused_in_memory to fall through to
+    FALLBACK_A1 so the collective seizure is stored exactly ONCE on the primary accused.
+    Without this, the codes A-2 and A-4 would both be extracted, creating a
+    COLLECTIVE_TOTAL entry on A2 that duplicates whatever the deterministic extractor
+    already produced for A4.
     """
     codes = set()
     source_sentence = str(source_sentence or '')
+
+    # Early exit for joint-range collective seizures
+    if _JOINT_RANGE_RE_DB.search(source_sentence):
+        logger.debug(
+            f"[DrugAttrib] Joint-range pattern detected in source sentence — "
+            f"returning empty codes (collective seizure, no per-person split): "
+            f"{source_sentence[:120]!r}"
+        )
+        return codes  # empty → falls through to FALLBACK_A1
 
     # Define downstream transaction keywords - codes after these shouldn't be attributed
     downstream_keywords = r'\b(?:sell|sold|selling|buyer|customer|purchase|bought|received|consume|consumed|consumption)\s+(?:to|by|from|by|of)?\s*'
@@ -770,12 +792,17 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
         No A-code in source_sentence but accused name present.
         e.g. "seized 100g from Raju" → matched to Raju's row.
 
-    Case 3 — COLLECTIVE_TOTAL:
-        source_sentence names 2+ accused → first mentioned only, no duplication.
+    Case 3 — COLLECTIVE_TOTAL → A1 (primary accused):
+        source_sentence names 2+ accused codes, OR names accused in a range
+        ("A2 to A4"), meaning a joint/shared seizure with NO per-person split.
+        Always stored on primary_row (A1 / first accused in roster).
+        Rule: If no explicit individual attribution → A1.
         e.g. "A1, A2, A3 caught with 520 KG ganja total" → stored on A1.
+        e.g. "seized 265g from possession of A2 to A4" → stored on A1.
 
     Case 4 — UNATTRIBUTED_FALLBACK_A1:
         No code or name match → primary (A1/first) accused only.
+        Same destination as Case 3 — reinforces the A1 rule.
 
     Case 5 — NO_DRUGS_DETECTED:
         Marker stamped on ALL accused so every row has a drugs[].
@@ -855,15 +882,17 @@ def write_drugs_by_accused_in_memory(bfai_rows, drug_data_list):
             _add_or_consolidate_drug(matched_rows[0], drug_data, 'INDIVIDUAL', drug_label, qty_label)
 
         elif len(matched_rows) > 1:
-            # ── Case 3: collective — same drug/seizure shared by multiple accused ──
-            # One entry on the first accused; no ghost copies on the rest.
-            holder_code = matched_rows[0].get('person_code') or '?'
+            # ── Case 3: collective — joint seizure shared by multiple accused ──
+            # No per-person split → always assign to primary_row (A1 / first in roster).
+            # Rule: "No explicit individual attribution → A1" applies to both
+            #       unattributed (Case 4) and multi-accused collective (Case 3).
+            holder_code = primary_row.get('person_code') or 'A1'
             all_codes   = [r.get('person_code') or r.get('full_name') or '?' for r in matched_rows]
             logger.info(
-                f"[DrugAttrib] COLLECTIVE_TOTAL: {drug_label} ({qty_label}) "
-                f"mentioned with {all_codes} → stored on {holder_code} only"
+                f"[DrugAttrib] COLLECTIVE_TOTAL→A1: {drug_label} ({qty_label}) "
+                f"joint seizure mentioned with {all_codes} → stored on {holder_code} (primary)"
             )
-            _add_or_consolidate_drug(matched_rows[0], drug_data, 'COLLECTIVE_TOTAL', drug_label, qty_label)
+            _add_or_consolidate_drug(primary_row, drug_data, 'COLLECTIVE_TOTAL', drug_label, qty_label)
 
         else:
             # ── Case 4A: unattributed collective consumption — assign to all accused ──

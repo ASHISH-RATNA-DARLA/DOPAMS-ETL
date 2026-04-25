@@ -341,6 +341,12 @@ _SEGMENT_QUANTITY_PATTERN = re.compile(
     r'(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams|grm|grms|mg|ml|l|ltr|litre|litres)\b',
     flags=re.IGNORECASE,
 )
+# Detects joint-range patterns like "possession of A2 to A4", "from A2 to A4",
+# "seized from A2 to A4" which indicate a COLLECTIVE seizure — not per-accused.
+_JOINT_ACCUSED_RANGE_RE = re.compile(
+    r'\bA\s*[-.]?\s*\d+\s+to\s+A\s*[-.]?\s*\d+\b',
+    re.IGNORECASE,
+)
 _PACKET_QUANTITY_PATTERN = re.compile(
     r'(?:(?P<idx>\d+)|(?P<exhibit_prefix>M\s*\d+)|(?P<word_idx>first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th))?\s*[\)\.:\-]?\s*(?:packet|exhibit|sachet|bundle)?\s*(?:was|of|weighing|wg)?\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|kgs|kilograms?|g|gm|gms|gram|grams|grm|grms|mg|ml|l|ltr|litre|litres|packet|packets|piece|pieces|cover|covers|bundle|bundles)\b(?:\s*[\(\[]?(?:marked\s+as\s+|marked\s+)?(?P<exhibit_suffix>M\s*\d+)[\)\]]?)?',
     flags=re.IGNORECASE,
@@ -504,6 +510,21 @@ def _extract_segmented_accused_rows(text: str, kb_lookup: Dict[str, str]) -> Lis
 
         qty_match = _SEGMENT_QUANTITY_PATTERN.search(segment)
         if not qty_match:
+            continue
+
+        # ── Joint-range guard ──────────────────────────────────────────────────
+        # If the segment contains a range pattern like "possession of A2 to A4"
+        # or "from A2 to A4", the quantity belongs to a COLLECTIVE joint seizure.
+        # Do NOT emit individual rows from it — the LLM/db.py COLLECTIVE_TOTAL
+        # path will handle it as a single entry on the primary accused.
+        # Check the window around the quantity match (±300 chars) for the range.
+        qty_start = qty_match.start()
+        range_window = segment[max(0, qty_start - 300): qty_start + 300]
+        if _JOINT_ACCUSED_RANGE_RE.search(range_window):
+            logger.debug(
+                f"[SegExtract] Skipped segment for accused A-{match.group(1)}: "
+                f"quantity found in joint-range context ({range_window[:120].strip()!r})"
+            )
             continue
 
         drug_raw, drug_standard = _best_drug_keyword_match(segment, kb_lookup)
@@ -1033,6 +1054,9 @@ R31:confession-seizure-attribution|"On the strength of confession of A-N, seized
      → Row 2: accused_ref=A-3, qty=44.80, unit=grams, worth_scope=drug_total, seizure_worth=2250
      → Do NOT create a third row for the 90g total — it is the sum of the above two.
    - Total worth ("W/Rs.") applies to ALL per-accused rows with worth_scope=drug_total.
+R32:joint-range-collective|If text describes a seizure using an ACCUSED RANGE like \"seized from A2 to A4\" or \"possession of A2 to A4\" (meaning \"from accused A2 through A4 jointly\") with NO individual per-person quantity split → produce EXACTLY 1 row with that total quantity and accused_ref=null. Do NOT produce separate rows for A2, A3, A4.
+   - Example: \"seized 265gms Dry Ganja from their possession of A2 to A4\" → 1 row, raw_quantity=265, raw_unit=\"gms\", accused_ref=null
+   - Contrast: \"seized 100g from A2, 80g from A3, 85g from A4\" (explicit per-person) → 3 rows (R31 style)
 
 ### Example 7 — confession-based per-accused seizure with total worth (R31)
 Input: "On the strength of the confession of A-2 seized 45.20 grams dry Ganja marked as M-1. On the strength of the confession of A-3 seized 44.80 grams dry Ganja marked as M-3. Total GANJA 90 grams W/Rs. 2250/-"
@@ -1041,6 +1065,13 @@ Input: "On the strength of the confession of A-2 seized 45.20 grams dry Ganja ma
   {"raw_drug_name":"Dry Ganja","raw_quantity":44.80,"raw_unit":"grams","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":2250.0,"worth_scope":"drug_total","is_commercial":false,"confidence_score":95,"extraction_metadata":{"source_sentence":"On the strength of the confession of A-3 seized 44.80 grams dry Ganja marked as M-3","accused_ref":"A-3"}}
 ]}
 NOTE: Do NOT create a third row for 90g total — it equals A-2 + A-3 quantities. Worth 2250 is drug_total distributed by post-processing.
+
+### Example 8 — joint accused-range collective seizure (R32)
+Input: "while they carrying Ganja in a plastic cover, conducted confession and seizure panchanama before the mediators and seized 265grms Dry Ganja, 2-two wheelers, 3 cell phones from their possession of A2 to A4"
+{"drugs":[
+  {"raw_drug_name":"Dry Ganja","raw_quantity":265.0,"raw_unit":"grms","primary_drug_name":"Ganja","drug_form":"solid","seizure_worth":0.0,"worth_scope":"individual","is_commercial":false,"confidence_score":92,"extraction_metadata":{"source_sentence":"seized 265grms Dry Ganja from their possession of A2 to A4","accused_ref":null}}
+]}
+NOTE: "A2 to A4" is an accused RANGE (joint possession) — produce 1 collective row, accused_ref=null. Two-wheelers and phones are NOT extracted (R11/R20).
 
 Input text:
 {text}
