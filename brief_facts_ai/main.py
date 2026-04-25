@@ -1731,6 +1731,22 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
         # ---- Status: raw DB value first, keyword fallback ----
         status = resolve_status_for_insert(row.get('accused_status'), facts_text, full_name or accused_code)
 
+        # ── (Suspect) tag — confessional-only or absconding accused ──────────
+        # If this DB accused appears ONLY in another accused's confessional
+        # narrative (e.g., supplier named as "purchased from A1 Vamshi") and
+        # was NOT physically apprehended at the crime scene, tag role as
+        # "<role> (Suspect)" so downstream analytics can distinguish.
+        # Same rule as Branch A gap-fill / Branch B / Branch C.
+        if status == 'absconding' or _is_confessional_only_accused(full_name or accused_code, facts_text):
+            if role_in_crime and not role_in_crime.endswith(' (Suspect)'):
+                role_in_crime = role_in_crime + ' (Suspect)'
+            elif not role_in_crime:
+                role_in_crime = 'Supplier (Suspect)'
+            logging.info(
+                f"Branch A: '{full_name or accused_code}' tagged (Suspect) "
+                f"— confessional-only/absconding (status={status})"
+            )
+
         # ---- Classification ----
         if role_in_crime:
             classification_text = role_in_crime + (" " + key_details if key_details else "")

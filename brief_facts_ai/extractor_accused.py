@@ -68,15 +68,28 @@ _POLICE_TITLE_RE = re.compile(
 
 def _is_confessional_only_accused(name: str, text: str) -> bool:
     """
-    Returns True when a name appears ONLY in another accused's confessional narrative
-    as a source/supplier — never as a directly apprehended person at the scene.
+    Returns True when a person appears ONLY in a confessional/investigative narrative
+    as a named source/supplier/find-out — never as a directly apprehended person at scene.
 
-    Example: "he purchased ganja from his known person Amjad" → Amjad is confessional-only.
-    These accused are included in extraction but tagged accused_type + " (Suspect)".
+    CASES HANDLED:
+    1. Classic confessional source:
+       "he purchased ganja from his known person Amjad" → Amjad = (Suspect)
+    2. Officer find-out / investigation discovery:
+       "on the strength of confession of A2, it came to light that A1 Vamshi
+        r/o Palakendram was the supplier" → Vamshi = (Suspect)
+    3. A-code + name referenced in confessional body:
+       "purchased ganja from accused A1 Vamshi" → Vamshi = (Suspect)
+    4. Named in confession but never apprehended:
+       "during further investigation found that one Raju s/o Suresh supplied" → Raju = (Suspect)
+    5. Explicit scene-absence:
+       "A1 is yet to be arrested" / "A1 not found at scene" → A1 = (Suspect)
 
-    Strategy: uses DIRECTIONAL windows so that Om Yadav's confessional panchanama
-    header ("panchanama of Om Yadav ...") does not bleed into the confession body
-    where Amjad is mentioned 120+ chars later.
+    NOT TRIGGERED by (correctly returns False):
+    - A person introduced as apprehended at the scene
+    - A person whose panchanama / confessional statement is taken (they're present)
+    - A person whose name + accused_code appears at the START of the FIR introduction block
+
+    Strategy: DIRECTIONAL windows prevent panchanama-header bleeding into confession body.
     """
     if not name or not text:
         return False
@@ -87,10 +100,9 @@ def _is_confessional_only_accused(name: str, text: str) -> bool:
     if lowered.find(lowered_name) < 0:
         return False
 
-    # --- Direct-presence markers (tight: name must appear AFTER marker within 90 chars) ---
-    # These patterns introduce the accused: "panchanama of [NAME]", "his name as [NAME]"
-    # A 90-char right-window prevents Om Yadav's panchanama from reaching Amjad
-    # (who appears 120+ chars later in the confession body).
+    # ── Step 1: Hard-pass — any direct-presence marker near name → NOT confessional-only ──
+    # A tight right-window (90 chars) after intro markers prevents panchanama header
+    # for accused Om Yadav from reaching supplier Amjad mentioned 120 chars later.
     intro_markers = [
         'revealed his name as', 'revealed her name as',
         'disclosed his name as', 'disclosed her name as',
@@ -100,6 +112,7 @@ def _is_confessional_only_accused(name: str, text: str) -> bool:
         'seizure panchanama of the accused',
         'panchanama of the accused',
         'confessional statement of',
+        'confession of the accused',
     ]
     for marker in intro_markers:
         pos = lowered.find(marker)
@@ -109,23 +122,66 @@ def _is_confessional_only_accused(name: str, text: str) -> bool:
                 return False
             pos = lowered.find(marker, pos + 1)
 
-    # Broader apprehension markers — name must be within ±80 chars
+    # Broad apprehension markers — name must be within ±100 chars
     apprehension_markers = [
         'apprehended', 'arrested', 'caught', 'nabbed', 'detained',
         'taken into custody', 'taken in to the custody', 'taken into the custody',
         'remanded', 'produced before court', 'surrendered',
         'introduced himself', 'introduced herself',
+        'was found with', 'was seized from', 'seized from his possession',
+        'seized from her possession', 'conducting search', 'during search',
     ]
     for marker in apprehension_markers:
         pos = lowered.find(marker)
         while pos >= 0:
-            window = lowered[max(0, pos - 80): pos + len(marker) + 80]
+            window = lowered[max(0, pos - 100): pos + len(marker) + 100]
             if lowered_name in window:
                 return False
             pos = lowered.find(marker, pos + 1)
 
-    # --- Confessional-source markers: name must appear AFTER marker within 120 chars ---
-    # "known person by name Amjad", "purchased from Amjad", etc.
+    # ── Step 2: Scene-absence markers — explicitly not present → (Suspect) ──
+    # If the name appears within 120 chars of "yet to be arrested", "not found", etc.
+    absence_markers = [
+        'yet to be arrested', 'not yet arrested', 'not arrested',
+        'not found at', 'not present at', 'not traceable', 'could not be traced',
+        'absconding', 'evading arrest', 'on the run', 'at large', 'fugitive',
+    ]
+    for marker in absence_markers:
+        pos = lowered.find(marker)
+        while pos >= 0:
+            window = lowered[max(0, pos - 120): pos + len(marker) + 120]
+            if lowered_name in window:
+                return True
+            pos = lowered.find(marker, pos + 1)
+
+    # ── Step 3: Officer / investigation find-out markers ──
+    # "on the strength of confession … came to know that <name>"
+    # "during investigation it was found that <name> supplied"
+    # "further investigation revealed that <name>"
+    findout_markers = [
+        ('on the strength of confession', 200),
+        ('on the strength of the confession', 200),
+        ('on further investigation', 200),
+        ('during further investigation', 200),
+        ('investigation revealed that', 160),
+        ('investigation disclosed that', 160),
+        ('came to know that', 120),
+        ('came to light that', 120),
+        ('it transpired that', 120),
+        ('it was found that', 120),
+        ('it was revealed that', 120),
+        ('it came to light that', 120),
+    ]
+    for marker, window_size in findout_markers:
+        pos = lowered.find(marker)
+        while pos >= 0:
+            after = lowered[pos: pos + len(marker) + window_size]
+            if lowered_name in after:
+                return True
+            pos = lowered.find(marker, pos + 1)
+
+    # ── Step 4: Forward confessional-source markers (name appears AFTER marker) ──
+    # "purchased from <name>", "supplied by <name>", "his known person <name>", etc.
     forward_confessional = [
         ('known person by name', 120),
         ('known person named', 100),
@@ -141,11 +197,22 @@ def _is_confessional_only_accused(name: str, text: str) -> bool:
         ('bought from', 80),
         ('received from', 80),
         ('sourced from', 80),
+        ('got from', 80),
+        ('collected from', 80),
         ('supplied by', 80),
+        ('given by', 80),
         ('from whom', 80),
         ('his known', 120),
         ('her known', 120),
         ('their known', 120),
+        # "purchased ganja from accused A1 Vamshi"
+        ('from accused', 80),
+        ('from the accused', 80),
+        # officer-discovered: "found that one Raju"
+        ('found that one', 120),
+        ('found that a person', 120),
+        ('disclosed that one', 120),
+        ('revealed that one', 120),
     ]
     for marker, window_size in forward_confessional:
         pos = lowered.find(marker)
@@ -155,14 +222,21 @@ def _is_confessional_only_accused(name: str, text: str) -> bool:
                 return True
             pos = lowered.find(marker, pos + 1)
 
-    # Name appears BEFORE reverse markers: "Amjad who is the native of..."
+    # ── Step 5: Reverse confessional markers (name appears BEFORE marker) ──
+    # "Amjad who is the native of …", "Vamshi r/o Palakendram who supplied"
     reverse_confessional = [
-        'who is the native of', 'who is a native of', 'hails from',
+        ('who is the native of', 80),
+        ('who is a native of', 80),
+        ('hails from', 80),
+        ('who supplied', 80),
+        ('who used to supply', 80),
+        ('who is the supplier', 80),
+        ('who sold', 80),
     ]
-    for marker in reverse_confessional:
+    for marker, window_size in reverse_confessional:
         pos = lowered.find(marker)
         while pos >= 0:
-            before = lowered[max(0, pos - 80): pos]
+            before = lowered[max(0, pos - window_size): pos]
             if lowered_name in before:
                 return True
             pos = lowered.find(marker, pos + 1)
@@ -323,6 +397,10 @@ From the input FIR / Brief Facts text:
    - Persons apprehended, arrested, confessed, or absconding
    - Persons referred as A1, A2, A-1, A-2, accused, suspect, JCL/CCL
    - Suppliers / Transporters / Producers named in confessions, even if not arrested
+   - Persons named in officer investigation find-outs:
+     * "during investigation it was found that one Raju supplied ganja" → include Raju
+     * "on the strength of confession it came to light that A1 Vamshi was the supplier" → include Vamshi
+     * "they purchased from A1.Vamshi r/o Palakendram" → include Vamshi
 
 =====================================
 STRICT EXCLUSIONS — DO NOT EXTRACT ANY OF THESE
@@ -343,7 +421,7 @@ PANCHAS / MEDIATORS / WITNESSES:
   Panchas, Panchayathdars, Mediators, independent witnesses, mahazar witnesses,
   any person described as "1) Sri..." / "2) Sri..." in a numbered witness list
 
-COMPLAINANT’S SUPPORT STAFF:
+COMPLAINANT'S SUPPORT STAFF:
   Clues team, photographer, videographer, dog squad, translator / interpreter,
   weighing shop owner (called only to weigh seized material)
 
