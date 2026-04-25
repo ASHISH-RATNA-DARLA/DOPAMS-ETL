@@ -13,7 +13,7 @@ import sys
 
 # Ensure the repo root (where env_utils.py lives) is on sys.path so this
 # module can be imported regardless of the working directory.
-_REPO_ROOT = Path(__file__).resolve().parents[0]  # sync_files_state.py -> etl-files/ -> repo root
+_REPO_ROOT = Path(__file__).resolve().parents[1]  # sync_files_state.py -> etl-files/ -> repo root
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
