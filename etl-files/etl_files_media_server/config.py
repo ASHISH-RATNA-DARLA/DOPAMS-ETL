@@ -1,5 +1,14 @@
 """Configuration file for DOPAMAS ETL Pipeline."""
 
+import sys
+from pathlib import Path
+
+# Ensure the repo root (where env_utils.py lives) is on sys.path so this
+# module can be imported regardless of the working directory.
+_REPO_ROOT = Path(__file__).resolve().parents[1]  # config.py -> etl_files_media_server/ -> etl-files/ -> repo root
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from env_utils import (
     get_bool_env,
     get_int_env,

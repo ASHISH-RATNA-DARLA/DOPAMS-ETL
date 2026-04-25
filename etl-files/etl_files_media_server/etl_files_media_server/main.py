@@ -50,6 +50,13 @@ from typing import Optional, Tuple
 import psycopg2
 import requests
 import colorlog
+
+# Ensure the repo root (where env_utils.py lives) is on sys.path so this
+# module can be imported regardless of the working directory.
+_REPO_ROOT = Path(__file__).resolve().parents[2]  # inner-pkg/ -> outer-pkg/ -> etl-files/ -> repo root
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from env_utils import first_env, get_bool_env, get_int_env
 
 # Allow running this file directly as a script as well as via `python -m`.
