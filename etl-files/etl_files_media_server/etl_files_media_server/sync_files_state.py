@@ -23,11 +23,13 @@ if str(PARENT_DIR) not in sys.path:
 from config import DB_CONFIG
 
 # Logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger("sync-files-state")
+if not logger.handlers:
+    logger.setLevel(logging.INFO)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(console_handler)
+    logger.propagate = False
 
 # Constants
 FILES_TABLE = os.getenv("FILES_TABLE", "files")

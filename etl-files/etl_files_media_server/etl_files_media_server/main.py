@@ -40,6 +40,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import random
 import logging
 import argparse
 import threading
@@ -79,9 +80,10 @@ FILES_TABLE = first_env("FILES_TABLE", default="files")
 # Base path on the Tomcat media server - ALWAYS read from env
 BASE_MEDIA_PATH = first_env("FILES_MEDIA_BASE_PATH", default="/mnt/shared-etl-files")
 
-# Files API rate limit: reduced to 5 requests per minute to avoid connection blocking
-FILES_API_MAX_RPM = 5
-SECONDS_PER_REQUEST = 60.0 / FILES_API_MAX_RPM  # 12.0 seconds
+# Files API rate limit - read from env so .env controls it without a code change.
+# Default 5 RPM → 12 s per request slot.
+FILES_API_MAX_RPM = get_int_env("FILES_API_MAX_RPM", 5)
+SECONDS_PER_REQUEST = 60.0 / max(1, FILES_API_MAX_RPM)
 
 # Hard cap to avoid retrying permanently bad file_ids forever across runs.
 MAX_TOTAL_ATTEMPTS = get_int_env("FILES_MAX_TOTAL_ATTEMPTS", 5)
@@ -562,14 +564,16 @@ class FilesMediaServerETL:
 
     def _wait_for_request_slot(self) -> None:
         """
-        Strict pacing: allow only one API request every SECONDS_PER_REQUEST.
+        Token-bucket rate limiter with jitter.
 
-        This is enforced before EVERY outbound HEAD/GET call so we do not rely
-        on loop speed or sequential execution behavior.
+        Enforced before EVERY outbound GET call. Jitter (±10 % of the slot
+        interval) prevents synchronized bursts when multiple sequential
+        requests finish close together.
         """
         with self._api_rate_lock:
+            jitter = random.uniform(-0.1, 0.1) * SECONDS_PER_REQUEST
             now = time.time()
-            wait_for = (self._last_api_request_ts + SECONDS_PER_REQUEST) - now
+            wait_for = (self._last_api_request_ts + SECONDS_PER_REQUEST + jitter) - now
             if wait_for > 0:
                 time.sleep(wait_for)
             self._last_api_request_ts = time.time()
@@ -578,51 +582,30 @@ class FilesMediaServerETL:
         """Build the files API URL for a given file_id."""
         return f"{FILES_BASE_URL}/{file_id}"
 
-    def check_file_exists(self, file_id: str) -> Tuple[bool, Optional[str]]:
+    def _find_existing_disk_path(self, file_id: str, source_type: str, source_field: str) -> Optional[str]:
         """
-        Check if file exists using HEAD request (faster than full download).
-        Returns: (exists: bool, error_message: Optional[str])
+        Check whether this file_id is already on disk WITHOUT hitting the API.
+
+        Returns the path string if the file exists and is non-empty, else None.
+        This replaces the old HEAD-request existence check, saving one API slot
+        per file (halving the effective request count for already-downloaded files).
         """
-        url = self.build_file_url(file_id)
-        headers = {"x-api-key": API_CONFIG["api_key"]}
-        
-        # Retry logic for existence check to handle transient connection errors
-        for attempt in range(1, 4):
-            try:
-                # Enforce strict request pacing for every HEAD call.
-                self._wait_for_request_slot()
-                response = requests.head(
-                    url,
-                    headers=headers,
-                    timeout=API_CONFIG.get("timeout", 30),
-                    allow_redirects=True
-                )
-
-                if response.status_code == 200:
-                    return (True, None)
-                elif response.status_code == 404:
-                    return (False, "PERMANENT: HTTP 404 Not Found - File does not exist")
-                elif response.status_code == 400:
-                    return (False, "PERMANENT: HTTP 400 Bad Request - File does not exist or invalid file_id")
-                elif response.status_code == 429:
-                    # Rate limited, wait and retry
-                    time.sleep(SECONDS_PER_REQUEST * attempt)
-                    continue
-                elif response.status_code in (401, 403):
-                    return (False, f"HTTP {response.status_code} - Authentication/Authorization failed")
-                else:
-                    return (True, None)
-
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-                if attempt < 3:
-                    logger.warning(f"⚠️  Existence check attempt {attempt} failed for {file_id}: {exc}. Retrying...")
-                    time.sleep(SECONDS_PER_REQUEST * attempt)
-                    continue
-                return (False, f"Connection error after {attempt} attempts: {str(exc)}")
-            except Exception as exc:
-                return (False, f"Error checking file: {str(exc)}")
-        
-        return (False, "Failed to check existence after retries")
+        subdir = map_destination_subdir(source_type, source_field)
+        if subdir is None:
+            return None
+        dest_dir = os.path.join(BASE_MEDIA_PATH, subdir)
+        if not os.path.isdir(dest_dir):
+            return None
+        prefix = f"{file_id}."
+        try:
+            for fname in os.listdir(dest_dir):
+                if fname.startswith(prefix):
+                    full = os.path.join(dest_dir, fname)
+                    if os.path.getsize(full) > 0:
+                        return full
+        except OSError:
+            pass
+        return None
 
     def download_single_file(
         self,
@@ -633,21 +616,19 @@ class FilesMediaServerETL:
         """
         Download a single file by its metadata.
 
-        FIX: download_attempts is now incremented ONCE per attempt at the start
-        of each retry loop iteration. It is NOT incremented again in
-        _mark_as_downloaded(). This gives an accurate count of real attempts made.
+        Disk-first existence check (no API HEAD request) → one GET per new file.
+        download_attempts is incremented once per real attempt loop iteration.
         """
-        logger.info(f"🔍 Checking if file exists: file_id={file_id}")
-        exists, check_error = self.check_file_exists(file_id)
-
-        if not exists and check_error:
-            logger.error(
-                f"❌ File does not exist for file_id={file_id}: {check_error} - "
-                f"marking as permanently failed and skipping"
+        # --- Fast path: already on disk (zero API cost) ---
+        existing_path = self._find_existing_disk_path(file_id, source_type, source_field)
+        if existing_path:
+            logger.info(
+                f"⏭️  File already exists on disk for file_id={file_id}: "
+                f"path={existing_path}, size={os.path.getsize(existing_path)} bytes (skipping download)"
             )
-            self._mark_as_downloaded(file_id, success=False, error_msg=check_error)
-            self.stats["failed"] += 1
-            return False
+            self._mark_as_downloaded(file_id, success=True)
+            self.stats["skipped_exists_on_disk"] += 1
+            return True
 
         url = self.build_file_url(file_id)
         headers = {"x-api-key": API_CONFIG["api_key"]}
@@ -781,17 +762,20 @@ class FilesMediaServerETL:
                             )
 
                         if attempt < max_retries:
+                            # Exponential backoff with jitter + honour Retry-After.
+                            # Base: 2^attempt * SECONDS_PER_REQUEST, jitter ±25 %.
                             retry_after_header = resp.headers.get("Retry-After")
                             if retry_after_header:
                                 try:
-                                    sleep_for = float(retry_after_header)
-                                    logger.info(f"⏳ API requested wait: {sleep_for:.1f}s (Retry-After header)")
+                                    base_sleep = float(retry_after_header)
+                                    logger.info(f"⏳ Honouring Retry-After: {base_sleep:.1f}s")
                                 except ValueError:
-                                    sleep_for = SECONDS_PER_REQUEST * attempt
+                                    base_sleep = (2 ** attempt) * SECONDS_PER_REQUEST
                             else:
-                                sleep_for = SECONDS_PER_REQUEST * attempt
-
-                            logger.info(f"⏳ Backing off for {sleep_for:.1f}s before retrying file_id={file_id}")
+                                base_sleep = (2 ** attempt) * SECONDS_PER_REQUEST
+                            jitter = random.uniform(-0.25, 0.25) * base_sleep
+                            sleep_for = max(SECONDS_PER_REQUEST, base_sleep + jitter)
+                            logger.info(f"⏳ Backing off for {sleep_for:.1f}s (exp+jitter) before retrying file_id={file_id}")
                             self._respect_rate_limit(start_time, extra_sleep=sleep_for)
                             continue
 
