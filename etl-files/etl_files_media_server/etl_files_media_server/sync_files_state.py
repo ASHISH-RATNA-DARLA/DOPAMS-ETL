@@ -12,6 +12,7 @@ import sys
 import logging
 import psycopg2
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to path for config imports
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -31,9 +32,12 @@ logger = logging.getLogger("sync-files-state")
 # Constants
 FILES_TABLE = os.getenv("FILES_TABLE", "files")
 BASE_MEDIA_PATH = os.getenv("FILES_MEDIA_BASE_PATH", "/mnt/shared-etl-files")
+WORKER_COUNT = int(os.getenv("SYNC_WORKER_COUNT", "32"))
 
-def get_expected_path(file_id, source_type, source_field):
-    """Matches the build_destination_path logic in main.py"""
+_DIR_CACHE = {}
+
+def is_file_missing(file_id, source_type, source_field):
+    """Checks if a file exists on disk efficiently using a directory cache."""
     mapping = {
         ("crime", "FIR_COPY"): "crimes",
         ("person", "IDENTITY_DETAILS"): "person/identitydetails",
@@ -46,19 +50,26 @@ def get_expected_path(file_id, source_type, source_field):
     
     sub_dir = mapping.get((source_type, source_field))
     if not sub_dir:
-        return None
+        return True # Missing
         
-    # We don't know the extension without the API, so we check for common ones
-    # or just check if any file with {file_id}.* exists in that directory
     base_dir = os.path.join(BASE_MEDIA_PATH, sub_dir)
     if not os.path.exists(base_dir):
-        return None
+        return True # Missing
         
-    for f in os.listdir(base_dir):
-        if f.startswith(f"{file_id}."):
-            return os.path.join(base_dir, f)
+    # Lazy load directory cache to prevent O(N^2) os.listdir() calls
+    if base_dir not in _DIR_CACHE:
+        try:
+            _DIR_CACHE[base_dir] = set(os.listdir(base_dir))
+        except Exception:
+            _DIR_CACHE[base_dir] = set()
             
-    return None
+    # Check if any file starts with {file_id}.
+    prefix = f"{file_id}."
+    for f in _DIR_CACHE[base_dir]:
+        if f.startswith(prefix):
+            return False # Found
+            
+    return True # Missing
 
 def sync():
     try:
@@ -70,37 +81,58 @@ def sync():
         rows = cur.fetchall()
         
         total = len(rows)
-        missing = 0
-        fixed = 0
+        if total == 0:
+            logger.info("✅ No downloaded files to verify.")
+            return
+
+        logger.info(f"📊 Found {total} records to verify on disk. Scanning with {WORKER_COUNT} workers...")
         
-        logger.info(f"📊 Found {total} records to verify on disk.")
-        
-        for file_id, source_type, source_field in rows:
-            path = get_expected_path(file_id, source_type, source_field)
+        missing_ids = []
+        processed = 0
+
+        with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
+            # Map futures to file_id
+            futures = {
+                executor.submit(is_file_missing, row[0], row[1], row[2]): row[0]
+                for row in rows
+            }
             
-            if not path or not os.path.exists(path):
-                missing += 1
-                logger.warning(f"❌ Missing file on disk: {file_id} ({source_type}/{source_field})")
+            for future in as_completed(futures):
+                file_id = futures[future]
+                processed += 1
                 
-                # Update DB to reflect reality
-                cur.execute(f"""
-                    UPDATE {FILES_TABLE} 
-                    SET is_downloaded = FALSE, 
-                        download_error = 'Sync: File missing on disk during audit'
-                    WHERE file_id = %s
-                """, (file_id,))
-                fixed += 1
+                if processed % 1000 == 0:
+                    logger.info(f"   ... verified {processed}/{total} files ...")
                 
-                if fixed % 100 == 0:
-                    conn.commit()
-                    logger.info(f"📝 Committed {fixed} fixes...")
+                try:
+                    is_missing = future.result()
+                    if is_missing:
+                        missing_ids.append(file_id)
+                except Exception as e:
+                    logger.error(f"Error checking file_id {file_id}: {e}")
         
-        conn.commit()
+        missing_count = len(missing_ids)
+        
+        if missing_count > 0:
+            logger.warning(f"❌ Found {missing_count} missing files on disk. Updating database in batch...")
+            
+            # Batch update the database for maximum performance
+            cur.execute(f"""
+                UPDATE {FILES_TABLE} 
+                SET is_downloaded = FALSE, 
+                    download_error = 'Sync: File missing on disk during audit'
+                WHERE file_id = ANY(%s)
+            """, (missing_ids,))
+            
+            conn.commit()
+            logger.info(f"📝 Database updated successfully for {missing_count} missing files.")
+        else:
+            logger.info("✅ All files are present on disk.")
+            
         logger.info("=" * 50)
         logger.info(f"✅ Audit Complete")
         logger.info(f"   - Total checked: {total}")
-        logger.info(f"   - Missing on disk: {missing}")
-        logger.info(f"   - Database updated: {fixed}")
+        logger.info(f"   - Missing on disk: {missing_count}")
         logger.info("=" * 50)
         
     except Exception as e:
