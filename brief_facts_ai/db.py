@@ -1073,6 +1073,11 @@ def bulk_upsert_brief_facts_ai(conn, items):
             if not item_data.get('accused_id') and role_in_crime in ['LLM_EXTRACTION_FAILED', 'NO_ACCUSED_IN_TEXT', 'NO_ACCUSED_DRUGS_ONLY']:
                  cur.execute("DELETE FROM public.brief_facts_ai WHERE crime_id = %s AND role_in_crime = %s AND accused_id IS NULL", (item_data.get('crime_id'), role_in_crime))
 
+            # Guard: etl_run_id must never be NULL (DB NOT NULL constraint).
+            # start_crime_processing_run can return None on failure; generate
+            # a fallback UUID so the upsert never violates the constraint.
+            etl_run_id = item_data.get('etl_run_id') or str(uuid.uuid4())
+
             cur.execute(query, (
                 bf_id,
                 item_data.get('crime_id'),
@@ -1101,7 +1106,7 @@ def bulk_upsert_brief_facts_ai(conn, items):
                 json.dumps(item_data.get('source_accused_fields', {})),
                 json.dumps(item_data.get('source_summary_fields', {})),
                 json.dumps(item_data.get('drugs')) if item_data.get('drugs') is not None else None,
-                item_data.get('etl_run_id'),
+                etl_run_id,
             ))
 
 

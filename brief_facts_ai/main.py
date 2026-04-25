@@ -1923,7 +1923,6 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                     
                     # Confessional-only or Absconding accused:
                     # Include them but append (Suspect) so downstream can distinguish.
-                    from extractor_accused import _is_confessional_only_accused
                     if status_extra == 'Absconding' or _is_confessional_only_accused(clean, facts_text):
                         base_role = role_desc or "peddler"
                         if not base_role.endswith(" (Suspect)"):
@@ -2114,8 +2113,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                 data['accused_type'] = None
             if data.get('status') == 'unknown':
                 data['status'] = None
-                
-            from extractor_accused import _is_confessional_only_accused
+
             if data.get('status') == 'Absconding' or _is_confessional_only_accused(accused.full_name, facts_text):
                 base_role = data.get('role_in_crime') or "peddler"
                 if not base_role.endswith(" (Suspect)"):
@@ -2230,7 +2228,7 @@ def _process_branch_b(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
                     accused_type_s = None
 
                 status_s  = resolve_status_for_insert(stub_status, facts_text, stub_name)
-                from extractor_accused import _is_confessional_only_accused
+
                 if status_s == 'Absconding' or _is_confessional_only_accused(stub_name, facts_text):
                     base_role = role_in_crime_s or "peddler"
                     if not base_role.endswith(" (Suspect)"):
