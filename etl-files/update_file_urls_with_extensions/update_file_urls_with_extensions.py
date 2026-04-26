@@ -340,7 +340,7 @@ def update_file_url_with_extension(record_id: str, file_url: str, extension: str
                 update_query = """
                     UPDATE files
                     SET file_url = %s
-                    WHERE id = %s AND file_url = %s
+                    WHERE id = %s::uuid AND file_url = %s
                     RETURNING id
                 """
                 cursor.execute(update_query, (new_url, record_id, file_url))
@@ -572,19 +572,27 @@ def main():
             sys.exit(1)
 
         # ===================================================================
-        # DISABLE TRIGGER (thread-safe)
+        # DISABLE TRIGGER (non-fatal)
         # ===================================================================
         logger.info("\nDisabling trigger: trigger_auto_generate_file_paths")
         with trigger_state_lock:
             try:
                 conn = connection_pool.get_connection()
                 with conn.cursor() as cursor:
-                    cursor.execute("ALTER TABLE files DISABLE TRIGGER trigger_auto_generate_file_paths")
-                    conn.commit()
-                    logger.info("✓ Trigger disabled")
+                    # Check if trigger exists first
+                    cursor.execute("""
+                        SELECT 1 FROM pg_trigger 
+                        WHERE tgrelid = 'files'::regclass 
+                        AND tgname = 'trigger_auto_generate_file_paths'
+                    """)
+                    if cursor.fetchone():
+                        cursor.execute("ALTER TABLE files DISABLE TRIGGER trigger_auto_generate_file_paths")
+                        conn.commit()
+                        logger.info("✓ Trigger disabled")
+                    else:
+                        logger.warning("⚠️  Trigger 'trigger_auto_generate_file_paths' not found on table 'files'. Skipping disable step.")
             except Exception as e:
-                logger.error(f"Failed to disable trigger: {e}")
-                raise
+                logger.warning(f"⚠️  Could not disable trigger: {e}. Proceeding anyway.")
 
         # ===================================================================
         # PROCESS SOURCE TYPES IN PARALLEL
@@ -610,7 +618,7 @@ def main():
                 raise
 
         # ===================================================================
-        # RE-ENABLE TRIGGER (thread-safe)
+        # RE-ENABLE TRIGGER (non-fatal)
         # ===================================================================
         logger.info("\nRe-enabling trigger: trigger_auto_generate_file_paths")
 
@@ -618,12 +626,20 @@ def main():
             try:
                 conn = connection_pool.get_connection()
                 with conn.cursor() as cursor:
-                    cursor.execute("ALTER TABLE files ENABLE TRIGGER trigger_auto_generate_file_paths")
-                    conn.commit()
-                    logger.info("✓ Trigger re-enabled")
+                    # Check if trigger exists first
+                    cursor.execute("""
+                        SELECT 1 FROM pg_trigger 
+                        WHERE tgrelid = 'files'::regclass 
+                        AND tgname = 'trigger_auto_generate_file_paths'
+                    """)
+                    if cursor.fetchone():
+                        cursor.execute("ALTER TABLE files ENABLE TRIGGER trigger_auto_generate_file_paths")
+                        conn.commit()
+                        logger.info("✓ Trigger re-enabled")
+                    else:
+                        logger.debug("Trigger not found, nothing to re-enable.")
             except Exception as e:
-                logger.error(f"Failed to re-enable trigger: {e}")
-                raise
+                logger.warning(f"⚠️  Could not re-enable trigger: {e}")
 
         # ===================================================================
         # PRINT SUMMARY
