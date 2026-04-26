@@ -697,13 +697,23 @@ def _dedupe_same_crime_accused_rows(rows):
     return kept, dropped
 
 
+_PLACEHOLDER_NAME_RE = re.compile(
+    r'^\s*(unknown|unidentified|not\s*known|unnamed|\?)\b',
+    re.IGNORECASE,
+)
+
+
 def _age_score(current_age, candidate_age):
+    # Both unknown → no evidence in either direction, contribute nothing.
+    if current_age is None and candidate_age is None:
+        return 0.0
+    # One side unknown → mild neutral (can't confirm or deny).
     if current_age is None or candidate_age is None:
-        return 0.5
+        return 0.3
     try:
         diff = abs(int(current_age) - int(candidate_age))
     except Exception:
-        return 0.5
+        return 0.3
     if diff <= 2:
         return 0.8
     if diff >= 10:
@@ -825,6 +835,21 @@ def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
     full_name = payload.get('full_name')
     gender = payload.get('gender')
     fallback_canonical = _canonical_person_id(full_name, gender, ps_code)
+
+    # ── Placeholder guard: "Unknown person", "Unidentified male", etc. ──────
+    # These names are phonetically identical across crimes so the candidate pool
+    # will always return matches — but they represent DIFFERENT people.
+    # Always generate a crime+accused-scoped unique ID so no cross-crime link is made.
+    if not full_name or _PLACEHOLDER_NAME_RE.match(full_name):
+        scoped_id = str(uuid.uuid5(
+            uuid.NAMESPACE_DNS,
+            f"{current_crime_id}|{current_accused_id or (full_name or '').lower()}"
+        ))
+        logger.debug(
+            "_resolve_canonical_identity: placeholder name %r → crime-scoped ID (no cross-crime link)",
+            full_name,
+        )
+        return scoped_id, 0.0, 3, False
 
     if current_crime_id not in _crime_profile_cache:
         _crime_profile_cache[current_crime_id] = fetch_crime_profile(conn, current_crime_id)

@@ -198,38 +198,80 @@ def fetch_canonical_by_accused_id(conn, accused_id, current_crime_id):
         """, (str(accused_id), current_crime_id))
         return cur.fetchone()
 
-
-
 def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limit=200):
+    """
+    Fetch candidate records from brief_facts_ai that could be the same person as the
+    accused being processed, using phonetic (SOUNDEX / dmetaphone) name matching.
+
+    FIX (2026-04-26): The original code built params via list.insert() which silently
+    swapped the ps_code and full_name positions when ps_code was provided, causing
+    every phonetic comparison to fail (ps_code matched against the name column and
+    vice versa). This rewrite builds params in explicit positional order that exactly
+    matches the %s sequence in the final SQL so there is no ambiguity.
+
+    Design:
+      - PS-code is no longer a hard WHERE filter. It is already a +0.05 scoring boost
+        in _dedup_score; using it as a hard block would silently exclude cross-PS
+        habitual offenders who are the primary target of cross-crime deduplication.
+      - Lookback extended to 2 years (was 6 months) to surface offenders across
+        older cases.
+      - Results are ordered: exact-SOUNDEX matches first, dmetaphone second, rest last.
+    """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                conditions = [
-                        "bfa.crime_id != %s",
-                        "bfa.full_name IS NOT NULL",
-                        "(SOUNDEX(bfa.full_name) = SOUNDEX(%s) OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s))",
-                        "COALESCE(c.date_modified, c.date_created) >= NOW() - INTERVAL '6 months'",
-                ]
-                params = [current_crime_id, full_name or '', full_name or '']
+        name_val = full_name or ''
 
-                if ps_code:
-                        conditions.insert(2, "bfa.source_accused_fields->>'ps_code' = %s")
-                        params.insert(2, ps_code)
+        # All params in positional order matching %s placeholders in the SQL below:
+        #   1. bfa.crime_id != %s                      → current_crime_id
+        #   2. SOUNDEX(%s) in phonetic condition        → name_val
+        #   3. dmetaphone(%s) in phonetic condition     → name_val
+        #   4. (date filter has no param)
+        #   ORDER BY:
+        #   5. SOUNDEX(%s)                              → name_val
+        #   6. dmetaphone(%s)                           → name_val
+        #   7. LIMIT %s                                 → limit
+        params = (
+            current_crime_id,
+            name_val, name_val,     # WHERE phonetic match
+            name_val, name_val,     # ORDER BY phonetic ranking
+            limit,
+        )
 
-                cur.execute(f"""
-                        SELECT bfa.bf_accused_id, bfa.canonical_person_id, bfa.accused_id, bfa.person_code, bfa.full_name,
-                                     bfa.alias_name, bfa.age, bfa.gender, bfa.address, bfa.source_accused_fields, bfa.crime_id,
-                                     c.major_head, c.minor_head, c.crime_type, c.acts_sections
-                        FROM public.brief_facts_ai bfa
-                        LEFT JOIN public.crimes c ON c.crime_id = bfa.crime_id
-                        WHERE {' AND '.join(conditions)}
-                        ORDER BY
-                            CASE
-                                WHEN SOUNDEX(bfa.full_name) = SOUNDEX(%s) THEN 0
-                                WHEN dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s) THEN 1
-                                ELSE 2
-                            END
-                        LIMIT %s
-                """, (*params, full_name or '', full_name or '', limit))
-                return cur.fetchall()
+        cur.execute("""
+            SELECT
+                bfa.bf_accused_id,
+                bfa.canonical_person_id,
+                bfa.accused_id,
+                bfa.person_code,
+                bfa.full_name,
+                bfa.alias_name,
+                bfa.age,
+                bfa.gender,
+                bfa.address,
+                bfa.source_accused_fields,
+                bfa.crime_id,
+                c.major_head,
+                c.minor_head,
+                c.crime_type,
+                c.acts_sections
+            FROM public.brief_facts_ai bfa
+            LEFT JOIN public.crimes c ON c.crime_id = bfa.crime_id
+            WHERE bfa.crime_id != %s
+              AND bfa.full_name IS NOT NULL
+              AND (
+                    SOUNDEX(bfa.full_name) = SOUNDEX(%s)
+                    OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s)
+              )
+              AND COALESCE(c.date_modified, c.date_created) >= NOW() - INTERVAL '2 years'
+            ORDER BY
+                CASE
+                    WHEN SOUNDEX(bfa.full_name) = SOUNDEX(%s) THEN 0
+                    WHEN dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s) THEN 1
+                    ELSE 2
+                END
+            LIMIT %s
+        """, params)
+        return cur.fetchall()
+
 
 def fetch_crime_profile(conn, crime_id):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
