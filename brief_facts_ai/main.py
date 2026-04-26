@@ -90,7 +90,10 @@ def _canonical_person_id(full_name, gender, ps_code):
 
 _RELATIONAL_PREFIX_RE = re.compile(r'\b(?:s/o|d/o|w/o|h/o)\b', re.IGNORECASE)
 _COMMON_NAME_TOKENS = {
-    'kumar', 'singh', 'rao', 'reddy', 'sharma', 'naidu', 'babu', 'raju'
+    'kumar', 'singh', 'rao', 'reddy', 'sharma', 'naidu', 'babu', 'raju',
+    'sai', 'krishna', 'mahesh', 'rajesh', 'rakesh', 'venkatesh', 'sunil',
+    'srinivas', 'shaik', 'mohammad', 'mohammed', 'md', 'sanjeev', 'praveen',
+    'ravi', 'suresh', 'ramesh', 'anand', 'vijay', 'ajay', 'sandeep', 'naveen'
 }
 
 _INDIC_TOKEN_MAP = {
@@ -229,14 +232,18 @@ def _phonetic_overlap(a, b):
     tokens_b = nb.split()
     # Sorted soundex set equality catches name-order reversals:
     # "Ashish Ratna" vs "Ratna Ashish" → same sorted codes → 1.0
-    sdx_a = sorted(s for s in (_soundex(t) for t in tokens_a) if s != '0000')
-    sdx_b = sorted(s for s in (_soundex(t) for t in tokens_b) if s != '0000')
-    if sdx_a and sdx_b and sdx_a == sdx_b:
+    sdx_a = set(s for s in (_soundex(t) for t in tokens_a) if s != '0000')
+    sdx_b = set(s for s in (_soundex(t) for t in tokens_b) if s != '0000')
+    if not sdx_a or not sdx_b:
+        return 0.0
+    
+    # Exact sorted set match (robust against reordering)
+    if sdx_a == sdx_b:
         return 1.0
-    # Fallback: first-token soundex (original behaviour for non-reversed names)
-    if _soundex(tokens_a[0]) == _soundex(tokens_b[0]) and _soundex(tokens_a[0]) != '0000':
-        return 1.0
-    return 1.0 if na[:3] == nb[:3] else 0.0
+        
+    # Calculate overlap proportion (prevents "Sai" matching "Sai Kumar Senapathi" with 1.0)
+    inter = len(sdx_a & sdx_b)
+    return (2.0 * inter) / (len(sdx_a) + len(sdx_b))
 
 
 def _address_similarity(a, b):
@@ -807,11 +814,30 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
         str(current_gender).lower() == str(candidate_gender).lower()):
         score += 0.12
 
-    normalized = _normalize_name(name_a)
-    if len(normalized.split()) == 1 and normalized in _COMMON_NAME_TOKENS:
-        score *= 0.85
+    # Penalty for mismatching distinctive tokens (Surnames / Distinctive middle names)
+    ta = set(_normalize_name(name_a).split())
+    tb = set(_normalize_name(name_b).split())
+    mismatched_distinctive = 0
+    for t in (ta ^ tb):
+        if t not in _COMMON_NAME_TOKENS:
+            mismatched_distinctive += 1
+    
+    # Waiver: If address matches perfectly, reduce the mismatch penalty
+    # (If they live in the same house, a name typo or missing surname is likely)
+    if mismatched_distinctive > 0:
+        penalty = 0.15 * mismatched_distinctive
+        if addr_similarity > 0.8:
+            penalty *= 0.3  # 70% reduction in penalty if address matches
+        score -= penalty
 
-    return round(min(score, 1.0), 2)
+    # Common name strictness: force requirement of secondary evidence
+    all_common = all(t in _COMMON_NAME_TOKENS for t in ta) or all(t in _COMMON_NAME_TOKENS for t in tb)
+    if all_common:
+        # Waiver: If we have strong secondary evidence (Address + Age), don't penalize
+        if not (addr_similarity > 0.8 and age_similarity > 0.8):
+            score *= 0.80
+
+    return round(max(0.0, min(score, 1.0)), 2)
 
 
 def _resolve_canonical_identity(conn, current_crime_id, payload, ps_code,
