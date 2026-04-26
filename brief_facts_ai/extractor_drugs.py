@@ -695,45 +695,42 @@ def _drop_llm_total_when_per_accused_exist(drugs: List[DrugExtraction]) -> List[
             else:
                 unattributed.append(d)
 
-        # Only act when there are 2+ different attributed accused AND at least 1 total row
-        if len(attributed) < 2 or not unattributed:
-            continue
-
-        # Check that attributed rows have 2+ distinct accused codes
+        # Case A: Sum of parts equals total (2+ distinct attributed rows)
         distinct_refs = {ref for _, ref in attributed}
-        if len(distinct_refs) < 2:
-            continue
-
-        # Sum of attributed quantities (in weight_g after standardize_units)
-        attributed_sum_g = sum(
-            float(d.weight_g or 0.0) for d, _ in attributed
-        )
-
-        for total_row in unattributed:
-            total_qty_g = float(total_row.weight_g or 0.0)
-            if total_qty_g <= 0:
-                continue
-
-            # Tolerance: total should match sum of parts within 5%
-            if attributed_sum_g > 0 and abs(total_qty_g - attributed_sum_g) / attributed_sum_g <= 0.05:
-                # Transfer worth to attributed rows
-                worth = float(total_row.seizure_worth or 0.0)
-                if worth > 0:
-                    for d, _ in attributed:
-                        if (d.seizure_worth or 0.0) == 0.0:
-                            d.seizure_worth = worth
-                            d.worth_scope = 'drug_total'
-                    logger.info(
-                        f"[TotalDrop] Transferred worth Rs.{worth} from total row to "
-                        f"{len(attributed)} attributed rows (drug={drug_key})"
-                    )
-
-                drugs_to_drop.add(id(total_row))
-                logger.info(
-                    f"[TotalDrop] Dropped redundant LLM total row: "
-                    f"{drug_key} {total_row.raw_quantity}{total_row.raw_unit} "
-                    f"({attributed_sum_g:.1f}g sum from {len(attributed)} accused matched)"
-                )
+        if len(distinct_refs) >= 2:
+            attributed_sum_g = sum(float(d.weight_g or 0.0) for d, _ in attributed)
+            for total_row in unattributed:
+                total_qty_g = float(total_row.weight_g or 0.0)
+                if total_qty_g > 0 and attributed_sum_g > 0 and abs(total_qty_g - attributed_sum_g) / attributed_sum_g <= 0.05:
+                    # Transfer worth
+                    worth = float(total_row.seizure_worth or 0.0)
+                    if worth > 0:
+                        for d, _ in attributed:
+                            if (d.seizure_worth or 0.0) == 0.0:
+                                d.seizure_worth = worth
+                                d.worth_scope = 'drug_total'
+                    drugs_to_drop.add(id(total_row))
+                    logger.info(f"[TotalDrop] Dropped redundant LLM total row: {drug_key} {total_qty_g}g sum matched.")
+        
+        # Case B: Exact quantity match between 1 attributed row and 1 unattributed row (Joint Seizure Hallucination)
+        elif len(attributed) == 1 and len(unattributed) >= 1:
+            attr_row, _ = attributed[0]
+            attr_qty_g = float(attr_row.weight_g or 0.0)
+            
+            for total_row in unattributed:
+                total_qty_g = float(total_row.weight_g or 0.0)
+                if total_qty_g > 0 and attr_qty_g > 0 and abs(total_qty_g - attr_qty_g) / attr_qty_g <= 0.01:
+                    # The segmented extractor duplicated the joint seizure and assigned it to one person.
+                    # We keep the total_row (which db.py will correctly handle as joint) and drop the attr_row.
+                    drugs_to_drop.add(id(attr_row))
+                    
+                    # Transfer worth to the total_row if it's missing
+                    worth = float(attr_row.seizure_worth or 0.0)
+                    if worth > 0 and (total_row.seizure_worth or 0.0) == 0.0:
+                        total_row.seizure_worth = worth
+                        
+                    logger.info(f"[TotalDrop] Dropped redundant explicit segment row: {drug_key} {attr_qty_g}g matches joint total.")
+                    break  # Only drop it once
 
     return [d for d in drugs if id(d) not in drugs_to_drop]
 
