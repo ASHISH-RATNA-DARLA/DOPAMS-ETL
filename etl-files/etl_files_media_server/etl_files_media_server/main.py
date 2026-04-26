@@ -981,8 +981,14 @@ def main() -> None:
         
         # Import and run sync to verify downloaded files exist on disk
         try:
-            # Add parent directory to path to import sync script
-            sys.path.insert(0, str(PARENT_DIR))
+            # Add etl-files directory to path to import official sync script
+            # Path(__file__) is etl-files/etl_files_media_server/etl_files_media_server/main.py
+            # PARENT_DIR is etl-files/etl_files_media_server/
+            # PARENT_DIR.parent is etl-files/
+            SYNC_SCRIPT_DIR = str(PARENT_DIR.parent)
+            if SYNC_SCRIPT_DIR not in sys.path:
+                sys.path.insert(0, SYNC_SCRIPT_DIR)
+
             from sync_files_state import run_sync
             sync_success = run_sync(logger=logger)
             if sync_success:
