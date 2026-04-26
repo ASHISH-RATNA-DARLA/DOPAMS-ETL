@@ -123,7 +123,7 @@ def sync():
                 UPDATE {FILES_TABLE} 
                 SET is_downloaded = FALSE, 
                     download_error = 'Sync: File missing on disk during audit'
-                WHERE file_id = ANY(%s)
+                WHERE file_id = ANY(%s::uuid[])
             """, (missing_ids,))
             
             conn.commit()

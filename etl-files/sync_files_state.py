@@ -26,7 +26,7 @@ _DB_RESOLVED = resolve_db_config()
 DB_CONFIG = {
     "host": _DB_RESOLVED["host"],
     "port": _DB_RESOLVED["port"],
-    "database": _DB_RESOLVED["dbname"],
+    "dbname": _DB_RESOLVED["dbname"],
     "user": _DB_RESOLVED["user"],
     "password": _DB_RESOLVED["password"],
 }
@@ -57,7 +57,7 @@ def validate_db_config(logger=None):
     
     required = {
         "DB_HOST": DB_CONFIG["host"],
-        "DB_NAME": DB_CONFIG["database"],
+        "DB_NAME": DB_CONFIG["dbname"],
         "DB_USER": DB_CONFIG["user"],
         "DB_PASSWORD": DB_CONFIG["password"],
         "DB_PORT": DB_CONFIG["port"],
