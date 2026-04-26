@@ -1658,7 +1658,12 @@ def _process_branch_a(conn, crime_id, ps_code, facts_text, db_accused, run_id, l
         if missing:
             missing_fields_map[code] = missing
 
-    # ---- Call LLM with annotations ----
+    # ---- Targeted role extraction for Branch A ----
+    # Branch A uses a dedicated LLM prompt (PASS2_KNOWN_ACCUSED_PROMPT) that receives the
+    # DB accused roster and returns a code-keyed dict: {accused_code -> {role_in_crime, ...}}.
+    # This is architecturally different from the general Branch C extractions (List[AccusedExtraction])
+    # and cannot be substituted. Thread safety is guaranteed by _get_thread_safe_llm() in
+    # extractor_accused.py which gives each worker thread its own LLM HTTP client.
     roles_by_code = extract_roles_for_known_accused(
         facts_text, list(valid_accused),
         missing_fields_map=missing_fields_map,

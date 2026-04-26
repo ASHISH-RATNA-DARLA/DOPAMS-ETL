@@ -11,9 +11,52 @@ from core.llm_service import get_llm, invoke_extraction_with_retry, RobustJsonOu
 
 import config
 import logging
+import threading
 
 # Configure Logging
 logger = logging.getLogger(__name__)
+
+# Thread-local storage for LLM instances to ensure thread safety.
+# ChatOllama wraps httpx.Client internally, which is NOT thread-safe.
+# Calling get_llm().get_langchain_model() returns a single shared instance
+# (LLMService caches it, get_llm() is lru_cache) — unsafe for parallel workers.
+# Each thread must create its own ChatOllama with its own httpx.Client.
+# We use threading.local() so each thread creates the instance once and reuses it.
+_thread_local = threading.local()
+
+def _get_thread_safe_llm(service_name: str = 'extraction'):
+    """
+    Returns a per-thread ChatOllama instance with its own httpx.Client.
+
+    Critically: we do NOT call llm_service.get_langchain_model() here because
+    that returns the shared singleton cached on the LLMService object. Instead we
+    read config from the service and construct a fresh ChatOllama per thread —
+    identical to the pattern in extractor_drugs.py.
+    """
+    attr_name = f"llm_{service_name}"
+    if not hasattr(_thread_local, attr_name):
+        from langchain_ollama import ChatOllama
+        llm_service = get_llm(service_name)          # gets lru_cache'd config object
+        base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        if base_url.endswith("/api"):
+            base_url = base_url.replace("/api", "")
+        timeout_seconds = float(os.getenv("LLM_TIMEOUT", "300"))
+        http_client = __import__('httpx').Client(timeout=timeout_seconds)
+        instance = ChatOllama(
+            base_url=base_url,
+            model=llm_service.model,
+            temperature=llm_service.temperature,
+            num_ctx=llm_service.context_window,
+            num_predict=llm_service.max_tokens,
+            keep_alive=os.getenv("OLLAMA_KEEP_ALIVE", "60m"),
+            client=http_client,
+        )
+        setattr(_thread_local, attr_name, instance)
+        logger.info(
+            f"Created thread-local ChatOllama [{service_name}] for thread "
+            f"{threading.current_thread().name} (timeout={timeout_seconds}s)"
+        )
+    return getattr(_thread_local, attr_name)
 
 # --- Data Models ---
 
@@ -925,8 +968,7 @@ def detect_ccl(full_name: str, role: str) -> bool:
 # --- Main Extraction Logic ---
 
 def get_llm_chain(prompt_template, parser):
-    llm_service = get_llm('extraction')
-    llm = llm_service.get_langchain_model()
+    llm = _get_thread_safe_llm('extraction')
     prompt = ChatPromptTemplate.from_template(prompt_template)
     return prompt | llm | parser
 
