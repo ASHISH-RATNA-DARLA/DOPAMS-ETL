@@ -230,19 +230,34 @@ def _phonetic_overlap(a, b):
         return 0.0
     tokens_a = na.split()
     tokens_b = nb.split()
-    # Sorted soundex set equality catches name-order reversals:
-    # "Ashish Ratna" vs "Ratna Ashish" → same sorted codes → 1.0
+    
+    # Soundex is too broad for Indian names (Rakesh/Rajesh share R220).
+    # We add a strictness check: if names have different distinctive consonants 
+    # at the same position, they are different names, not typos.
     sdx_a = set(s for s in (_soundex(t) for t in tokens_a) if s != '0000')
     sdx_b = set(s for s in (_soundex(t) for t in tokens_b) if s != '0000')
+    
     if not sdx_a or not sdx_b:
         return 0.0
-    
-    # Exact sorted set match (robust against reordering)
+
+    # Exact match is still good
     if sdx_a == sdx_b:
+        # Final Guard: Check for Rakesh/Rajesh style consonant swaps in short names
+        if len(na) < 8 and len(nb) < 8:
+            # If Levenshtein distance is 1 but it's a consonant swap, it's a different name
+            if _lev and _lev.distance(na, nb) == 1:
+                # Find the mismatching char
+                for i in range(min(len(na), len(nb))):
+                    if na[i] != nb[i]:
+                        # If mismatch is a consonant, it's likely a different name (Rakesh/Rajesh)
+                        # We only penalize if it's a CONSONANT swap (like j/k), not a vowel addition.
+                        if na[i] in 'bcdfghjklmnpqrstvwxz' and nb[i] in 'bcdfghjklmnpqrstvwxz':
+                            return 0.2 # Strong penalty: prevents merge even with same address
+                        break
         return 1.0
-        
-    # Calculate overlap proportion (prevents "Sai" matching "Sai Kumar Senapathi" with 1.0)
+
     inter = len(sdx_a & sdx_b)
+    return (2.0 * inter) / (len(sdx_a) + len(sdx_b))
     return (2.0 * inter) / (len(sdx_a) + len(sdx_b))
 
 
@@ -770,6 +785,12 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
 
     prefix_similarity = _name_similarity(name_a, name_b)
     token_similarity = _token_set_similarity(name_a, name_b)
+    
+    # Anagram check: If all tokens match exactly (e.g., "Senapathi Sai Kumar" vs "Sai Kumar Senapathi"), 
+    # sequence matching might be low due to word reordering. Boost prefix_similarity to reflect this.
+    if token_similarity == 1.0:
+        prefix_similarity = max(prefix_similarity, 0.95)
+        
     fuzzy_token_similarity = _token_fuzzy_similarity(name_a, name_b)
     phonetic_similarity = _phonetic_overlap(name_a, name_b)
     addr_similarity = _address_similarity(current.get('address'), candidate.get('address'))
@@ -808,11 +829,18 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
     current_gender = current.get('gender')
     candidate_age = candidate.get('age')
     candidate_gender = candidate.get('gender')
-    if (fuzzy_token_similarity > 0 and current_age and candidate_age and
-        current_gender and candidate_gender and
-        str(current_age) == str(candidate_age) and
-        str(current_gender).lower() == str(candidate_gender).lower()):
+    
+    gender_match = (current_gender and candidate_gender and str(current_gender).lower() == str(candidate_gender).lower())
+    
+    if (fuzzy_token_similarity > 0 and current_age and candidate_age and gender_match and str(current_age) == str(candidate_age)):
         score += 0.12
+
+    # Define strong secondary evidence to waive penalties for name variations/missing surnames
+    strong_secondary_evidence = (
+        addr_similarity > 0.8 or 
+        (age_similarity > 0.8 and gender_match) or
+        (ps_code and cand_ps and str(ps_code) == str(cand_ps) and current_assoc_codes and candidate_assoc_codes and (current_assoc_codes & candidate_assoc_codes))
+    )
 
     # Penalty for mismatching distinctive tokens (Surnames / Distinctive middle names)
     ta = set(_normalize_name(name_a).split())
@@ -822,19 +850,19 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
         if t not in _COMMON_NAME_TOKENS:
             mismatched_distinctive += 1
     
-    # Waiver: If address matches perfectly, reduce the mismatch penalty
-    # (If they live in the same house, a name typo or missing surname is likely)
+    # Waiver: If strong secondary evidence is present, reduce the mismatch penalty
+    # (If they share address/age/associates, a name typo or missing surname is likely)
     if mismatched_distinctive > 0:
         penalty = 0.15 * mismatched_distinctive
-        if addr_similarity > 0.8:
-            penalty *= 0.3  # 70% reduction in penalty if address matches
+        if strong_secondary_evidence:
+            penalty *= 0.3  # 70% reduction in penalty
         score -= penalty
 
     # Common name strictness: force requirement of secondary evidence
     all_common = all(t in _COMMON_NAME_TOKENS for t in ta) or all(t in _COMMON_NAME_TOKENS for t in tb)
     if all_common:
-        # Waiver: If we have strong secondary evidence (Address + Age), don't penalize
-        if not (addr_similarity > 0.8 and age_similarity > 0.8):
+        # Waiver: If we have strong secondary evidence, don't penalize
+        if not strong_secondary_evidence:
             score *= 0.80
 
     return round(max(0.0, min(score, 1.0)), 2)
