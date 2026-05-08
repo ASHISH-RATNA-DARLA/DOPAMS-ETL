@@ -1,6 +1,6 @@
-﻿CREATE MATERIALIZED VIEW public.advanced_search_accuseds_mv AS
- SELECT a.accused_id AS id,
-    a.accused_code AS "accusedCode",
+CREATE MATERIALIZED VIEW public.advanced_search_accuseds_mv AS
+ SELECT bfa.accused_id AS id,
+    COALESCE(a.accused_code, bfa.person_code) AS "accusedCode",
     a.seq_num AS "seqNum",
     a.is_ccl AS "isCCL",
     a.beard,
@@ -138,9 +138,9 @@
             WHEN ((c.class_classification)::text = 'Commercial'::text) THEN ((c.fir_date + '180 days'::interval))::date
             ELSE ((c.fir_date + '60 days'::interval))::date
         END AS chargesheet_due_date
-   FROM ((((public.accused a
-     JOIN public.crimes c ON (((a.crime_id)::text = (c.crime_id)::text)))
-     JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN public.persons p ON (((a.person_id)::text = (p.person_id)::text)))
-     LEFT JOIN public.brief_facts_ai_accused_flat bfa ON (((a.accused_id)::text = (bfa.accused_id)::text)))
+   FROM ((((public.brief_facts_ai_accused_flat bfa
+     JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
+     JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
+     LEFT JOIN public.accused a ON (((bfa.accused_id)::text = (a.accused_id)::text)))
+     LEFT JOIN public.persons p ON (((bfa.person_id)::text = (p.person_id)::text)))
   WITH NO DATA;

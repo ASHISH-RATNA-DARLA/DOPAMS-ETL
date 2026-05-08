@@ -1,10 +1,10 @@
-﻿CREATE MATERIALIZED VIEW public.accuseds_mv AS
- SELECT a.accused_id AS id,
+CREATE MATERIALIZED VIEW public.accuseds_mv AS
+ SELECT bfa.accused_id AS id,
     h.dist_name AS unit,
     h.ps_name AS ps,
     (EXTRACT(year FROM c.fir_date))::integer AS year,
     c.crime_id AS "crimeId",
-    p.person_id AS "personId",
+    bfa.person_id AS "personId",
     c.fir_num AS "firNumber",
     c.fir_reg_num AS "firRegNum",
     c.acts_sections AS section,
@@ -39,9 +39,9 @@
     COALESCE(bfa.status, a.accused_status) AS "accusedStatusRaw",
     a.type AS "accusedType",
     ( SELECT count(*) AS count
-           FROM public.accused a3
-          WHERE ((a3.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
-    ( SELECT jsonb_agg(jsonb_build_object('name', p2.name, 'surname', p2.surname, 'alias', p2.alias, 'fullName', p2.full_name, 'status',
+           FROM public.brief_facts_ai_accused_flat bfa3
+          WHERE ((bfa3.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
+    ( SELECT jsonb_agg(jsonb_build_object('name', COALESCE(p2.name, bfa2.full_name), 'surname', p2.surname, 'alias', COALESCE(p2.alias, bfa2.alias_name), 'fullName', COALESCE(p2.full_name, bfa2.full_name), 'status',
                 CASE
                     WHEN ((COALESCE(bfa2.status, a2.accused_status) ~~* 'Arrest%'::text) AND (COALESCE(bfa2.status, a2.accused_status) !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
                     WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* 'Surrendered%'::text) THEN 'Arrested'::text
@@ -51,10 +51,10 @@
                     WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* 'High court directions%'::text) THEN 'Issued Notice'::text
                     ELSE 'Unknown'::text
                 END, 'email', p2.email_id)) AS jsonb_agg
-           FROM ((public.accused a2
-             LEFT JOIN public.persons p2 ON (((a2.person_id)::text = (p2.person_id)::text)))
-             LEFT JOIN public.brief_facts_ai_accused_flat bfa2 ON (((a2.accused_id)::text = (bfa2.accused_id)::text)))
-          WHERE ((a2.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
+           FROM ((public.brief_facts_ai_accused_flat bfa2
+             LEFT JOIN public.persons p2 ON (((bfa2.person_id)::text = (p2.person_id)::text)))
+             LEFT JOIN public.accused a2 ON (((bfa2.accused_id)::text = (a2.accused_id)::text)))
+          WHERE ((bfa2.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
     p.name,
     p.surname,
     p.alias,
@@ -105,11 +105,11 @@
     concat_ws(', '::text, NULLIF((p.permanent_house_no)::text, ''::text), NULLIF((p.permanent_street_road_no)::text, ''::text), NULLIF((p.permanent_ward_colony)::text, ''::text), NULLIF((p.permanent_locality_village)::text, ''::text), NULLIF((p.permanent_district)::text, ''::text), NULLIF((p.permanent_state_ut)::text, ''::text), NULLIF((p.permanent_pin_code)::text, ''::text)) AS "permanentAddress",
     ( SELECT count(DISTINCT bfa_c.crime_id) AS count
            FROM public.brief_facts_ai_accused_flat bfa_c
-          WHERE ((bfa_c.accused_id)::text = (a.accused_id)::text)) AS "noOfCrimes",
+          WHERE ((bfa_c.accused_id)::text = (bfa.accused_id)::text)) AS "noOfCrimes",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('crimeId', c2.crime_id, 'firNumber', c2.fir_num)) AS jsonb_agg
-           FROM (public.accused a4
-             JOIN public.crimes c2 ON (((a4.crime_id)::text = (c2.crime_id)::text)))
-          WHERE ((a4.person_id)::text = (p.person_id)::text)) AS "previouslyInvolvedCases",
+           FROM (public.brief_facts_ai_accused_flat bfa4
+             JOIN public.crimes c2 ON (((bfa4.crime_id)::text = (c2.crime_id)::text)))
+          WHERE (((bfa4.person_id)::text = (p.person_id)::text) AND (p.person_id IS NOT NULL))) AS "previouslyInvolvedCases",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM public.brief_facts_ai_drug_flat bfd
           WHERE ((bfd.crime_id)::text = (c.crime_id)::text)) AS "drugType",
@@ -130,8 +130,8 @@
            FROM public.disposal d
           WHERE ((d.crime_id)::text = (c.crime_id)::text)) AS "disposalDetails"
    FROM ((((public.brief_facts_ai_accused_flat bfa
-     JOIN public.accused a ON (((bfa.accused_id)::text = (a.accused_id)::text)))
-     JOIN public.crimes c ON (((a.crime_id)::text = (c.crime_id)::text)))
-     JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
-     LEFT JOIN public.persons p ON (((a.person_id)::text = (p.person_id)::text)))
+     JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
+     JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
+     LEFT JOIN public.accused a ON (((bfa.accused_id)::text = (a.accused_id)::text)))
+     LEFT JOIN public.persons p ON (((bfa.person_id)::text = (p.person_id)::text)))
   WITH NO DATA;

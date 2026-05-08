@@ -1,4 +1,4 @@
-﻿CREATE MATERIALIZED VIEW public.firs_mv AS
+CREATE MATERIALIZED VIEW public.firs_mv AS
  SELECT c.crime_id AS id,
     h.dist_name AS unit,
     h.ps_name AS ps,
@@ -228,5 +228,5 @@
            FROM public.interrogation_reports ir
           WHERE ((ir.crime_id)::text = (c.crime_id)::text)) AS "irDetails"
    FROM (public.crimes c
-     JOIN public.hierarchy h ON (((h.ps_code)::text = (c.ps_code)::text)))
+     JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
   WITH NO DATA;

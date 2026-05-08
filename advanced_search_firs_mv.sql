@@ -1,4 +1,4 @@
-﻿CREATE MATERIALIZED VIEW public.advanced_search_firs_mv AS
+CREATE MATERIALIZED VIEW public.advanced_search_firs_mv AS
  SELECT c.crime_id AS id,
     h.ps_code AS "psCode",
     c.fir_num AS "firNum",
@@ -30,22 +30,21 @@
     h.adg_code AS "adgCode",
     h.adg_name AS "adgName",
     ( SELECT count(*) AS count
-           FROM public.accused a
-          WHERE ((a.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
-    ( SELECT jsonb_agg(jsonb_build_object('name', p2.name, 'surname', p2.surname, 'alias', p2.alias, 'fullName', p2.full_name, 'accusedRole', COALESCE(bfa2.accused_type, a2.type), 'status',
+           FROM public.brief_facts_ai_accused_flat bfa
+          WHERE ((bfa.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
+    ( SELECT jsonb_agg(jsonb_build_object('name', COALESCE(p2.name, bfa2.full_name), 'surname', p2.surname, 'alias', COALESCE(p2.alias, bfa2.alias_name), 'fullName', COALESCE(p2.full_name, bfa2.full_name), 'accusedRole', bfa2.accused_type, 'status',
                 CASE
-                    WHEN ((COALESCE(bfa2.status, a2.accused_status) ~~* 'Arrest%'::text) AND (COALESCE(bfa2.status, a2.accused_status) !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
-                    WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* 'Surrendered%'::text) THEN 'Arrested'::text
-                    WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* 'Absconding'::text) THEN 'Absconding'::text
-                    WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* 'Arrest Related/41A CrPC Pending'::text) THEN 'Absconding'::text
-                    WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* '41A Cr.P.C%'::text) THEN 'Issued Notice'::text
-                    WHEN (COALESCE(bfa2.status, a2.accused_status) ~~* 'High court directions%'::text) THEN 'Issued Notice'::text
+                    WHEN ((bfa2.status ~~* 'Arrest%'::text) AND (bfa2.status !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
+                    WHEN (bfa2.status ~~* 'Surrendered%'::text) THEN 'Arrested'::text
+                    WHEN (bfa2.status ~~* 'Absconding'::text) THEN 'Absconding'::text
+                    WHEN (bfa2.status ~~* 'Arrest Related/41A CrPC Pending'::text) THEN 'Absconding'::text
+                    WHEN (bfa2.status ~~* '41A Cr.P.C%'::text) THEN 'Issued Notice'::text
+                    WHEN (bfa2.status ~~* 'High court directions%'::text) THEN 'Issued Notice'::text
                     ELSE 'Unknown'::text
                 END)) AS jsonb_agg
-           FROM ((public.accused a2
-             LEFT JOIN public.persons p2 ON (((a2.person_id)::text = (p2.person_id)::text)))
-             LEFT JOIN public.brief_facts_ai_accused_flat bfa2 ON (((a2.accused_id)::text = (bfa2.accused_id)::text)))
-          WHERE ((a2.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
+           FROM (public.brief_facts_ai_accused_flat bfa2
+             LEFT JOIN public.persons p2 ON (((bfa2.person_id)::text = (p2.person_id)::text)))
+          WHERE ((bfa2.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM public.brief_facts_ai_drug_flat bfd
           WHERE ((bfd.crime_id)::text = (c.crime_id)::text)) AS "drugType",
@@ -79,5 +78,5 @@
             ELSE ((c.fir_date + '60 days'::interval))::date
         END AS chargesheet_due_date
    FROM (public.crimes c
-     JOIN public.hierarchy h ON (((c.ps_code)::text = (h.ps_code)::text)))
+     JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
   WITH NO DATA;
