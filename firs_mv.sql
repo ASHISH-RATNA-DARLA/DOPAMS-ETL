@@ -37,13 +37,10 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
             WHEN ((c.class_classification)::text = 'Commercial'::text) THEN ((c.fir_date + '180 days'::interval))::date
             ELSE ((c.fir_date + '60 days'::interval))::date
         END AS chargesheet_due_date,
-    CASE
-        WHEN EXISTS (SELECT 1 FROM public.brief_facts_ai_accused_flat bfa WHERE ((bfa.crime_id)::text = (c.crime_id)::text))
-        THEN (SELECT count(*) FROM public.brief_facts_ai_accused_flat bfa WHERE ((bfa.crime_id)::text = (c.crime_id)::text))
-        ELSE (SELECT count(*) FROM public.accused a WHERE ((a.crime_id)::text = (c.crime_id)::text))
-    END AS "noOfAccusedInvolved",
-    COALESCE(
-        ( SELECT jsonb_agg(jsonb_build_object('personCode', bfa.person_code, 'fullName', bfa.full_name, 'alias', bfa.alias_name, 'accusedType', bfa.accused_type, 'personId', bfa.person_id, 'status',
+    ( SELECT count(*) AS count
+           FROM public.brief_facts_ai_accused_flat bfa
+          WHERE ((bfa.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
+    ( SELECT jsonb_agg(jsonb_build_object('personCode', bfa.person_code, 'fullName', bfa.full_name, 'alias', bfa.alias_name, 'accusedType', bfa.accused_type, 'personId', bfa.person_id, 'status',
                     CASE
                         WHEN ((bfa.status ~~* 'Arrest%'::text) AND (bfa.status !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
                         WHEN (bfa.status ~~* 'Surrendered%'::text) THEN 'Arrested'::text
@@ -54,21 +51,7 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
                         ELSE 'Unknown'::text
                     END) ORDER BY bfa.seq_num) AS jsonb_agg
                FROM public.brief_facts_ai_accused_flat bfa
-              WHERE ((bfa.crime_id)::text = (c.crime_id)::text)),
-        ( SELECT jsonb_agg(jsonb_build_object('personCode', a2.accused_code, 'fullName', p2.full_name, 'alias', p2.alias, 'accusedType', a2.type, 'personId', a2.person_id, 'status',
-                    CASE
-                        WHEN ((a2.accused_status ~~* 'Arrest%'::text) AND (a2.accused_status !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
-                        WHEN (a2.accused_status ~~* 'Surrendered%'::text) THEN 'Arrested'::text
-                        WHEN (a2.accused_status ~~* 'Absconding'::text) THEN 'Absconding'::text
-                        WHEN (a2.accused_status ~~* 'Arrest Related/41A CrPC Pending'::text) THEN 'Absconding'::text
-                        WHEN (a2.accused_status ~~* '41A Cr.P.C%'::text) THEN 'Issued Notice'::text
-                        WHEN (a2.accused_status ~~* 'High court directions%'::text) THEN 'Issued Notice'::text
-                        ELSE 'Unknown'::text
-                    END) ORDER BY a2.seq_num) AS jsonb_agg
-               FROM (public.accused a2
-                 LEFT JOIN public.persons p2 ON (((a2.person_id)::text = (p2.person_id)::text)))
-              WHERE ((a2.crime_id)::text = (c.crime_id)::text))
-    ) AS "accusedDetails",
+              WHERE ((bfa.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM public.brief_facts_ai_drug_flat bfd
           WHERE ((bfd.crime_id)::text = (c.crime_id)::text)) AS "drugType",
@@ -246,4 +229,5 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
           WHERE ((ir.crime_id)::text = (c.crime_id)::text)) AS "irDetails"
    FROM (public.crimes c
      JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
+  WHERE EXISTS (SELECT 1 FROM public.brief_facts_ai bfai WHERE (bfai.crime_id)::text = (c.crime_id)::text)
   WITH NO DATA;
