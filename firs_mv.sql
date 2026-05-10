@@ -39,7 +39,8 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
         END AS chargesheet_due_date,
     ( SELECT count(*) AS count
            FROM public.brief_facts_ai_accused_flat bfa
-          WHERE ((bfa.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
+          WHERE ((bfa.crime_id)::text = (c.crime_id)::text)
+            AND (bfa.accused_id IS NOT NULL OR bfa.full_name IS NOT NULL)) AS "noOfAccusedInvolved",
     ( SELECT jsonb_agg(jsonb_build_object('personCode', bfa.person_code, 'fullName', bfa.full_name, 'alias', bfa.alias_name, 'accusedType', bfa.accused_type, 'personId', bfa.person_id, 'status',
                     CASE
                         WHEN ((bfa.status ~~* 'Arrest%'::text) AND (bfa.status !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
@@ -51,7 +52,8 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
                         ELSE 'Unknown'::text
                     END) ORDER BY bfa.seq_num) AS jsonb_agg
                FROM public.brief_facts_ai_accused_flat bfa
-              WHERE ((bfa.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
+              WHERE ((bfa.crime_id)::text = (c.crime_id)::text)
+                AND (bfa.accused_id IS NOT NULL OR bfa.full_name IS NOT NULL)) AS "accusedDetails",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM public.brief_facts_ai_drug_flat bfd
           WHERE ((bfd.crime_id)::text = (c.crime_id)::text)) AS "drugType",
@@ -229,5 +231,9 @@ CREATE MATERIALIZED VIEW public.firs_mv AS
           WHERE ((ir.crime_id)::text = (c.crime_id)::text)) AS "irDetails"
    FROM (public.crimes c
      JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
-  WHERE EXISTS (SELECT 1 FROM public.brief_facts_ai bfai WHERE (bfai.crime_id)::text = (c.crime_id)::text)
+  WHERE EXISTS (
+    SELECT 1 FROM public.brief_facts_ai bfai
+    WHERE (bfai.crime_id)::text = (c.crime_id)::text
+      AND (bfai.accused_id IS NOT NULL OR bfai.full_name IS NOT NULL)
+  )
   WITH NO DATA;

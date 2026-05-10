@@ -42,7 +42,8 @@ CREATE MATERIALIZED VIEW public.accuseds_mv AS
     a.type AS "accusedType",
     ( SELECT count(*) AS count
            FROM public.brief_facts_ai_accused_flat bfa3
-          WHERE ((bfa3.crime_id)::text = (c.crime_id)::text)) AS "noOfAccusedInvolved",
+          WHERE ((bfa3.crime_id)::text = (c.crime_id)::text)
+            AND (bfa3.accused_id IS NOT NULL OR bfa3.full_name IS NOT NULL)) AS "noOfAccusedInvolved",
     ( SELECT jsonb_agg(jsonb_build_object('name', COALESCE(p2.name, bfa2.full_name), 'surname', p2.surname, 'alias', COALESCE(p2.alias, bfa2.alias_name), 'fullName', COALESCE(p2.full_name, bfa2.full_name), 'status',
                 CASE
                     WHEN ((COALESCE(bfa2.status, a2.accused_status) ~~* 'Arrest%'::text) AND (COALESCE(bfa2.status, a2.accused_status) !~~* 'Arrest Related%'::text)) THEN 'Arrested'::text
@@ -56,7 +57,8 @@ CREATE MATERIALIZED VIEW public.accuseds_mv AS
            FROM ((public.brief_facts_ai_accused_flat bfa2
              LEFT JOIN public.persons p2 ON (((bfa2.person_id)::text = (p2.person_id)::text)))
              LEFT JOIN public.accused a2 ON (((bfa2.accused_id)::text = (a2.accused_id)::text)))
-          WHERE ((bfa2.crime_id)::text = (c.crime_id)::text)) AS "accusedDetails",
+          WHERE ((bfa2.crime_id)::text = (c.crime_id)::text)
+            AND (bfa2.accused_id IS NOT NULL OR bfa2.full_name IS NOT NULL)) AS "accusedDetails",
     p.name,
     p.surname,
     p.alias,
@@ -136,5 +138,6 @@ CREATE MATERIALIZED VIEW public.accuseds_mv AS
      JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
      LEFT JOIN public.accused a ON (((bfa.accused_id)::text = (a.accused_id)::text)))
      LEFT JOIN public.persons p ON (((bfa.person_id)::text = (p.person_id)::text)))
+  WHERE (bfa.accused_id IS NOT NULL OR bfa.full_name IS NOT NULL)
 
   WITH NO DATA;

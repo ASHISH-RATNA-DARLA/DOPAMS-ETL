@@ -145,5 +145,6 @@ CREATE MATERIALIZED VIEW public.advanced_search_accuseds_mv AS
      JOIN (SELECT DISTINCT ON (ps_code) * FROM public.hierarchy ORDER BY ps_code, date_modified DESC NULLS LAST) h ON (((c.ps_code)::text = (h.ps_code)::text)))
      LEFT JOIN public.accused a ON (((bfa.accused_id)::text = (a.accused_id)::text)))
      LEFT JOIN public.persons p ON (((bfa.person_id)::text = (p.person_id)::text)))
+  WHERE (bfa.accused_id IS NOT NULL OR bfa.full_name IS NOT NULL)
 
   WITH NO DATA;
