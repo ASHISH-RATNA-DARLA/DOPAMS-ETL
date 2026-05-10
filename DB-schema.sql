@@ -627,6 +627,8 @@ CREATE VIEW public.brief_facts_ai_accused_flat AS
     crime_id,
     accused_id,
     person_id,
+    canonical_person_id,
+    dedup_match_tier,
     person_code,
     seq_num,
     full_name,

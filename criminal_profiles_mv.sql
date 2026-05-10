@@ -189,42 +189,52 @@ UNION ALL
                         END) AS crime_data
                    FROM (public.brief_facts_ai_accused_flat bfa2
                      JOIN public.crimes c ON (((bfa2.crime_id)::text = (c.crime_id)::text)))
-                  WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)
+                  WHERE bfa2.canonical_person_id IS NOT NULL
+                    AND bfa2.canonical_person_id = bfa.canonical_person_id
                   ORDER BY c.crime_id, bfa2.date_created DESC NULLS LAST) sub) AS crimes,
     ( SELECT c.crime_id
            FROM (public.brief_facts_ai_accused_flat bfa2
              JOIN public.crimes c ON (((bfa2.crime_id)::text = (c.crime_id)::text)))
-          WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id
           ORDER BY c.fir_date DESC
          LIMIT 1) AS "latestCrimeId",
     ( SELECT c.fir_num
            FROM (public.brief_facts_ai_accused_flat bfa2
              JOIN public.crimes c ON (((bfa2.crime_id)::text = (c.crime_id)::text)))
-          WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id
           ORDER BY c.fir_date DESC
          LIMIT 1) AS "latestCrimeNo",
     ( SELECT count(DISTINCT bfa2.crime_id) AS count
            FROM public.brief_facts_ai_accused_flat bfa2
-          WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)) AS "noOfCrimes",
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id) AS "noOfCrimes",
     0::bigint AS "arrestCount",
     ( SELECT max(c.fir_date) AS max
            FROM (public.brief_facts_ai_accused_flat bfa2
              JOIN public.crimes c ON (((bfa2.crime_id)::text = (c.crime_id)::text)))
-          WHERE (((bfa2.accused_id)::text = (bfa.accused_id)::text) AND (((bfa2.status ~~* 'Arrest%'::text) AND (bfa2.status !~~* 'Arrest Related%'::text)) OR (bfa2.status ~~* 'Surrendered%'::text)))) AS "lastArrestDate",
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id
+            AND (((bfa2.status ~~* 'Arrest%'::text) AND (bfa2.status !~~* 'Arrest Related%'::text)) OR (bfa2.status ~~* 'Surrendered%'::text))) AS "lastArrestDate",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('crimeId', bfa2.crime_id, 'accusedId', bfa2.accused_id, 'accusedRole', bfa2.accused_type)) AS jsonb_agg
            FROM public.brief_facts_ai_accused_flat bfa2
-          WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)) AS "crimesInvolved",
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id) AS "crimesInvolved",
     ( SELECT array_agg(DISTINCT bfa2.accused_type) FILTER (WHERE (bfa2.accused_type IS NOT NULL)) AS array_agg
            FROM public.brief_facts_ai_accused_flat bfa2
-          WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)) AS "accusedRoles",
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id) AS "accusedRoles",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('id', c.crime_id, 'value', c.fir_num)) AS jsonb_agg
            FROM (public.brief_facts_ai_accused_flat bfa2
              JOIN public.crimes c ON (((bfa2.crime_id)::text = (c.crime_id)::text)))
-          WHERE ((bfa2.accused_id)::text = (bfa.accused_id)::text)) AS "previouslyInvolvedCases",
+          WHERE bfa2.canonical_person_id IS NOT NULL
+            AND bfa2.canonical_person_id = bfa.canonical_person_id) AS "previouslyInvolvedCases",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM (public.brief_facts_ai_accused_flat bfa_d
              JOIN public.brief_facts_ai_drug_flat bfd ON (((bfd.crime_id)::text = (bfa_d.crime_id)::text)))
-          WHERE ((bfa_d.accused_id)::text = (bfa.accused_id)::text)) AS "associatedDrugs",
+          WHERE bfa_d.canonical_person_id IS NOT NULL
+            AND bfa_d.canonical_person_id = bfa.canonical_person_id) AS "associatedDrugs",
     ARRAY[]::text[] AS "DOPAMSLinks",
     NULL::text AS counselled,
     ARRAY[]::text[] AS "socialMedia",

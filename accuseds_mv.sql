@@ -109,11 +109,14 @@ CREATE MATERIALIZED VIEW public.accuseds_mv AS
     concat_ws(', '::text, NULLIF((p.permanent_house_no)::text, ''::text), NULLIF((p.permanent_street_road_no)::text, ''::text), NULLIF((p.permanent_ward_colony)::text, ''::text), NULLIF((p.permanent_locality_village)::text, ''::text), NULLIF((p.permanent_district)::text, ''::text), NULLIF((p.permanent_state_ut)::text, ''::text), NULLIF((p.permanent_pin_code)::text, ''::text)) AS "permanentAddress",
     ( SELECT count(DISTINCT bfa_c.crime_id) AS count
            FROM public.brief_facts_ai_accused_flat bfa_c
-          WHERE ((bfa_c.accused_id)::text = (bfa.accused_id)::text)) AS "noOfCrimes",
+          WHERE bfa_c.canonical_person_id IS NOT NULL
+            AND bfa_c.canonical_person_id = bfa.canonical_person_id) AS "noOfCrimes",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('crimeId', c2.crime_id, 'firNumber', c2.fir_num)) AS jsonb_agg
            FROM (public.brief_facts_ai_accused_flat bfa4
              JOIN public.crimes c2 ON (((bfa4.crime_id)::text = (c2.crime_id)::text)))
-          WHERE (((bfa4.person_id)::text = (p.person_id)::text) AND (p.person_id IS NOT NULL))) AS "previouslyInvolvedCases",
+          WHERE bfa4.canonical_person_id IS NOT NULL
+            AND bfa4.canonical_person_id = bfa.canonical_person_id
+            AND (bfa4.crime_id)::text <> (c.crime_id)::text) AS "previouslyInvolvedCases",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM public.brief_facts_ai_drug_flat bfd
           WHERE ((bfd.crime_id)::text = (c.crime_id)::text)) AS "drugType",
