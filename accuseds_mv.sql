@@ -115,7 +115,7 @@ CREATE MATERIALIZED VIEW public.accuseds_mv AS
                  OR EXISTS (
                    SELECT 1 FROM public.brief_facts_ai bfa_chk
                    WHERE bfa_chk.canonical_person_id = bfa.canonical_person_id
-                     AND bfa_chk.dedup_match_tier IN (1, 2)))) AS "noOfCrimes",
+                     AND bfa_chk.dedup_confidence > 0.65))) AS "noOfCrimes",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('crimeId', c2.crime_id, 'firNumber', c2.fir_num)) AS jsonb_agg
            FROM (public.brief_facts_ai_accused_flat bfa4
              JOIN public.crimes c2 ON (((bfa4.crime_id)::text = (c2.crime_id)::text)))
@@ -125,7 +125,7 @@ CREATE MATERIALIZED VIEW public.accuseds_mv AS
             AND EXISTS (
               SELECT 1 FROM public.brief_facts_ai bfa_chk
               WHERE bfa_chk.canonical_person_id = bfa.canonical_person_id
-                AND bfa_chk.dedup_match_tier IN (1, 2))) AS "previouslyInvolvedCases",
+                AND bfa_chk.dedup_confidence > 0.65)) AS "previouslyInvolvedCases",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM public.brief_facts_ai_drug_flat bfd
           WHERE ((bfd.crime_id)::text = (c.crime_id)::text)) AS "drugType",
