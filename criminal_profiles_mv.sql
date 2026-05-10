@@ -67,44 +67,54 @@ CREATE MATERIALIZED VIEW public.criminal_profiles_mv AS
                         END) AS crime_data
                    FROM (public.brief_facts_ai_accused_flat bfa
                      JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
-                  WHERE ((bfa.person_id)::text = (p.person_id)::text)
+                  WHERE bfa.canonical_person_id IS NOT NULL
+                    AND bfa.canonical_person_id = bfa_canon.canonical_person_id
                   ORDER BY c.crime_id, bfa.date_created DESC NULLS LAST) sub) AS crimes,
     ( SELECT c.crime_id
            FROM (public.brief_facts_ai_accused_flat bfa
              JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
-          WHERE ((bfa.person_id)::text = (p.person_id)::text)
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id
           ORDER BY c.fir_date DESC
          LIMIT 1) AS "latestCrimeId",
     ( SELECT c.fir_num
            FROM (public.brief_facts_ai_accused_flat bfa
              JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
-          WHERE ((bfa.person_id)::text = (p.person_id)::text)
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id
           ORDER BY c.fir_date DESC
          LIMIT 1) AS "latestCrimeNo",
     ( SELECT count(DISTINCT bfa.crime_id) AS count
            FROM public.brief_facts_ai_accused_flat bfa
-          WHERE ((bfa.person_id)::text = (p.person_id)::text)) AS "noOfCrimes",
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id) AS "noOfCrimes",
     ( SELECT count(*) AS count
            FROM public.arrests arr
           WHERE (((arr.person_id)::text = (p.person_id)::text) AND (arr.is_arrested = true))) AS "arrestCount",
     ( SELECT max(c.fir_date) AS max
            FROM (public.brief_facts_ai_accused_flat bfa
              JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
-          WHERE (((bfa.person_id)::text = (p.person_id)::text) AND (((bfa.status ~~* 'Arrest%'::text) AND (bfa.status !~~* 'Arrest Related%'::text)) OR (bfa.status ~~* 'Surrendered%'::text)))) AS "lastArrestDate",
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id
+            AND (((bfa.status ~~* 'Arrest%'::text) AND (bfa.status !~~* 'Arrest Related%'::text)) OR (bfa.status ~~* 'Surrendered%'::text))) AS "lastArrestDate",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('crimeId', bfa.crime_id, 'accusedId', bfa.accused_id, 'accusedRole', bfa.accused_type)) AS jsonb_agg
            FROM public.brief_facts_ai_accused_flat bfa
-          WHERE ((bfa.person_id)::text = (p.person_id)::text)) AS "crimesInvolved",
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id) AS "crimesInvolved",
     ( SELECT array_agg(DISTINCT bfa.accused_type) FILTER (WHERE (bfa.accused_type IS NOT NULL)) AS array_agg
            FROM public.brief_facts_ai_accused_flat bfa
-          WHERE ((bfa.person_id)::text = (p.person_id)::text)) AS "accusedRoles",
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id) AS "accusedRoles",
     ( SELECT jsonb_agg(DISTINCT jsonb_build_object('id', c.crime_id, 'value', c.fir_num)) AS jsonb_agg
            FROM (public.brief_facts_ai_accused_flat bfa
              JOIN public.crimes c ON (((bfa.crime_id)::text = (c.crime_id)::text)))
-          WHERE ((bfa.person_id)::text = (p.person_id)::text)) AS "previouslyInvolvedCases",
+          WHERE bfa.canonical_person_id IS NOT NULL
+            AND bfa.canonical_person_id = bfa_canon.canonical_person_id) AS "previouslyInvolvedCases",
     ( SELECT COALESCE(array_agg(DISTINCT upper(TRIM(BOTH FROM bfd.primary_drug_name))) FILTER (WHERE ((bfd.primary_drug_name IS NOT NULL) AND (bfd.primary_drug_name <> 'NO_DRUGS_DETECTED'::text))), ARRAY[]::text[]) AS "coalesce"
            FROM (public.brief_facts_ai_accused_flat bfa_d
              JOIN public.brief_facts_ai_drug_flat bfd ON (((bfd.crime_id)::text = (bfa_d.crime_id)::text)))
-          WHERE ((bfa_d.person_id)::text = (p.person_id)::text)) AS "associatedDrugs",
+          WHERE bfa_d.canonical_person_id IS NOT NULL
+            AND bfa_d.canonical_person_id = bfa_canon.canonical_person_id) AS "associatedDrugs",
     ARRAY[]::text[] AS "DOPAMSLinks",
     NULL::text AS counselled,
     ARRAY[]::text[] AS "socialMedia",
@@ -120,6 +130,13 @@ CREATE MATERIALIZED VIEW public.criminal_profiles_mv AS
     NULL::text AS "propertyForfeited",
     NULL::text AS "PITNDPSInitiated"
    FROM public.persons p
+   LEFT JOIN LATERAL (
+     SELECT canonical_person_id
+     FROM public.brief_facts_ai
+     WHERE (person_id)::text = (p.person_id)::text
+       AND canonical_person_id IS NOT NULL
+     LIMIT 1
+   ) bfa_canon ON TRUE
   WHERE (EXISTS ( SELECT 1
            FROM public.brief_facts_ai_accused_flat bfa
           WHERE ((bfa.person_id)::text = (p.person_id)::text)))
