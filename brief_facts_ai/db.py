@@ -249,6 +249,7 @@ def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limi
                 bfa.address,
                 bfa.source_accused_fields,
                 bfa.crime_id,
+                bfa.phone_numbers,
                 c.major_head,
                 c.minor_head,
                 c.crime_type,
@@ -261,7 +262,7 @@ def fetch_dedup_candidates(conn, current_crime_id, full_name, ps_code=None, limi
                     SOUNDEX(bfa.full_name) = SOUNDEX(%s)
                     OR dmetaphone(COALESCE(bfa.full_name, '')) = dmetaphone(%s)
               )
-              AND COALESCE(c.date_modified, c.date_created) >= NOW() - INTERVAL '2 years'
+              AND COALESCE(bfa.date_modified, bfa.date_created) >= NOW() - INTERVAL '2 years'
             ORDER BY
                 CASE
                     WHEN SOUNDEX(bfa.full_name) = SOUNDEX(%s) THEN 0
@@ -346,7 +347,7 @@ def fetch_existing_accused_for_crime(conn, crime_id):
             ORDER BY
                 CASE
                     WHEN a.accused_code ~* '^A[-.]?[0-9]+$'
-                    THEN regexp_replace(a.accused_code, '\D', '', 'g')::numeric
+                    THEN regexp_replace(a.accused_code, '\\D', '', 'g')::numeric
                     ELSE NULL
                 END NULLS LAST,
                 CASE

@@ -89,11 +89,33 @@ def _canonical_person_id(full_name, gender, ps_code):
 
 
 _RELATIONAL_PREFIX_RE = re.compile(r'\b(?:s/o|d/o|w/o|h/o)\b', re.IGNORECASE)
+_HONORIFIC_RE = re.compile(
+    r'^\s*(?:mr|mrs|ms|dr|sri|smt|late|shri|kumari|kumari|kum|rev|prof|capt|col|gen|sgt|insp|si|hc|pc)\b\.?\s*',
+    re.IGNORECASE,
+)
 _COMMON_NAME_TOKENS = {
-    'kumar', 'singh', 'rao', 'reddy', 'sharma', 'naidu', 'babu', 'raju',
-    'sai', 'krishna', 'mahesh', 'rajesh', 'rakesh', 'venkatesh', 'sunil',
-    'srinivas', 'shaik', 'mohammad', 'mohammed', 'md', 'sanjeev', 'praveen',
-    'ravi', 'suresh', 'ramesh', 'anand', 'vijay', 'ajay', 'sandeep', 'naveen'
+    # North Indian
+    'kumar', 'singh', 'sharma', 'yadav', 'gupta', 'verma', 'mishra', 'pandey',
+    'tiwari', 'jha', 'dubey', 'shukla', 'chaudhary', 'rana', 'chauhan',
+    # South Indian (Telugu/Kannada/Tamil)
+    'rao', 'reddy', 'naidu', 'babu', 'raju', 'sai', 'krishna', 'mahesh',
+    'rajesh', 'rakesh', 'venkatesh', 'sunil', 'srinivas', 'ramana', 'prasad',
+    'goud', 'nayak', 'vamshi', 'arjun', 'teja', 'kiran', 'ganesh', 'ramu',
+    'narasimha', 'laxman', 'bhaskar', 'swamy', 'ranga', 'chandra',
+    # Common first names (male)
+    'shiva', 'raja', 'ravi', 'suresh', 'ramesh', 'anand', 'vijay', 'ajay',
+    'sandeep', 'naveen', 'rahul', 'rohit', 'amit', 'anil', 'arun', 'ashok',
+    'deepak', 'dinesh', 'girish', 'harish', 'jagdish', 'kamal', 'manoj',
+    'mukesh', 'naresh', 'nitesh', 'pawan', 'pradeep', 'pramod', 'praveen',
+    'rajan', 'rakesh', 'ram', 'sanjeev', 'santosh', 'satish', 'saurabh',
+    'shyam', 'sonu', 'sushil', 'umesh', 'vinod', 'vishal', 'vivek',
+    # Muslim names (common components)
+    'shaik', 'sheikh', 'syed', 'md', 'mohd', 'mohammad', 'mohammed',
+    'khan', 'ali', 'basha', 'hussain', 'pasha', 'mirza', 'ansari',
+    # Common female tokens
+    'devi', 'kumari', 'bai', 'amma',
+    # Relational tokens that appear standalone
+    'son', 'daughter', 'wife', 'husband',
 }
 
 _INDIC_TOKEN_MAP = {
@@ -148,7 +170,8 @@ def _transliterate_indic_approx(value):
 def _normalize_name(value):
     if not value:
         return ''
-    cleaned = _RELATIONAL_PREFIX_RE.sub(' ', str(value))
+    cleaned = _HONORIFIC_RE.sub(' ', str(value))
+    cleaned = _RELATIONAL_PREFIX_RE.sub(' ', cleaned)
     cleaned = _transliterate_indic_approx(cleaned)
     cleaned = cleaned.split('@')[0]
     cleaned = re.sub(r'[^a-zA-Z0-9\s]', ' ', cleaned.lower())
@@ -258,12 +281,34 @@ def _phonetic_overlap(a, b):
 
     inter = len(sdx_a & sdx_b)
     return (2.0 * inter) / (len(sdx_a) + len(sdx_b))
-    return (2.0 * inter) / (len(sdx_a) + len(sdx_b))
+
+
+_ADDRESS_STOP_WORDS = frozenset({
+    # Countries / mega-geographies
+    'india', 'bharat',
+    # Generic place descriptors
+    'dist', 'district', 'mandal', 'village', 'vill', 'post', 'po', 'ps', 'thana',
+    'taluk', 'taluq', 'tehsil', 'block', 'ward', 'colony', 'nagar', 'nagara',
+    'puram', 'peta', 'pet', 'guda', 'gudem', 'pally', 'palya', 'halli',
+    'road', 'st', 'street', 'lane', 'cross', 'main', 'circle', 'layout',
+    'near', 'opp', 'opposite', 'behind', 'beside', 'next', 'adj', 'adjacent',
+    'house', 'flat', 'door', 'no', 'num', 'plot', 'survey',
+    # Common direction words
+    'north', 'south', 'east', 'west', 'central',
+    # Filler words
+    'and', 'of', 'at', 'in', 'on', 'the', 'a', 'an',
+    # Numeric-only tokens (filtered separately, but belt-and-suspenders)
+})
 
 
 def _address_similarity(a, b):
-    ta = set(re.findall(r'[a-z0-9]+', (a or '').lower()))
-    tb = set(re.findall(r'[a-z0-9]+', (b or '').lower()))
+    def _tokens(text):
+        raw = set(re.findall(r'[a-z0-9]+', (text or '').lower()))
+        # Drop pure-numeric tokens (door/house numbers differ across FIRs) and stop-words
+        return {t for t in raw if not t.isdigit() and t not in _ADDRESS_STOP_WORDS and len(t) > 2}
+
+    ta = _tokens(a)
+    tb = _tokens(b)
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / len(ta | tb)
@@ -720,17 +765,22 @@ def _dedupe_same_crime_accused_rows(rows):
 
 
 _PLACEHOLDER_NAME_RE = re.compile(
-    r'^\s*(unknown|unidentified|not\s*known|unnamed|\?)\b',
+    r'^\s*(unknown|unidentified|not\s*known|unnamed|absconding|accused'
+    r'|male\s*person|female\s*person|person|suspect|juvenile|boy|girl|\?)\b',
     re.IGNORECASE,
 )
 
 
 def _age_score(current_age, candidate_age):
+    # age=0 is missing data, not a real age (newborns are not accused)
+    def _is_missing(age):
+        return age is None or str(age).strip() in ('', '0')
+
     # Both unknown → no evidence in either direction, contribute nothing.
-    if current_age is None and candidate_age is None:
+    if _is_missing(current_age) and _is_missing(candidate_age):
         return 0.0
     # One side unknown → mild neutral (can't confirm or deny).
-    if current_age is None or candidate_age is None:
+    if _is_missing(current_age) or _is_missing(candidate_age):
         return 0.3
     try:
         diff = abs(int(current_age) - int(candidate_age))
@@ -747,6 +797,36 @@ def _alias_score(current_alias, candidate_alias):
     if not current_alias or not candidate_alias:
         return 0.0
     return 1.0 if _normalize_name(current_alias) == _normalize_name(candidate_alias) else 0.0
+
+
+_FAKE_PHONE_NUMBERS = frozenset({
+    '9000000000', '9999999999', '8888888888', '7777777777', '0000000000',
+    '1111111111', '1234567890', '9876543210', '9111111111', '9000000001',
+})
+
+
+def _phone_score(current_phones, candidate_phones):
+    """Compare phone number lists; returns 1.0 on a genuine match, 0.0 otherwise.
+
+    Fake/dummy numbers (all same digit, sequential) are ignored.
+    """
+    def _clean(phones):
+        # DB stores phone_numbers as varchar (single value) or a list; normalise both.
+        if isinstance(phones, str):
+            phones = [phones]
+        out = set()
+        for p in (phones or []):
+            digits = re.sub(r'\D', '', str(p))
+            normalized = digits[-10:] if len(digits) >= 10 else digits
+            if normalized and normalized not in _FAKE_PHONE_NUMBERS and len(normalized) >= 8:
+                out.add(normalized)
+        return out
+
+    ca = _clean(current_phones)
+    cb = _clean(candidate_phones)
+    if not ca or not cb:
+        return 0.0
+    return 1.0 if ca & cb else 0.0
 
 
 def _token_fuzzy_similarity(a, b):
@@ -785,17 +865,25 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
 
     prefix_similarity = _name_similarity(name_a, name_b)
     token_similarity = _token_set_similarity(name_a, name_b)
-    
-    # Anagram check: If all tokens match exactly (e.g., "Senapathi Sai Kumar" vs "Sai Kumar Senapathi"), 
+
+    # Anagram check: If all tokens match exactly (e.g., "Senapathi Sai Kumar" vs "Sai Kumar Senapathi"),
     # sequence matching might be low due to word reordering. Boost prefix_similarity to reflect this.
     if token_similarity == 1.0:
         prefix_similarity = max(prefix_similarity, 0.95)
-        
+
     fuzzy_token_similarity = _token_fuzzy_similarity(name_a, name_b)
     phonetic_similarity = _phonetic_overlap(name_a, name_b)
     addr_similarity = _address_similarity(current.get('address'), candidate.get('address'))
     age_similarity = _age_score(current.get('age'), candidate.get('age'))
     alias_similarity = _alias_score(current.get('alias_name'), candidate.get('alias_name'))
+    phone_similarity = _phone_score(current.get('phone_numbers'), candidate.get('phone_numbers'))
+
+    # Alias cross-match: current's name vs candidate's alias (and vice versa)
+    alias_cross = 0.0
+    if name_a and candidate.get('alias_name'):
+        alias_cross = max(alias_cross, _name_similarity(name_a, candidate.get('alias_name')))
+    if name_b and current.get('alias_name'):
+        alias_cross = max(alias_cross, _name_similarity(name_b, current.get('alias_name')))
 
     score = (
         0.30 * prefix_similarity +
@@ -823,21 +911,31 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
     if current_assoc_codes and candidate_assoc_codes and (current_assoc_codes & candidate_assoc_codes):
         score += 0.06
 
+    # Phone match is a strong corroborating signal
+    if phone_similarity > 0:
+        score += 0.10
+
+    # Alias cross-match boost (name matches other party's alias)
+    if alias_cross > 0.85:
+        score += 0.08
+
     # Contextual boost: age and gender both match in same crime (only if name already has overlap)
-    # Only apply when there's already some name similarity to avoid false positives
     current_age = current.get('age')
     current_gender = current.get('gender')
     candidate_age = candidate.get('age')
     candidate_gender = candidate.get('gender')
-    
+
     gender_match = (current_gender and candidate_gender and str(current_gender).lower() == str(candidate_gender).lower())
-    
+
     if (fuzzy_token_similarity > 0 and current_age and candidate_age and gender_match and str(current_age) == str(candidate_age)):
         score += 0.12
 
-    # Define strong secondary evidence to waive penalties for name variations/missing surnames
+    # Define strong secondary evidence: verified non-name corroboration
+    # NOTE: addr_similarity > 0.8 requires meaningful tokens now (stop-words filtered),
+    # so a shared city/state alone no longer qualifies as strong evidence.
     strong_secondary_evidence = (
-        addr_similarity > 0.8 or 
+        phone_similarity > 0 or
+        addr_similarity > 0.8 or
         (age_similarity > 0.8 and gender_match) or
         (ps_code and cand_ps and str(ps_code) == str(cand_ps) and current_assoc_codes and candidate_assoc_codes and (current_assoc_codes & candidate_assoc_codes))
     )
@@ -849,21 +947,30 @@ def _dedup_score(current, candidate, ps_code, current_crime_profile, current_ass
     for t in (ta ^ tb):
         if t not in _COMMON_NAME_TOKENS:
             mismatched_distinctive += 1
-    
-    # Waiver: If strong secondary evidence is present, reduce the mismatch penalty
-    # (If they share address/age/associates, a name typo or missing surname is likely)
+
     if mismatched_distinctive > 0:
         penalty = 0.15 * mismatched_distinctive
         if strong_secondary_evidence:
-            penalty *= 0.3  # 70% reduction in penalty
+            penalty *= 0.3  # 70% reduction when strong corroboration exists
         score -= penalty
 
-    # Common name strictness: force requirement of secondary evidence
+    # Common name strictness: all tokens are common (Shiva, Rahul, Ravi...)
+    # Require strong secondary evidence; without it, cap at Tier-2 threshold.
     all_common = all(t in _COMMON_NAME_TOKENS for t in ta) or all(t in _COMMON_NAME_TOKENS for t in tb)
-    if all_common:
-        # Waiver: If we have strong secondary evidence, don't penalize
-        if not strong_secondary_evidence:
-            score *= 0.80
+    if all_common and not strong_secondary_evidence:
+        score *= 0.60  # was 0.80; tightened so pure name-only common names can't reach Tier-1
+
+    # Minimum evidence gate: name-only records must NOT reach Tier-1 (≥0.70).
+    # At least one secondary field must carry meaningful signal.
+    has_secondary = (
+        addr_similarity > 0.0 or
+        phone_similarity > 0.0 or
+        age_similarity > 0.3 or  # > 0.3 means at least one age is known
+        alias_similarity > 0.0 or
+        alias_cross > 0.0
+    )
+    if not has_secondary:
+        score = min(score, 0.64)  # cap just below Tier-1 boundary
 
     return round(max(0.0, min(score, 1.0)), 2)
 
