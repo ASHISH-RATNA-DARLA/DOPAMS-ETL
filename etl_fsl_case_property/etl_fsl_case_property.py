@@ -705,68 +705,37 @@ class FSLCasePropertyETL:
         # Use fsl_case_property_url from config (which reads from .env)
         url = API_CONFIG.get('fsl_case_property_url', f"{API_CONFIG['base_url']}/case-property")
         params = {
-        Check if FSL MO_ID maps to any MO seizure key for the same crime.
-        Returns True to allow insert - this is an audit check, not a strict FK gate.
+            'fromDate': from_date,
+            'toDate': to_date
         }
-        Matching strategy:
-        1) crime_id + mo_seizure_id (primary observed API mapping)
-        2) crime_id + mo_id (legacy/alternate mapping)
+        headers = {
+            'x-api-key': API_CONFIG['api_key']
+        }
 
-        If neither matches, log an informational warning for investigation.
-        }
-        
         for attempt in range(API_CONFIG['max_retries']):
             try:
                 logger.debug(f"Fetching FSL case property: {from_date} to {to_date} (Attempt {attempt + 1})")
                 logger.trace(f"API Request - URL: {url}, Params: {params}, Headers: {headers}")
-                SELECT
-                    EXISTS (
-                        SELECT 1
-                        FROM {MO_SEIZURES_TABLE}
-                        WHERE crime_id = %s
-                          AND mo_seizure_id = %s
-                    ) AS match_mo_seizure_id,
-                    EXISTS (
-                        SELECT 1
-                        FROM {MO_SEIZURES_TABLE}
-                        WHERE crime_id = %s
-                          AND mo_id = %s
-                    ) AS match_mo_id
-                """,
-                (crime_id, mo_id, crime_id, mo_id)
-            )
-            row = self.db_cursor.fetchone()
-            match_mo_seizure_id = bool(row[0]) if row else False
-            match_mo_id = bool(row[1]) if row else False
+                response = requests.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=API_CONFIG['timeout']
+                )
+                logger.trace(f"API Response - Status: {response.status_code}, Headers: {dict(response.headers)}")
 
-            if match_mo_seizure_id:
-                logger.trace(
-                    "MO_ID %s matched in %s via mo_seizure_id for CRIME_ID %s",
-                    mo_id,
-                    MO_SEIZURES_TABLE,
-                    crime_id,
-                )
-            elif match_mo_id:
-                logger.trace(
-                    "MO_ID %s matched in %s via mo_id for CRIME_ID %s",
-                    mo_id,
-                    MO_SEIZURES_TABLE,
-                    crime_id,
-                )
-            else:
-                logger.warning(
-                    "⚠️  [INFO] MO_ID %s not found in %s for CRIME_ID %s "
-                    "(checked mo_seizure_id + mo_id; API reference, allowing insert)",
-                    mo_id,
-                    MO_SEIZURES_TABLE,
-                    crime_id,
-                )
+                if response.status_code == 200:
+                    data = response.json()
+                    self.stats['total_api_calls'] += 1
 
-            return True  # Always allow insert; this is audit-only validation.
-        except Exception as e:
-            logger.error(f"Error validating mo_id={mo_id} for crime_id={crime_id}: {e}")
-            self.db_conn.rollback()
-            return True  # Allow insert on validation error
+                    # Handle both single object and array responses
+                    if data.get('status'):
+                        case_property_data = data.get('data')
+                        if case_property_data:
+                            # If single object, convert to list
+                            if isinstance(case_property_data, dict):
+                                case_property_data = [case_property_data]
+
                             # Extract crime_ids for logging
                             crime_ids = [d.get('CRIME_ID') for d in case_property_data if d.get('CRIME_ID')]
                             
@@ -1255,7 +1224,7 @@ class FSLCasePropertyETL:
             if push_fk_failure is not None and original_crime_id:
                 try:
                     push_fk_failure(
-                        conn, 'fsl_case_property',
+                        self.db_conn, 'fsl_case_property',
                         record_id=original_crime_id,
                         record_json=json.dumps(
                             {k: str(v) if v is not None else None
@@ -1264,7 +1233,7 @@ class FSLCasePropertyETL:
                         missing_fk_column='crime_id',
                         missing_fk_value=original_crime_id,
                     )
-                    conn.commit()
+                    self.db_conn.commit()
                 except Exception as _qe:
                     logger.warning("FK queue push failed for fsl_case_property %s: %s",
                                    original_crime_id, _qe)
@@ -1741,7 +1710,7 @@ class FSLCasePropertyETL:
                 return False  # Still missing
             record['crime_id'] = original_crime_id
             record['_original_crime_id'] = original_crime_id
-            success, _ = self.insert_case_property(record, conn, cur, 'FK_RETRY')
+            success, _ = self.insert_fsl_case_property(record, 'FK_RETRY')
             return success
 
     def run(self):
@@ -1770,10 +1739,9 @@ class FSLCasePropertyETL:
         # Retry any FSL case property records queued from previous runs due to FK misses.
         if _drain_fk_queue is not None:
             try:
-                with self.db_pool.get_connection_context() as _drain_conn:
-                    _drain_fk_queue(_drain_conn, 'fsl_case_property',
-                                    self._retry_fsl_case_property_record)
-                    _drain_conn.commit()
+                _drain_fk_queue(self.db_conn, 'fsl_case_property',
+                                self._retry_fsl_case_property_record)
+                self.db_conn.commit()
             except Exception as _de:
                 logger.warning("FK queue drain failed at startup: %s (non-fatal)", _de)
         

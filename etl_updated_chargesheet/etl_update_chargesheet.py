@@ -962,7 +962,7 @@ class UpdatedChargesheetETL:
             if push_fk_failure is not None:
                 try:
                     push_fk_failure(
-                        conn, 'updated_chargesheet',
+                        self._conn, 'updated_chargesheet',
                         record_id=original_crime_id or 'UNKNOWN',
                         record_json=json.dumps(
                             {k: str(v) if v is not None else None
@@ -971,7 +971,7 @@ class UpdatedChargesheetETL:
                         missing_fk_column='crime_id',
                         missing_fk_value=original_crime_id or '',
                     )
-                    conn.commit()
+                    self._conn.commit()
                 except Exception as _qe:
                     logger.warning("FK queue push failed for updated_chargesheet %s: %s",
                                    original_crime_id, _qe)
@@ -1468,10 +1468,9 @@ class UpdatedChargesheetETL:
         # Retry any updated chargesheet records queued from previous runs due to FK misses.
         if _drain_fk_queue is not None:
             try:
-                with self.db_pool.get_connection_context() as _drain_conn:
-                    _drain_fk_queue(_drain_conn, 'updated_chargesheet',
-                                    self._retry_updated_chargesheet_record)
-                    _drain_conn.commit()
+                _drain_fk_queue(self._conn, 'updated_chargesheet',
+                                self._retry_updated_chargesheet_record)
+                self._conn.commit()
             except Exception as _de:
                 logger.warning("FK queue drain failed at startup: %s (non-fatal)", _de)
         

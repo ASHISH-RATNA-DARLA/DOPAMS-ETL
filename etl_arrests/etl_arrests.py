@@ -826,7 +826,8 @@ class ArrestsETL:
     
     def log_invalid_ids(self, arrests: Dict, invalid_ids: Dict, chunk_range: str = ""):
         """
-        Log arrests that failed due to invalid IDs (crime_id or person_id - both cause records to be skipped)
+        Log arrests with invalid IDs (crime_id causes the record to be skipped; person_id is
+        optional and the record is still processed with person_id=NULL)
 
         Args:
             arrests: Transformed arrests dict
@@ -926,36 +927,38 @@ class ArrestsETL:
         # Validate IDs and track which ones are invalid
         invalid_ids = {}
         has_invalid_ids = False
-        
+
         # Validate crime_id (required)
         if not crime_id:
             invalid_ids['crime_id'] = True
             has_invalid_ids = True
-        
+
         # Validate person_id (optional - only if provided in API)
         if original_person_id and not person_id:
             invalid_ids['person_id'] = True
             has_invalid_ids = True
 
-        # Skip if crime_id or person_id is invalid (both required to maintain referential integrity)
-        if invalid_ids.get('crime_id') or invalid_ids.get('person_id'):
+        # PERSON_ID is an optional FK — an invalid/unresolved PERSON_ID must NOT drop the
+        # record; it is still inserted with person_id=NULL. Only a missing/invalid
+        # CRIME_ID (required FK) causes the record to be skipped.
+        if invalid_ids.get('person_id'):
+            logger.warning(f"⚠️  Invalid PERSON_ID: {original_person_id}, processing arrests with NULL")
+            with self.stats_lock:
+                self.stats['total_arrests_failed_person_id'] += 1
+            self.log_invalid_ids(arrests, invalid_ids, chunk_date_range)
+
+        if invalid_ids.get('crime_id'):
             reason = 'invalid_ids'
             error_details = f"Invalid IDs: {invalid_ids}"
-
-            if invalid_ids.get('crime_id'):
-                logger.warning(f"⚠️  {error_details}, skipping arrests")
-            if invalid_ids.get('person_id'):
-                logger.warning(f"⚠️  {error_details}, skipping arrests")
+            logger.warning(f"⚠️  {error_details}, skipping arrests")
 
             with self.stats_lock:
                 self.stats['total_arrests_failed'] += 1
-                if invalid_ids.get('crime_id'):
-                    self.stats['total_arrests_failed_crime_id'] += 1
-                if invalid_ids.get('person_id'):
-                    self.stats['total_arrests_failed_person_id'] += 1
+                self.stats['total_arrests_failed_crime_id'] += 1
 
             self.log_failed_record(arrests, reason, error_details)
-            self.log_invalid_ids(arrests, invalid_ids, chunk_date_range)
+            if not invalid_ids.get('person_id'):
+                self.log_invalid_ids(arrests, invalid_ids, chunk_date_range)
 
             # Park in FK retry queue — recovers when crime record arrives
             if push_fk_failure is not None and invalid_ids.get('crime_id'):
@@ -1206,26 +1209,16 @@ class ArrestsETL:
                         invalid_ids['crime_id'] = True
                     if original_person_id and not person_id:
                         invalid_ids['person_id'] = True
-                    
-                    # Skip if crime_id or person_id is invalid (both required to maintain referential integrity)
-                    if invalid_ids.get('crime_id') or invalid_ids.get('person_id'):
-                        with chunk_lock:
-                            if invalid_ids.get('crime_id'):
-                                logger.warning(f"⚠️  Arrests with invalid CRIME_ID: {original_crime_id}, skipping")
-                                with self.stats_lock:
-                                    self.stats['total_arrests_failed'] += 1
-                                    self.stats['total_arrests_failed_crime_id'] += 1
-                            if invalid_ids.get('person_id'):
-                                logger.warning(f"⚠️  Arrests with invalid PERSON_ID: {original_person_id}, skipping")
-                                with self.stats_lock:
-                                    self.stats['total_arrests_failed'] += 1
-                                    self.stats['total_arrests_failed_person_id'] += 1
 
-                            chunk_state['failed_keys'].append(f"{original_crime_id}:{accused_seq_no}")
-                            reason = 'invalid_ids'
-                            if reason not in chunk_state['failed_reasons']:
-                                chunk_state['failed_reasons'][reason] = []
-                            chunk_state['failed_reasons'][reason].append(f"{original_crime_id}:{accused_seq_no}")
+                    # PERSON_ID is an optional FK (see transform_arrests: "foreign key to
+                    # persons.person_id (optional)") — an invalid/unresolved PERSON_ID must
+                    # NOT drop the record; it is still inserted with person_id=NULL. Only a
+                    # missing/invalid CRIME_ID (required FK) causes the record to be skipped.
+                    if invalid_ids.get('person_id'):
+                        with chunk_lock:
+                            logger.warning(f"⚠️  Arrests with invalid PERSON_ID: {original_person_id}, processing with NULL")
+                            with self.stats_lock:
+                                self.stats['total_arrests_failed_person_id'] += 1
                             chunk_state['invalid_ids_in_chunk'].append({
                                 'crime_id': original_crime_id,
                                 'person_id': original_person_id,
@@ -1233,6 +1226,27 @@ class ArrestsETL:
                                 'invalid_ids': invalid_ids
                             })
                             self.log_invalid_ids(arrests, invalid_ids, chunk_range)
+
+                    if invalid_ids.get('crime_id'):
+                        with chunk_lock:
+                            logger.warning(f"⚠️  Arrests with invalid CRIME_ID: {original_crime_id}, skipping")
+                            with self.stats_lock:
+                                self.stats['total_arrests_failed'] += 1
+                                self.stats['total_arrests_failed_crime_id'] += 1
+
+                            chunk_state['failed_keys'].append(f"{original_crime_id}:{accused_seq_no}")
+                            reason = 'invalid_ids'
+                            if reason not in chunk_state['failed_reasons']:
+                                chunk_state['failed_reasons'][reason] = []
+                            chunk_state['failed_reasons'][reason].append(f"{original_crime_id}:{accused_seq_no}")
+                            if not invalid_ids.get('person_id'):
+                                chunk_state['invalid_ids_in_chunk'].append({
+                                    'crime_id': original_crime_id,
+                                    'person_id': original_person_id,
+                                    'accused_seq_no': accused_seq_no,
+                                    'invalid_ids': invalid_ids
+                                })
+                                self.log_invalid_ids(arrests, invalid_ids, chunk_range)
                         return
                     
                     # Create unique key for tracking duplicates (based on unique constraint)
@@ -1785,9 +1799,9 @@ class ArrestsETL:
             logger.info(f"  Total Duplicate Occurrences (Processed): {self.stats['total_duplicates']}")
             logger.info(f"  Note: All duplicates are processed to allow updates")
             logger.info(f"")
-            logger.info(f"⚠️  INVALID IDs (SKIPPED):")
+            logger.info(f"⚠️  INVALID IDs:")
             logger.info(f"  Arrests SKIPPED Due to Invalid CRIME_ID: {self.stats['total_arrests_failed_crime_id']}")
-            logger.info(f"  Arrests SKIPPED Due to Invalid PERSON_ID: {self.stats['total_arrests_failed_person_id']}")
+            logger.info(f"  Arrests Processed with NULL PERSON_ID (invalid/unresolved): {self.stats['total_arrests_failed_person_id']}")
             logger.info(f"    Check logs/arrests_invalid_ids_*.log for details")
             logger.info(f"")
             logger.info(f"📊 COVERAGE:")
