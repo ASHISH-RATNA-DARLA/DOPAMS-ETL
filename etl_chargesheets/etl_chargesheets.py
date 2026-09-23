@@ -27,6 +27,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
+from env_utils import get_etl_run_id
 
 try:
     from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
@@ -82,6 +83,11 @@ CHARGESHEET_ACCUSED_TABLE = TABLE_CONFIG.get('chargesheet_accused', 'chargesheet
 CHARGESHEET_MEDIA_TABLE = TABLE_CONFIG.get('chargesheet_media', 'chargesheet_media')
 CHARGESHEET_ACTS_SECTIONS_TABLE = TABLE_CONFIG.get('chargesheet_acts_sections', 'chargesheet_acts_sections')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/chargesheets'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -1157,6 +1163,10 @@ class ChargesheetsETL:
                     
                     # Only update if there are changes
                     if update_fields:
+                        # Bump provenance alongside any real business-field change —
+                        # a re-verified-unchanged row does not need a new fetched_at.
+                        update_fields.extend(['source_system = %s', 'source_endpoint = %s', 'fetched_at = %s', 'etl_run_id = %s'])
+                        update_values.extend([SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID])
                         update_query = f"""
                             UPDATE {CHARGESHEETS_TABLE} SET
                                 {', '.join(update_fields)}
@@ -1191,7 +1201,8 @@ class ChargesheetsETL:
                 insert_columns = [
                     'id', 'crime_id', 'chargesheet_no', 'chargesheet_no_icjs', 'chargesheet_date',
                     'chargesheet_type', 'court_name', 'is_ccl', 'is_esigned',
-                    'date_created', 'date_modified'
+                    'date_created', 'date_modified',
+                    'source_system', 'source_endpoint', 'fetched_at', 'etl_run_id'
                 ]
                 insert_values = [
                     chargesheet_id,
@@ -1204,7 +1215,11 @@ class ChargesheetsETL:
                     chargesheet.get('is_ccl'),
                     chargesheet.get('is_esigned'),
                     chargesheet.get('date_created'),
-                    chargesheet.get('date_modified')
+                    chargesheet.get('date_modified'),
+                    SOURCE_SYSTEM,
+                    SOURCE_ENDPOINT,
+                    datetime.now(timezone.utc),
+                    ETL_RUN_ID
                 ]
                 if has_api_key:
                     insert_columns.insert(1, 'charge_sheet_id')

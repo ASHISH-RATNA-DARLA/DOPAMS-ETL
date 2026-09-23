@@ -24,7 +24,7 @@ import re
 # Import PostgreSQLConnectionPool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
-from env_utils import get_float_env, get_int_env
+from env_utils import get_float_env, get_int_env, get_etl_run_id
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
@@ -34,6 +34,11 @@ from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 # Set to 0 for Full Historical Fetch (Reset)
 # ==========================================
 RUN_MODE = get_int_env('ACCUSED_RUN_MODE', 1)
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/accused'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -1412,6 +1417,10 @@ class AccusedETL:
                     
                     # Only update if there are changes
                     if update_fields:
+                        # Bump provenance alongside any real business-field change —
+                        # a re-verified-unchanged row does not need a new fetched_at.
+                        update_fields.extend(['source_system = %s', 'source_endpoint = %s', 'fetched_at = %s', 'etl_run_id = %s'])
+                        update_values.extend([SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID])
                         update_query = f"""
                             UPDATE {ACCUSED_TABLE} SET
                                 {', '.join(update_fields)}
@@ -1469,11 +1478,13 @@ class AccusedETL:
                         accused_id, crime_id, person_id, accused_code, type, seq_num, is_ccl,
                         beard, build, color, ear, eyes, face, hair, height,
                         leucoderma, mole, mustache, nose, teeth, accused_status,
-                        date_created, date_modified
+                        date_created, date_modified,
+                        source_system, source_endpoint, fetched_at, etl_run_id
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s
                     )
-                    ON CONFLICT (accused_id) 
+                    ON CONFLICT (accused_id)
                     DO UPDATE SET
                         crime_id = EXCLUDED.crime_id,
                         person_id = EXCLUDED.person_id,
@@ -1496,7 +1507,11 @@ class AccusedETL:
                         teeth = EXCLUDED.teeth,
                         accused_status = EXCLUDED.accused_status,
                         date_created = EXCLUDED.date_created,
-                        date_modified = EXCLUDED.date_modified
+                        date_modified = EXCLUDED.date_modified,
+                        source_system = EXCLUDED.source_system,
+                        source_endpoint = EXCLUDED.source_endpoint,
+                        fetched_at = EXCLUDED.fetched_at,
+                        etl_run_id = EXCLUDED.etl_run_id
                 """
                 
                 try:
@@ -1526,7 +1541,11 @@ class AccusedETL:
                         accused['teeth'],
                         accused['accused_status'],
                         accused['date_created'],  # From API/crime (or NULL)
-                        accused['date_modified']  # From API/crime (or NULL)
+                        accused['date_modified'],  # From API/crime (or NULL)
+                        SOURCE_SYSTEM,
+                        SOURCE_ENDPOINT,
+                        datetime.now(timezone.utc),
+                        ETL_RUN_ID
                     ))
                     
                     # Check if it was an insert or update

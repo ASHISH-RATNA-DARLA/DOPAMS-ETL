@@ -22,11 +22,17 @@ from typing import Dict, Optional, List, Set, Tuple, Any
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
+from env_utils import get_etl_run_id
 
 from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDER_CONFIG, PERSON_GENDER_LLM_CONFIG
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/person-details'
+ETL_RUN_ID = get_etl_run_id()
 
 
 def parse_iso_date(iso_date_str: str) -> datetime:
@@ -1744,7 +1750,11 @@ class PersonsETL:
                         country_code=COALESCE(%s, country_code),
                         email_id=COALESCE(%s, email_id),
                         date_created=COALESCE(%s, date_created),
-                        date_modified=COALESCE(%s, date_modified)
+                        date_modified=COALESCE(%s, date_modified),
+                        source_system=%s,
+                        source_endpoint=%s,
+                        fetched_at=%s,
+                        etl_run_id=%s
                     WHERE person_id=%s
                     """,
                     (
@@ -1793,6 +1803,7 @@ class PersonsETL:
                         self.truncate_string(contact.get('COUNTRY_CODE'), 10, 'country_code'),
                         self.truncate_string(contact.get('EMAIL_ID'), 255, 'email_id'),
                         date_created, date_modified,
+                        SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID,
                         person_id
                     )
                 )
@@ -1830,7 +1841,8 @@ class PersonsETL:
                         permanent_district, permanent_state_ut, permanent_country, permanent_residency_type,
                         permanent_pin_code, permanent_jurisdiction_ps,
                         phone_number, country_code, email_id,
-                        date_created, date_modified
+                        date_created, date_modified,
+                        source_system, source_endpoint, fetched_at, etl_run_id
                     ) VALUES (
                         %s,%s,%s,%s,%s,
                         %s,%s,%s,%s,
@@ -1846,7 +1858,8 @@ class PersonsETL:
                         %s,%s,%s,%s,
                         %s,%s,
                         %s,%s,%s,
-                        %s, %s
+                        %s, %s,
+                        %s, %s, %s, %s
                     )
                     """,
                     (
@@ -1895,7 +1908,8 @@ class PersonsETL:
                         primary_phone,
                         self.truncate_string(contact.get('COUNTRY_CODE'), 10, 'country_code'),
                         self.truncate_string(contact.get('EMAIL_ID'), 255, 'email_id'),
-                        date_created, date_modified
+                        date_created, date_modified,
+                        SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID
                     )
                 )
 

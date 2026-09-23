@@ -18,6 +18,7 @@ import sys
 # Import PostgreSQLConnectionPool using relative path based on user instructions
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
+from env_utils import get_etl_run_id
 from tqdm import tqdm
 import logging
 import colorlog
@@ -66,6 +67,11 @@ else:
 
 # Target table (allows redirecting ETL runs to test tables)
 HIERARCHY_TABLE = TABLE_CONFIG.get('hierarchy', 'hierarchy')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/master-data/hierarchy'
+ETL_RUN_ID = get_etl_run_id()
 
 
 def parse_iso_date(date_str: str) -> datetime:
@@ -735,6 +741,10 @@ class HierarchyETL:
                     
                     # Only update if there are changes
                     if update_fields:
+                        # Bump provenance alongside any real business-field change —
+                        # a re-verified-unchanged row does not need a new fetched_at.
+                        update_fields.extend(['source_system = %s', 'source_endpoint = %s', 'fetched_at = %s', 'etl_run_id = %s'])
+                        update_values.extend([SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID])
                         update_query = f"""
                             UPDATE {HIERARCHY_TABLE} SET
                                 {', '.join(update_fields)}
@@ -776,7 +786,13 @@ class HierarchyETL:
                 else:
                     # If table_columns not provided, use all fields from record
                     fields_to_insert = record
-                
+
+                # CCTNS V2 source-provenance columns (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+                fields_to_insert['source_system'] = SOURCE_SYSTEM
+                fields_to_insert['source_endpoint'] = SOURCE_ENDPOINT
+                fields_to_insert['fetched_at'] = datetime.now(timezone.utc)
+                fields_to_insert['etl_run_id'] = ETL_RUN_ID
+
                 # Build dynamic INSERT query
                 columns = list(fields_to_insert.keys())
                 placeholders = ', '.join(['%s'] * len(columns))

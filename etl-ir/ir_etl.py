@@ -28,8 +28,14 @@ try:
     from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 except ImportError:
     pass
+from env_utils import get_etl_run_id
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/interrogation-reports/v1/'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -894,10 +900,14 @@ class InterrogationReportsETL:
                     is_facing_trial = %s, facing_trial_ps_name = %s, facing_trial_crime_num = %s,
                     other_regular_habits = %s, other_indulgence_before_offence = %s,
                     time_since_modus_operandi = %s,
-                    date_created = %s, date_modified = %s
+                    date_created = %s, date_modified = %s,
+                    source_system = %s, source_endpoint = %s, fetched_at = %s, etl_run_id = %s
                 WHERE interrogation_report_id = %s
             """
-            cursor.execute(update_sql, main_values[1:] + (main_values[0],))
+            cursor.execute(
+                update_sql,
+                main_values[1:] + (SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID, main_values[0])
+            )
         else:
             # Insert new record
             insert_sql = f"""
@@ -922,14 +932,19 @@ class InterrogationReportsETL:
                     is_facing_trial, facing_trial_ps_name, facing_trial_crime_num,
                     other_regular_habits, other_indulgence_before_offence,
                     time_since_modus_operandi,
-                    date_created, date_modified
+                    date_created, date_modified,
+                    source_system, source_endpoint, fetched_at, etl_run_id
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
                 )
             """
-            cursor.execute(insert_sql, main_values)
+            cursor.execute(
+                insert_sql,
+                main_values + (SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID)
+            )
     
     def insert_related_records(self, record: Dict[str, Any], cursor):
         """Insert all related records for an IR. Person_id is optional - all data is inserted."""

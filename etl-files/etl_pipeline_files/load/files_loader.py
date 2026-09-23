@@ -1,10 +1,27 @@
 """
 Load file records into files table with idempotency
 """
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
 import psycopg2
 from psycopg2.extras import execute_values, RealDictCursor
 from typing import List, Dict, Any
 import logging
+
+# Ensure the repo root (where env_utils.py lives) is on sys.path.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from env_utils import get_etl_run_id
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+# `files` rows are derived from fields already fetched by other entity ETLs
+# (crimes/accused/persons/IR/properties/...), not from a single CCTNS endpoint,
+# so source_endpoint is set per-row below from each record's own source_type.
+SOURCE_SYSTEM = 'CCTNS_V2'
+ETL_RUN_ID = get_etl_run_id()
 
 
 class FilesLoader:
@@ -113,7 +130,8 @@ class FilesLoader:
                         INSERT INTO files (
                             source_type, source_field, parent_id, file_id,
                             file_index, identity_type, identity_number,
-                            has_field, is_empty, created_at
+                            has_field, is_empty, created_at,
+                            source_system, source_endpoint, fetched_at, etl_run_id
                         )
                         VALUES %s
                         ON CONFLICT DO NOTHING
@@ -193,10 +211,15 @@ class FilesLoader:
                             r.get('identity_number'),
                             r.get('has_field', True),
                             r.get('is_empty', r.get('file_id') is None),
-                            created_at
+                            created_at,
+                            SOURCE_SYSTEM,
+                            f"derived:{r['source_type']}",
+                            datetime.now(timezone.utc),
+                            ETL_RUN_ID
                         ))
                 else:
-                    # Fallback: don't include created_at if column doesn't exist
+                    # Fallback: don't include created_at (or the provenance columns
+                    # added alongside it) if the table predates that migration.
                     insert_query = """
                         INSERT INTO files (
                             source_type, source_field, parent_id, file_id,

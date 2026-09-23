@@ -26,6 +26,7 @@ if PROJECT_ROOT not in sys.path:
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
+from env_utils import get_etl_run_id
 
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
@@ -71,6 +72,11 @@ else:
 MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
 MO_SEIZURE_MEDIA_TABLE = TABLE_CONFIG.get('mo_seizure_media', 'mo_seizure_media')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/mo-seizures'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -1137,6 +1143,11 @@ class MoSeizureETL:
 
                     # Only update if there are changes in the parent row or media set
                     if update_fields or media_changed:
+                        if update_fields:
+                            # Bump provenance alongside any real business-field change —
+                            # a re-verified-unchanged row does not need a new fetched_at.
+                            update_fields.extend(['source_system = %s', 'source_endpoint = %s', 'fetched_at = %s', 'etl_run_id = %s'])
+                            update_values.extend([SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID])
                         update_query = f"""
                             UPDATE {MO_SEIZURES_TABLE} SET
                                 {', '.join(update_fields)}
@@ -1174,9 +1185,11 @@ class MoSeizureETL:
                         pos_address1, pos_address2, pos_city, pos_district, pos_pincode,
                         pos_landmark, pos_description, pos_latitude, pos_longitude,
                         mo_media_url, mo_media_name, mo_media_file_id,
-                        date_created, date_modified
+                        date_created, date_modified,
+                        source_system, source_endpoint, fetched_at, etl_run_id
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s
                     )
                 """
                 cursor.execute(insert_query, (
@@ -1204,7 +1217,11 @@ class MoSeizureETL:
                     seizure.get('mo_media_name'),
                     seizure.get('mo_media_file_id'),
                     seizure.get('date_created'),  # From API (or NULL)
-                    seizure.get('date_modified')  # From API (or NULL)
+                    seizure.get('date_modified'),  # From API (or NULL)
+                    SOURCE_SYSTEM,
+                    SOURCE_ENDPOINT,
+                    datetime.now(timezone.utc),
+                    ETL_RUN_ID
                 ))
                 if media_entries:
                     self.sync_seizure_media(mo_seizure_id, media_entries, conn, cursor)

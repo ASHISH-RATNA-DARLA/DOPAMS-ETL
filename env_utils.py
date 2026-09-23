@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Union
 from urllib.parse import urlparse
@@ -461,3 +462,10 @@ def resolve_table_name(env_key: str, default: str) -> str:
     value = first_env(env_key, default="")
     value = (value or "").strip()
     return value or default
+
+
+def get_etl_run_id() -> str:
+    """Return the current pipeline run's ETL_RUN_ID (set by master_etl.py on every
+    run and passed down to each child ETL process), or mint a standalone one when
+    a script is invoked directly outside the master orchestrator."""
+    return first_env("ETL_RUN_ID", default="") or str(uuid.uuid4())

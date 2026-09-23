@@ -40,6 +40,8 @@ except ImportError:  # pragma: no cover
     push_fk_failure = None
     _drain_fk_queue = None
 
+from env_utils import get_etl_run_id
+
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
@@ -85,6 +87,11 @@ ARRESTS_TABLE = TABLE_CONFIG.get('arrests', 'arrests')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 PERSONS_TABLE = TABLE_CONFIG.get('persons', 'persons')
 ACCUSED_TABLE = TABLE_CONFIG.get('accused', 'accused')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/arrests'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -1075,6 +1082,10 @@ class ArrestsETL:
                     
                     # Only update if there are changes
                     if update_fields:
+                        # Bump provenance alongside any real business-field change —
+                        # a re-verified-unchanged row does not need a new fetched_at.
+                        update_fields.extend(['source_system = %s', 'source_endpoint = %s', 'fetched_at = %s', 'etl_run_id = %s'])
+                        update_values.extend([SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID])
                         update_query = f"""
                             UPDATE {ARRESTS_TABLE} SET
                                 {', '.join(update_fields)}
@@ -1106,9 +1117,11 @@ class ArrestsETL:
                         crime_id, person_id, accused_seq_no, accused_code, accused_type,
                         is_arrested, arrested_date, is_41a_crpc, is_41a_explain_submitted,
                         date_of_issue_41a, is_ccl, is_apprehended, is_absconding, is_died,
-                        date_created, date_modified
+                        date_created, date_modified,
+                        source_system, source_endpoint, fetched_at, etl_run_id
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s
                     )
                 """
                 cursor.execute(insert_query, (
@@ -1127,7 +1140,11 @@ class ArrestsETL:
                     arrests.get('is_absconding'),
                     arrests.get('is_died'),
                     arrests.get('date_created'),  # From API (or NULL)
-                    arrests.get('date_modified')  # From API (or NULL)
+                    arrests.get('date_modified'),  # From API (or NULL)
+                    SOURCE_SYSTEM,
+                    SOURCE_ENDPOINT,
+                    datetime.now(timezone.utc),
+                    ETL_RUN_ID
                 ))
                 with self.stats_lock:
                     self.stats['total_arrests_inserted'] += 1

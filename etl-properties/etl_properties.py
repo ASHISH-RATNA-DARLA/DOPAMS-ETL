@@ -25,6 +25,7 @@ try:
     from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 except ImportError:
     pass
+from env_utils import get_etl_run_id
 
 import json
 
@@ -56,6 +57,11 @@ CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 PENDING_FK_TABLE = 'properties_pending_fk'
 PROPERTY_ADDITIONAL_DETAILS_TABLE = TABLE_CONFIG.get('property_additional_details', 'property_additional_details')
 PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('property_media', 'property_media')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/property-details'
+ETL_RUN_ID = get_etl_run_id()
 
 
 def parse_iso_date(date_str: str) -> datetime:
@@ -908,9 +914,11 @@ class PropertiesETL:
                     recovered_from, place_of_recovery, date_of_seizure, nature,
                     belongs, estimate_value, recovered_value, particular_of_property,
                     category, additional_details, media,
-                    date_created, date_modified
+                    date_created, date_modified,
+                    source_system, source_endpoint, fetched_at, etl_run_id
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
                 )
                 ON CONFLICT (property_id) DO UPDATE SET
                     crime_id = EXCLUDED.crime_id,
@@ -928,7 +936,11 @@ class PropertiesETL:
                     additional_details = EXCLUDED.additional_details,
                     media = EXCLUDED.media,
                     date_created = EXCLUDED.date_created,
-                    date_modified = EXCLUDED.date_modified
+                    date_modified = EXCLUDED.date_modified,
+                    source_system = EXCLUDED.source_system,
+                    source_endpoint = EXCLUDED.source_endpoint,
+                    fetched_at = EXCLUDED.fetched_at,
+                    etl_run_id = EXCLUDED.etl_run_id
                 WHERE (
                     {PROPERTIES_TABLE}.crime_id IS DISTINCT FROM EXCLUDED.crime_id OR
                     {PROPERTIES_TABLE}.case_property_id IS DISTINCT FROM EXCLUDED.case_property_id OR
@@ -967,7 +979,11 @@ class PropertiesETL:
                 self.to_jsonb_param(prop['additional_details']),
                 self.to_jsonb_param(prop['media']),
                 prop['date_created'],
-                prop['date_modified']
+                prop['date_modified'],
+                SOURCE_SYSTEM,
+                SOURCE_ENDPOINT,
+                datetime.now(timezone.utc),
+                ETL_RUN_ID
             ))
 
             upsert_result = cursor.fetchone()

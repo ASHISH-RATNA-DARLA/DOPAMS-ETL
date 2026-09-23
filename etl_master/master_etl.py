@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime
 
 os.environ["TZ"] = "Asia/Kolkata"
@@ -199,12 +200,17 @@ def normalize_processes_for_unified_mode(processes):
     return normalized
 
 
-def validate_brief_facts_ai_wiring(processes, config_path):
+def validate_brief_facts_ai_wiring(processes, config_path, pure_cctns=False):
     has_unified_block = any((process.get("name") or "").strip().lower() == "brief_facts_ai" for process in processes)
     has_legacy_accused = any((process.get("name") or "").strip().lower() == "brief_facts_accused" for process in processes)
 
     if has_unified_block or has_legacy_accused:
         logger.info("Unified brief_facts_ai orchestration enabled")
+    elif pure_cctns:
+        logger.info(
+            "PURE-CCTNS mode: brief_facts_ai step intentionally absent from %s",
+            config_path,
+        )
     else:
         logger.warning(
             "Unified brief_facts_ai orchestration enabled, but no matching block was found in %s",
@@ -393,13 +399,13 @@ def resolve_config_path(args):
     """Prefer --config, but keep --input-file as backward-compatible alias.
     Falls back to searching in the script directory if the file is not in CWD.
     """
-    path = "input.txt"
+    path = "input.cctns-pure.txt" if args.pure_cctns else "input.txt"
     if args.config:
         path = args.config
     elif args.input_file:
         logger.warning("--input-file is deprecated; use --config going forward")
         path = args.input_file
-    
+
     if os.path.exists(path):
         return path
         
@@ -442,9 +448,28 @@ def main():
     parser.add_argument("--env", default="prod", help="Runtime environment name, e.g., prod")
     parser.add_argument("--start-order", type=int, default=None, help="Optional first order to execute")
     parser.add_argument("--end-order", type=int, default=None, help="Optional last order to execute")
+    parser.add_argument(
+        "--pure-cctns",
+        action="store_true",
+        help=(
+            "Run the AI-free CCTNS V2 ingestion pipeline: defaults --config to "
+            "input.cctns-pure.txt (no brief_facts_ai step) and forces every AI "
+            "fallback (address LLM resolver, persons gender-inference LLM) off "
+            "for this run, regardless of .env defaults."
+        ),
+    )
     args = parser.parse_args()
 
     config_path = resolve_config_path(args)
+
+    if args.pure_cctns:
+        os.environ["ADDRESS_DISABLE_LLM"] = "1"
+        os.environ["PERSON_GENDER_LLM_ENABLED"] = "false"
+        logger.info(
+            "PURE-CCTNS mode: AI disabled for this run (ADDRESS_DISABLE_LLM=1, "
+            "PERSON_GENDER_LLM_ENABLED=false); config=%s",
+            config_path,
+        )
 
     if args.start_order is not None and args.end_order is not None and args.start_order > args.end_order:
         logger.error("Invalid order range: --start-order cannot be greater than --end-order")
@@ -474,7 +499,7 @@ def main():
     processes = parse_input_file(config_path)
     validate_mo_seizures_wiring(processes, config_path)
     processes = normalize_processes_for_unified_mode(processes)
-    validate_brief_facts_ai_wiring(processes, config_path)
+    validate_brief_facts_ai_wiring(processes, config_path, pure_cctns=args.pure_cctns)
     processes = optimize_refresh_steps(processes)
 
     try:
@@ -509,10 +534,18 @@ def main():
     else:
         logger.info("Incremental mode: FROM=%s TO=%s", from_date, to_date)
 
-    # Inject date window into all child subprocess environments
+    # Inject date window and a run identifier (for source-provenance tracking) into
+    # all child subprocess environments.
     os.environ["ETL_FROM_DATE"] = from_date
     os.environ["ETL_TO_DATE"] = to_date
-    logger.info("ETL_FROM_DATE=%s  ETL_TO_DATE=%s injected into child env", from_date, to_date)
+    etl_run_id = os.environ.get("ETL_RUN_ID") or str(uuid.uuid4())
+    os.environ["ETL_RUN_ID"] = etl_run_id
+    logger.info(
+        "ETL_FROM_DATE=%s  ETL_TO_DATE=%s  ETL_RUN_ID=%s injected into child env",
+        from_date,
+        to_date,
+        etl_run_id,
+    )
 
     pipeline_start_time = time.time()
 

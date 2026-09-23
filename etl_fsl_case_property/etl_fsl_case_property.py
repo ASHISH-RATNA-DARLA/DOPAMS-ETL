@@ -23,6 +23,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
+from env_utils import get_etl_run_id
 
 try:
     from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
@@ -76,6 +77,11 @@ FSL_CASE_PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('fsl_case_property_media', 'fsl
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
 ALT_FSL_MEDIA_TABLE = 'case_property_media'
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/case-property'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -1293,6 +1299,10 @@ class FSLCasePropertyETL:
                     
                     # Only update if there are changes
                     if update_fields:
+                        # Bump provenance alongside any real business-field change —
+                        # a re-verified-unchanged row does not need a new fetched_at.
+                        update_fields.extend(['source_system = %s', 'source_endpoint = %s', 'fetched_at = %s', 'etl_run_id = %s'])
+                        update_values.extend([SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID])
                         update_query = f"""
                             UPDATE {FSL_CASE_PROPERTY_TABLE} SET
                                 {', '.join(update_fields)}
@@ -1340,10 +1350,12 @@ class FSLCasePropertyETL:
                         opinion, opinion_furnished, strength_of_evidence, expert_type,
                         other_expert_type, cpr_no, direction_by_court, details_disposal,
                         place_disposal, release_order_no, place_custody, assign_custody,
-                        property_received_back, date_created, date_modified
+                        property_received_back, date_created, date_modified,
+                        source_system, source_endpoint, fetched_at, etl_run_id
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s
                     )
                 """
                 self.db_cursor.execute(insert_query, (
@@ -1382,7 +1394,11 @@ class FSLCasePropertyETL:
                     case_property.get('assign_custody'),
                     case_property.get('property_received_back'),
                     case_property.get('date_created'),  # From API (or NULL)
-                    case_property.get('date_modified')  # From API (or NULL)
+                    case_property.get('date_modified'),  # From API (or NULL)
+                    SOURCE_SYSTEM,
+                    SOURCE_ENDPOINT,
+                    datetime.now(timezone.utc),
+                    ETL_RUN_ID
                 ))
                 self.stats['total_records_inserted'] += 1
                 

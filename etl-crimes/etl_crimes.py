@@ -18,6 +18,7 @@ import json
 # Import PostgreSQLConnectionPool
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
+from env_utils import get_etl_run_id
 
 from tqdm import tqdm
 import logging
@@ -69,6 +70,11 @@ else:
 # Target tables (allows redirecting ETL into test tables)
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 HIERARCHY_TABLE = TABLE_CONFIG.get('hierarchy', 'hierarchy')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/crimes'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -679,8 +685,10 @@ class CrimesETL:
                     crime_id, ps_code, fir_num, fir_reg_num, fir_type,
                     acts_sections, fir_date, case_status, major_head, minor_head,
                     crime_type, io_name, io_rank, brief_facts, fir_copy,
-                    additional_json_data, date_created, date_modified
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    additional_json_data, date_created, date_modified,
+                    source_system, source_endpoint, fetched_at, etl_run_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s)
                 ON CONFLICT (crime_id) DO UPDATE SET
                     ps_code = EXCLUDED.ps_code,
                     fir_num = EXCLUDED.fir_num,
@@ -697,7 +705,11 @@ class CrimesETL:
                     brief_facts = EXCLUDED.brief_facts,
                     fir_copy = EXCLUDED.fir_copy,
                     additional_json_data = EXCLUDED.additional_json_data,
-                    date_modified = EXCLUDED.date_modified
+                    date_modified = EXCLUDED.date_modified,
+                    source_system = EXCLUDED.source_system,
+                    source_endpoint = EXCLUDED.source_endpoint,
+                    fetched_at = EXCLUDED.fetched_at,
+                    etl_run_id = EXCLUDED.etl_run_id
                 WHERE (
                     {CRIMES_TABLE}.ps_code IS DISTINCT FROM EXCLUDED.ps_code OR
                     {CRIMES_TABLE}.fir_num IS DISTINCT FROM EXCLUDED.fir_num OR
@@ -724,7 +736,8 @@ class CrimesETL:
                 crime['minor_head'], crime['crime_type'], crime['io_name'],
                 crime['io_rank'], crime['brief_facts'], crime['fir_copy'],
                 Json(crime['additional_json_data']) if crime['additional_json_data'] else None,
-                crime['date_created'], crime['date_modified']
+                crime['date_created'], crime['date_modified'],
+                SOURCE_SYSTEM, SOURCE_ENDPOINT, datetime.now(timezone.utc), ETL_RUN_ID
             ))
             
             # Check if this was an insert or update by examining rowcount

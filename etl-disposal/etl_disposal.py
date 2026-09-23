@@ -31,6 +31,8 @@ except ImportError:  # pragma: no cover — queue module not yet deployed
     push_fk_failure = None
     _drain_fk_queue = None
 
+from env_utils import get_etl_run_id
+
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
 # Add TRACE level support (lower than DEBUG)
@@ -76,6 +78,11 @@ else:
 # Target tables (allows redirecting ETL into test tables)
 DISPOSAL_TABLE = TABLE_CONFIG.get('disposal', 'disposal')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
+
+# CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
+SOURCE_SYSTEM = 'CCTNS_V2'
+SOURCE_ENDPOINT = '/crimes/disposal'
+ETL_RUN_ID = get_etl_run_id()
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -979,15 +986,21 @@ class DisposalETL:
             upsert_query = f"""
                 INSERT INTO {DISPOSAL_TABLE} (
                     crime_id, disposal_type, disposed_at, disposal, case_status,
-                    date_created, date_modified
+                    date_created, date_modified,
+                    source_system, source_endpoint, fetched_at, etl_run_id
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
                 )
                 ON CONFLICT (crime_id, disposal_type, disposed_at) DO UPDATE SET
                     disposal = EXCLUDED.disposal,
                     case_status = EXCLUDED.case_status,
                     date_created = EXCLUDED.date_created,
-                    date_modified = EXCLUDED.date_modified
+                    date_modified = EXCLUDED.date_modified,
+                    source_system = EXCLUDED.source_system,
+                    source_endpoint = EXCLUDED.source_endpoint,
+                    fetched_at = EXCLUDED.fetched_at,
+                    etl_run_id = EXCLUDED.etl_run_id
                 WHERE (
                     {DISPOSAL_TABLE}.disposal IS DISTINCT FROM EXCLUDED.disposal OR
                     {DISPOSAL_TABLE}.case_status IS DISTINCT FROM EXCLUDED.case_status OR
@@ -1004,7 +1017,11 @@ class DisposalETL:
                 disposal.get('disposal'),
                 disposal.get('case_status'),
                 disposal.get('date_created'),
-                disposal.get('date_modified')
+                disposal.get('date_modified'),
+                SOURCE_SYSTEM,
+                SOURCE_ENDPOINT,
+                datetime.now(timezone.utc),
+                ETL_RUN_ID
             ))
 
             result = cursor.fetchone()
