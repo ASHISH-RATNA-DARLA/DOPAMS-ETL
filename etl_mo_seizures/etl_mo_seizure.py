@@ -70,7 +70,7 @@ else:
 
 # Target tables (allows redirecting ETL into test tables)
 MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
-MO_SEIZURE_MEDIA_TABLE = TABLE_CONFIG.get('mo_seizure_media', 'mo_seizure_media')
+# mo_seizure_media was consolidated into file_media_bookkeeping (source_type='mo_seizures', source_field='MO_MEDIA').
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
 # CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
@@ -890,24 +890,27 @@ class MoSeizureETL:
         return None
 
     def get_existing_seizure_media(self, mo_seizure_id: str, cursor) -> List[Dict]:
-        """Get existing media rows for a seizure."""
-        query = f"""
-            SELECT media_index, media_file_id, media_url, media_name
-            FROM {MO_SEIZURE_MEDIA_TABLE}
-            WHERE mo_seizure_id = %s
-            ORDER BY media_index ASC, id ASC
+        """Get existing media rows for a seizure from the consolidated
+        file_media_bookkeeping table (source_type='mo_seizures',
+        source_field='MO_MEDIA'). Replaces the former dedicated
+        mo_seizure_media table."""
+        query = """
+            SELECT file_index, file_id, media_url, media_name
+            FROM file_media_bookkeeping
+            WHERE source_type = 'mo_seizures' AND source_field = 'MO_MEDIA' AND parent_id = %s
+            ORDER BY file_index ASC, id ASC
         """
         try:
             cursor.execute(query, (mo_seizure_id,))
             rows = cursor.fetchall()
         except Exception as exc:
-            logger.warning(f"⚠️  Could not read {MO_SEIZURE_MEDIA_TABLE} for {mo_seizure_id}: {exc}")
+            logger.warning(f"⚠️  Could not read file_media_bookkeeping for {mo_seizure_id}: {exc}")
             return []
 
         return [
             {
                 'media_index': row[0],
-                'media_file_id': row[1],
+                'media_file_id': str(row[1]) if row[1] is not None else None,
                 'media_url': row[2],
                 'media_name': row[3],
             }
@@ -930,22 +933,27 @@ class MoSeizureETL:
         return normalize(existing_entries) == normalize(new_entries)
 
     def sync_seizure_media(self, mo_seizure_id: str, media_entries: List[Dict], conn, cursor):
-        """Replace media rows for a seizure with the normalized source-of-truth set."""
-        delete_query = f"DELETE FROM {MO_SEIZURE_MEDIA_TABLE} WHERE mo_seizure_id = %s"
+        """Replace media rows for a seizure with the normalized source-of-truth
+        set, in the consolidated file_media_bookkeeping table
+        (source_type='mo_seizures', source_field='MO_MEDIA'). Replaces the
+        former dedicated mo_seizure_media table."""
+        delete_query = (
+            "DELETE FROM file_media_bookkeeping "
+            "WHERE source_type = 'mo_seizures' AND source_field = 'MO_MEDIA' AND parent_id = %s"
+        )
         cursor.execute(delete_query, (mo_seizure_id,))
 
         if not media_entries:
             return
 
-        insert_query = f"""
-            INSERT INTO {MO_SEIZURE_MEDIA_TABLE} (
-                mo_seizure_id,
-                media_index,
-                media_file_id,
-                media_url,
-                media_name
-            ) VALUES (%s, %s, %s, %s, %s)
+        insert_query = """
+            INSERT INTO file_media_bookkeeping (
+                source_type, source_field, parent_id,
+                file_index, file_id, media_url, media_name,
+                created_at, updated_at, source_system, source_endpoint, fetched_at, etl_run_id
+            ) VALUES ('mo_seizures', 'MO_MEDIA', %s, %s, %s::uuid, %s, %s, now(), now(), %s, %s, %s, %s)
         """
+        now_utc = datetime.now(timezone.utc)
         media_values = [
             (
                 mo_seizure_id,
@@ -953,6 +961,10 @@ class MoSeizureETL:
                 entry.get('media_file_id'),
                 entry.get('media_url'),
                 entry.get('media_name'),
+                SOURCE_SYSTEM,
+                SOURCE_ENDPOINT,
+                now_utc,
+                ETL_RUN_ID,
             )
             for entry in media_entries
         ]

@@ -9,8 +9,8 @@ Single pass per record:
   read → normalize → kb_resolve → (llm_resolve if partial) → validate → idempotent write.
 
 Pagination: stable keyset on person_id::text.
-Checkpointing: crash-only etl_checkpoint row, cleared after a clean run.
-Failures: etl_address_failures table (no silent drops).
+Checkpointing: crash-only etl_bookkeeping (kind='checkpoint') row, cleared after a clean run.
+Failures: etl_bookkeeping (kind='failure') rows (no silent drops).
 LLM: Ollama (primary + fallback) via core.llm_service settings.
 """
 from __future__ import annotations

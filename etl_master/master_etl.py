@@ -561,7 +561,7 @@ def main():
     etl_run_config.persist_last_run(to_date)
     logger.info("LAST_RUN persisted: %s", to_date)
 
-    # Mark backfill as complete ONLY if all steps succeeded (keeps etl_run_state in sync)
+    # Mark backfill as complete ONLY if all steps succeeded (keeps etl_bookkeeping run_state in sync)
     logger.info("Updating master checkpoint to mark backfill complete...")
     if mark_backfill_complete():
         logger.info("Backfill marked complete. Future runs will use daily incremental mode.")

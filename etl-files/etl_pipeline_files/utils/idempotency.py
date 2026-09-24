@@ -37,7 +37,7 @@ class IdempotencyChecker:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 query = """
                     SELECT COUNT(*) as count
-                    FROM files
+                    FROM file_media_bookkeeping
                     WHERE source_type = %s
                       AND source_field = %s
                       AND parent_id = %s
@@ -83,7 +83,7 @@ class IdempotencyChecker:
             with self.connection.cursor() as cursor:
                 query = """
                     SELECT DISTINCT parent_id
-                    FROM files
+                    FROM file_media_bookkeeping
                     WHERE source_type = %s
                       AND source_field = %s
                 """

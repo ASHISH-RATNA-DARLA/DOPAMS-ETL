@@ -71,7 +71,7 @@ IR_PREVIOUS_OFFENCES_TABLE = TABLE_CONFIG.get('ir_previous_offences_confessed', 
 IR_DEFENCE_COUNSEL_TABLE = TABLE_CONFIG.get('ir_defence_counsel', 'ir_defence_counsel')
 IR_ASSOCIATE_DETAILS_TABLE = TABLE_CONFIG.get('ir_associate_details', 'ir_associate_details')
 IR_SHELTER_TABLE = TABLE_CONFIG.get('ir_shelter', 'ir_shelter')
-IR_MEDIA_TABLE = TABLE_CONFIG.get('ir_media', 'ir_media')
+# ir_media was consolidated into file_media_bookkeeping (source_type='interrogation', source_field='MEDIA').
 IR_INTERROGATION_REPORT_REFS_TABLE = TABLE_CONFIG.get('ir_interrogation_report_refs', 'ir_interrogation_report_refs')
 IR_DOPAMS_LINKS_TABLE = TABLE_CONFIG.get('ir_dopams_links', 'ir_dopams_links')
 IR_INDULGANCE_BEFORE_OFFENCE_TABLE = TABLE_CONFIG.get('ir_indulgance_before_offence', 'ir_indulgance_before_offence')
@@ -777,7 +777,6 @@ class InterrogationReportsETL:
             IR_DEFENCE_COUNSEL_TABLE,
             IR_ASSOCIATE_DETAILS_TABLE,
             IR_SHELTER_TABLE,
-            IR_MEDIA_TABLE,
             IR_INTERROGATION_REPORT_REFS_TABLE,
             IR_DOPAMS_LINKS_TABLE,
             IR_INDULGANCE_BEFORE_OFFENCE_TABLE,
@@ -790,9 +789,16 @@ class InterrogationReportsETL:
             IR_NEW_GANG_FORMATION_TABLE,
             IR_CONVICTION_ACQUITTAL_TABLE
         ]
-        
+
         for table in tables:
             cursor.execute(f"DELETE FROM {table} WHERE interrogation_report_id = %s", (ir_id,))
+
+        # ir_media was consolidated into file_media_bookkeeping (source_type='interrogation',
+        # source_field='MEDIA'), which is keyed by parent_id rather than interrogation_report_id.
+        cursor.execute(
+            "DELETE FROM file_media_bookkeeping WHERE source_type = 'interrogation' AND source_field = 'MEDIA' AND parent_id = %s",
+            (ir_id,)
+        )
 
     def insert_main_record(self, record: Dict[str, Any], cursor, is_update: bool = False):
         """Insert or update main interrogation_reports record."""
@@ -1237,16 +1243,24 @@ class InterrogationReportsETL:
                 shelter_values
             )
         
-        # 13. Media
+        # 13. Media (consolidated into file_media_bookkeeping: source_type='interrogation',
+        # source_field='MEDIA'; replaces the former dedicated ir_media table)
         media = record.get('MEDIA', [])
         if media:
-            media_values = [(ir_id, media_id) for media_id in media if media_id]
+            now_utc = datetime.now(timezone.utc)
+            media_values = [
+                (ir_id, idx, media_id, SOURCE_SYSTEM, SOURCE_ENDPOINT, now_utc, ETL_RUN_ID)
+                for idx, media_id in enumerate(media) if media_id
+            ]
             if media_values:
                 execute_values(
                     cursor,
-                    f"""INSERT INTO {IR_MEDIA_TABLE} (interrogation_report_id, media_id)
+                    """INSERT INTO file_media_bookkeeping
+                           (parent_id, file_index, file_id, source_system, source_endpoint, fetched_at, etl_run_id,
+                            source_type, source_field)
                        VALUES %s ON CONFLICT DO NOTHING""",
-                    media_values
+                    media_values,
+                    template="(%s, %s, %s::uuid, %s, %s, %s, %s, 'interrogation', 'MEDIA')"
                 )
         
         # 14. Interrogation Report Refs

@@ -9,8 +9,14 @@ parent record (crime_id / person_id / mo_id) does not yet exist at insert time
 the record was previously logged and silently dropped — permanently, because
 the incremental watermark advances forward and will never re-fetch that record.
 
-This module provides a lightweight, shared queue table (etl_fk_retry_queue)
-shared across all five ETLs.  Records with unresolvable FKs are parked here.
+This module parks records with unresolvable FKs in the consolidated
+etl_bookkeeping table (kind='fk_retry'), shared across all five ETLs — the
+same table that also holds checkpoint/run_state/failure bookkeeping rows for
+other modules (see cctns-v2_schema.sql / cctns-v2_schema_mapping_report.md).
+This table replaces the former dedicated etl_fk_retry_queue table; the
+`queue_id` column below is now `id`, and `error_detail` is now `reason`, but
+the push/drain call signatures are unchanged.
+
 Each ETL calls drain_fk_queue() at startup to attempt re-insertion of queued
 records before processing the new API window.
 
@@ -33,33 +39,55 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# DDL — table is created lazily on first use.
+# DDL — table is created lazily on first use (idempotent). This is the same
+# consolidated etl_bookkeeping table cctns-v2_schema.sql defines; the schema
+# file is the source of truth, this is only a defensive fallback for
+# environments where it hasn't been applied yet.
 _CREATE_DDL = """
-CREATE TABLE IF NOT EXISTS public.etl_fk_retry_queue (
-    queue_id            BIGSERIAL PRIMARY KEY,
-    source_table        VARCHAR(100)  NOT NULL,
-    record_id           TEXT          NOT NULL,
-    record_json         JSONB         NOT NULL,
-    missing_fk_column   VARCHAR(100)  NOT NULL,
-    missing_fk_value    TEXT          NOT NULL,
+DO $$ BEGIN
+    CREATE TYPE public.etl_bookkeeping_kind AS ENUM ('checkpoint', 'run_state', 'fk_retry', 'failure');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS public.etl_bookkeeping (
+    id                  BIGSERIAL PRIMARY KEY,
+    kind                public.etl_bookkeeping_kind NOT NULL,
+    module_name         TEXT          NOT NULL,
+    record_key          TEXT,
+    run_id              TEXT,
+    checkpoint_value    TEXT,
+    watermark           TIMESTAMPTZ,
+    record_json         JSONB,
+    missing_fk_column   VARCHAR(100),
+    missing_fk_value    TEXT,
+    reason              TEXT,
     attempt_count       INTEGER       NOT NULL DEFAULT 0,
     last_attempted_at   TIMESTAMPTZ,
     first_failed_at     TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     resolved            BOOLEAN       NOT NULL DEFAULT FALSE,
-    error_detail        TEXT
+    resolved_at         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_singleton
+    ON public.etl_bookkeeping (kind, module_name)
+    WHERE kind IN ('checkpoint', 'run_state');
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_failure
+    ON public.etl_bookkeeping (kind, module_name, record_key)
+    WHERE kind = 'failure';
+
 -- Index for per-table drain scans
-CREATE INDEX IF NOT EXISTS etl_fk_retry_queue_source_unresolved
-    ON public.etl_fk_retry_queue (source_table)
-    WHERE resolved = FALSE;
+CREATE INDEX IF NOT EXISTS idx_etl_bookkeeping_fk_retry_unresolved
+    ON public.etl_bookkeeping (module_name)
+    WHERE kind = 'fk_retry' AND resolved = FALSE;
 """
 
 _MAX_ATTEMPTS = int(__import__('os').environ.get('FK_RETRY_MAX_ATTEMPTS', '5'))
 
 
 def _ensure_queue_table(conn):
-    """Create etl_fk_retry_queue if it does not exist (idempotent)."""
+    """Create etl_bookkeeping if it does not exist (idempotent)."""
     with conn.cursor() as cur:
         cur.execute(_CREATE_DDL)
 
@@ -81,10 +109,10 @@ def push_fk_failure(conn, source_table: str, record_id: str,
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO public.etl_fk_retry_queue
-                (source_table, record_id, record_json,
+            INSERT INTO public.etl_bookkeeping
+                (kind, module_name, record_key, record_json,
                  missing_fk_column, missing_fk_value)
-            VALUES (%s, %s, %s::jsonb, %s, %s)
+            VALUES ('fk_retry', %s, %s, %s::jsonb, %s, %s)
             ON CONFLICT DO NOTHING
             """,
             (source_table, record_id,
@@ -103,7 +131,7 @@ def drain_fk_queue(conn, source_table: str, retry_fn):
     For each queued record:
     - Calls retry_fn(conn, record_dict) → True on success, False on failure.
     - Marks resolved=TRUE on success.
-    - Increments attempt_count and updates error_detail on failure.
+    - Increments attempt_count and updates the failure reason on failure.
     - Records that exceed FK_RETRY_MAX_ATTEMPTS (default 5) are left in the
       table with their full error history for manual review.
 
@@ -111,15 +139,16 @@ def drain_fk_queue(conn, source_table: str, retry_fn):
         conn:         Active DB connection. drain_fk_queue commits per record.
         source_table: Table name matching what was passed to push_fk_failure.
         retry_fn:     Callable(conn, record: dict) -> bool.
-                      Must not commit \u2014 drain_fk_queue handles that.
+                      Must not commit — drain_fk_queue handles that.
     """
     _ensure_queue_table(conn)
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT queue_id, record_id, record_json, attempt_count
-            FROM public.etl_fk_retry_queue
-            WHERE source_table = %s
+            SELECT id, record_key, record_json, attempt_count
+            FROM public.etl_bookkeeping
+            WHERE kind = 'fk_retry'
+              AND module_name = %s
               AND resolved = FALSE
               AND attempt_count < %s
             ORDER BY first_failed_at
@@ -153,12 +182,13 @@ def drain_fk_queue(conn, source_table: str, retry_fn):
             if success:
                 cur.execute(
                     """
-                    UPDATE public.etl_fk_retry_queue
+                    UPDATE public.etl_bookkeeping
                     SET resolved = TRUE,
+                        resolved_at = CURRENT_TIMESTAMP,
                         last_attempted_at = CURRENT_TIMESTAMP,
                         attempt_count = attempt_count + 1,
-                        error_detail = NULL
-                    WHERE queue_id = %s
+                        reason = NULL
+                    WHERE id = %s
                     """,
                     (queue_id,),
                 )
@@ -170,11 +200,11 @@ def drain_fk_queue(conn, source_table: str, retry_fn):
             else:
                 cur.execute(
                     """
-                    UPDATE public.etl_fk_retry_queue
+                    UPDATE public.etl_bookkeeping
                     SET last_attempted_at = CURRENT_TIMESTAMP,
                         attempt_count = attempt_count + 1,
-                        error_detail = %s
-                    WHERE queue_id = %s
+                        reason = %s
+                    WHERE id = %s
                     """,
                     (err, queue_id),
                 )

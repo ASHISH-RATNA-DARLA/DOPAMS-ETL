@@ -1,0 +1,318 @@
+[
+  {
+    "method": "GET",
+    "endpoint": "/crimes/disposal/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "1 detail record(s) vs 1 matching bulk record(s)",
+    "compared_with": "bulk /crimes/disposal (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl-disposal/etl_disposal.py:625 fetch_disposal_api() -> run() -> process_date_range() -> INSERT INTO disposal (:987)",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (5 record(s))",
+      "crime_id=67dc561e593fd97bb662a28b: detail_records=1 bulk_matches=1 dopams_rows=n/a (detail 0.02s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=67dc561e593fd97bb662a28b: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/arrests/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "4 detail record(s) vs 4 matching bulk record(s)",
+    "compared_with": "bulk /arrests (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl_arrests/etl_arrests.py:559 fetch_arrests_api() -> run() -> process_date_range() -> INSERT INTO arrests (:1116)",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (582 record(s))",
+      "crime_id=63be433715c407a4322d0309: detail_records=4 bulk_matches=4 dopams_rows=n/a (detail 0.03s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=63be433715c407a4322d0309: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/mo-seizures/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "1 detail record(s) vs 1 matching bulk record(s)",
+    "compared_with": "bulk /mo-seizures (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl_mo_seizures/etl_mo_seizure.py:557 fetch fn -> run() -> INSERT INTO mo_seizures (:1182) + mo_seizure_media (:941)",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (16 record(s))",
+      "crime_id=6946556831baaad011f8ffb5: detail_records=1 bulk_matches=1 dopams_rows=n/a (detail 0.01s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=6946556831baaad011f8ffb5: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/property-details/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "1 detail record(s) vs 1 matching bulk record(s)",
+    "compared_with": "bulk /property-details (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl-properties/etl_properties.py:528 fetch_properties_api() -> run() -> INSERT INTO properties (:912)",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (46 record(s))",
+      "crime_id=6a84752b97e1d32740a4b54b: detail_records=1 bulk_matches=1 dopams_rows=n/a (detail 0.04s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=6a84752b97e1d32740a4b54b: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/interrogation-reports/v1/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "1 detail record(s) vs 1 matching bulk record(s)",
+    "compared_with": "bulk /interrogation-reports/v1/ (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl-ir/ir_etl.py:567 fetch fn -> run() -> process_date_range() -> INSERT INTO interrogation_reports (:913-947) + 24 child tables",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (228 record(s))",
+      "crime_id=67b308db73f2552e42bf8264: detail_records=1 bulk_matches=1 dopams_rows=n/a (detail 0.05s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=67b308db73f2552e42bf8264: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/chargesheets/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "1 detail record(s) vs 1 matching bulk record(s)",
+    "compared_with": "bulk /chargesheets (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl_chargesheets/etl_chargesheets.py:614 fetch fn -> run() -> INSERT INTO chargesheets (:1229) + 5 child tables",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (52 record(s))",
+      "crime_id=67d009d7ee53cd0192b2b383: detail_records=1 bulk_matches=1 dopams_rows=n/a (detail 0.02s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=67d009d7ee53cd0192b2b383: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/update-chargesheets/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "1 detail record(s) vs 1 matching bulk record(s)",
+    "compared_with": "bulk /update-chargesheets (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl_updated_chargesheet/etl_update_chargesheet.py:560 fetch fn -> run() -> INSERT INTO charge_sheet_updates (:1111)",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (15 record(s))",
+      "crime_id=690ddbf9d550251a881ef9e4: detail_records=1 bulk_matches=1 dopams_rows=n/a (detail 0.02s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=690ddbf9d550251a881ef9e4: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/case-property/{crime_id}",
+    "http_result": "PASS",
+    "data_summary": "2 detail record(s) vs 2 matching bulk record(s)",
+    "compared_with": "bulk /case-property (fromDate=2026-09-16&toDate=2026-09-22)",
+    "additional_data": "NO",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "EXACT_DUPLICATE",
+    "etl_usage": "etl_fsl_case_property/etl_fsl_case_property.py:712 fetch fn -> run() -> INSERT INTO fsl_case_property (:1344) + fsl_case_property_media",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "bulk window used: 2026-09-16..2026-09-22 (5 record(s))",
+      "crime_id=6a84752b97e1d32740a4b54b: detail_records=2 bulk_matches=2 dopams_rows=n/a (detail 0.02s) -> bulk_comparison=EXACT_DUPLICATE",
+      "crime_id=6a84752b97e1d32740a4b54b: DOPAMS DB comparison skipped this run \u2014 connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/ping",
+    "http_result": "PASS",
+    "data_summary": "status=200 body='Hello DOPAMS!'",
+    "compared_with": "n/a (utility probe, no data-bearing equivalent expected)",
+    "additional_data": "NO",
+    "dopams_equivalent": "n/a",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called by any ETL script; no health-check/connectivity-test caller found anywhere in the repo (confirmed by repo-wide grep in an earlier code audit)",
+    "classification": "UTILITY_ONLY",
+    "evidence": [
+      "HTTP 200, 0.014s round trip, auth accepted=True",
+      "Body is a plain connectivity string, not business data \u2014 confirms no data ingestion is possible through this endpoint."
+    ]
+  },
+  {
+    "method": "POST",
+    "endpoint": "/api/NCRP/gen-token",
+    "http_result": "SKIPPED",
+    "data_summary": "not called",
+    "compared_with": "n/a",
+    "additional_data": "n/a",
+    "dopams_equivalent": "n/a",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase",
+    "classification": "OUT_OF_SCOPE",
+    "evidence": [
+      "Zero references to NCRP/gen-token/e-zero-fir anywhere in the DOPAMS-ETL codebase (confirmed by repo-wide grep in an earlier code audit) \u2014 no encryption/requestData scheme, no BearerAuth token handling, no NCRP-specific credentials configured.",
+      "NCRP direction is DOPAMS -> NCRP (submitting eZero FIRs outward), the opposite direction of CCTNS V2 -> DOPAMS ingestion this ETL performs.",
+      "Auth-token endpoint for the NCRP domain; irrelevant without any NCRP integration to authenticate for."
+    ]
+  },
+  {
+    "method": "POST",
+    "endpoint": "/api/NCRP/e-zero-fir",
+    "http_result": "SKIPPED",
+    "data_summary": "not called",
+    "compared_with": "n/a",
+    "additional_data": "n/a",
+    "dopams_equivalent": "n/a",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase",
+    "classification": "WRITE_ONLY_NOT_SAFE_TO_TEST",
+    "evidence": [
+      "Zero references to NCRP/gen-token/e-zero-fir anywhere in the DOPAMS-ETL codebase (confirmed by repo-wide grep in an earlier code audit) \u2014 no encryption/requestData scheme, no BearerAuth token handling, no NCRP-specific credentials configured.",
+      "NCRP direction is DOPAMS -> NCRP (submitting eZero FIRs outward), the opposite direction of CCTNS V2 -> DOPAMS ingestion this ETL performs.",
+      "Creates a real FIR record in NCRP if invoked \u2014 a write with external side effects. Never called by this script."
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/api/NCRP/e-zero-fir/ack-copy",
+    "http_result": "SKIPPED",
+    "data_summary": "not called",
+    "compared_with": "n/a",
+    "additional_data": "n/a",
+    "dopams_equivalent": "n/a",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase",
+    "classification": "OUT_OF_SCOPE",
+    "evidence": [
+      "Zero references to NCRP/gen-token/e-zero-fir anywhere in the DOPAMS-ETL codebase (confirmed by repo-wide grep in an earlier code audit) \u2014 no encryption/requestData scheme, no BearerAuth token handling, no NCRP-specific credentials configured.",
+      "NCRP direction is DOPAMS -> NCRP (submitting eZero FIRs outward), the opposite direction of CCTNS V2 -> DOPAMS ingestion this ETL performs.",
+      "Requires a real eZeroFirNo that only exists after a genuine e-zero-fir submission; cannot be safely tested without first performing the unsafe write above."
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/reports/missing-udb-persons/v1/",
+    "http_result": "PASS",
+    "data_summary": "150 record(s) across 6 windows, 145 distinct crime_id(s)",
+    "compared_with": "reconstructed from `crimes` (+ `persons`/`hierarchy` for name/address fields) for the same crime_ids",
+    "additional_data": "n/a",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase (confirmed by repo-wide grep in an earlier code audit); the underlying entities it's built from (crimes/persons/arrests/properties) ARE independently ingested",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "2026-09-16..2026-09-22 -> HTTP 200 (25 records)",
+      "2026-09-09..2026-09-15 -> HTTP 200 (25 records)",
+      "2026-09-02..2026-09-08 -> HTTP 200 (25 records)",
+      "2026-08-26..2026-09-01 -> HTTP 200 (25 records)",
+      "2026-08-19..2026-08-25 -> HTTP 200 (25 records)",
+      "2026-08-12..2026-08-18 -> HTTP 200 (25 records)",
+      "connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/reports/arrest/arrest-particulars/v1/",
+    "http_result": "PASS",
+    "data_summary": "150 record(s) across 6 windows, 97 distinct crime_id(s)",
+    "compared_with": "reconstructed from `arrests`/`crimes`/`persons` (matched via crime_id)",
+    "additional_data": "n/a",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase (confirmed by repo-wide grep in an earlier code audit); the underlying entities it's built from (crimes/persons/arrests/properties) ARE independently ingested",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "2026-09-16..2026-09-22 -> HTTP 200 (25 records)",
+      "2026-09-09..2026-09-15 -> HTTP 200 (25 records)",
+      "2026-09-02..2026-09-08 -> HTTP 200 (25 records)",
+      "2026-08-26..2026-09-01 -> HTTP 200 (25 records)",
+      "2026-08-19..2026-08-25 -> HTTP 200 (25 records)",
+      "2026-08-12..2026-08-18 -> HTTP 200 (25 records)",
+      "connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/reports/citizen/arrest/arrest-particulars/v1/",
+    "http_result": "PASS",
+    "data_summary": "150 record(s) across 6 windows, 92 distinct FIR_REG_NUM(s)",
+    "compared_with": "reconstructed from `arrests`/`crimes`/`persons` (matched via FIR_REG_NUM)",
+    "additional_data": "n/a",
+    "dopams_equivalent": "DB_UNAVAILABLE",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase (confirmed by repo-wide grep in an earlier code audit); the underlying entities it's built from (crimes/persons/arrests/properties) ARE independently ingested",
+    "classification": "REQUIRES_REVIEW",
+    "evidence": [
+      "2026-09-16..2026-09-22 -> HTTP 200 (25 records)",
+      "2026-09-09..2026-09-15 -> HTTP 200 (25 records)",
+      "2026-09-02..2026-09-08 -> HTTP 200 (25 records)",
+      "2026-08-26..2026-09-01 -> HTTP 200 (25 records)",
+      "2026-08-19..2026-08-25 -> HTTP 200 (25 records)",
+      "2026-08-12..2026-08-18 -> HTTP 200 (25 records)",
+      "connection to server at \"192.168.103.106\", port 5432 failed: FATAL:  database \"cctns-v2\" does not exist\n"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/reports/stolen-automobiles",
+    "http_result": "PASS",
+    "data_summary": "0 records across 20 windows (140 days scanned)",
+    "compared_with": "n/a",
+    "additional_data": "n/a",
+    "dopams_equivalent": "n/a",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase (confirmed by repo-wide grep in an earlier code audit); the underlying entities it's built from (crimes/persons/arrests/properties) ARE independently ingested",
+    "classification": "NO_DATA_FOUND_AFTER_MULTI_WINDOW_TEST",
+    "evidence": [
+      "Scanned 20 consecutive 7-day windows back from yesterday (140 days total); every window returned 0 records.",
+      "2026-09-16..2026-09-22 -> HTTP 200 (0 records)",
+      "2026-09-09..2026-09-15 -> HTTP 200 (0 records)",
+      "2026-09-02..2026-09-08 -> HTTP 200 (0 records)",
+      "2026-08-26..2026-09-01 -> HTTP 200 (0 records)",
+      "2026-08-19..2026-08-25 -> HTTP 200 (0 records)",
+      "2026-08-12..2026-08-18 -> HTTP 200 (0 records)",
+      "2026-08-05..2026-08-11 -> HTTP 200 (0 records)",
+      "2026-07-29..2026-08-04 -> HTTP 200 (0 records)",
+      "2026-07-22..2026-07-28 -> HTTP 200 (0 records)",
+      "2026-07-15..2026-07-21 -> HTTP 200 (0 records)",
+      "2026-07-08..2026-07-14 -> HTTP 200 (0 records)",
+      "2026-07-01..2026-07-07 -> HTTP 200 (0 records)",
+      "2026-06-24..2026-06-30 -> HTTP 200 (0 records)",
+      "2026-06-17..2026-06-23 -> HTTP 200 (0 records)",
+      "2026-06-10..2026-06-16 -> HTTP 200 (0 records)",
+      "2026-06-03..2026-06-09 -> HTTP 200 (0 records)",
+      "2026-05-27..2026-06-02 -> HTTP 200 (0 records)",
+      "2026-05-20..2026-05-26 -> HTTP 200 (0 records)",
+      "2026-05-13..2026-05-19 -> HTTP 200 (0 records)",
+      "2026-05-06..2026-05-12 -> HTTP 200 (0 records)"
+    ]
+  },
+  {
+    "method": "GET",
+    "endpoint": "/reports/stolen-automobiles/{crimeId}",
+    "http_result": "SKIPPED",
+    "data_summary": "bulk report found 0 records across 20 windows; a crimeId-scoped lookup can only ever be a subset of that same empty dataset",
+    "compared_with": "/reports/stolen-automobiles",
+    "additional_data": "n/a",
+    "dopams_equivalent": "n/a",
+    "bulk_comparison": "n/a",
+    "etl_usage": "not called anywhere in the codebase (confirmed by repo-wide grep in an earlier code audit); the underlying entities it's built from (crimes/persons/arrests/properties) ARE independently ingested",
+    "classification": "NO_DATA_FOUND_AFTER_MULTI_WINDOW_TEST",
+    "evidence": [
+      "Not separately exercised \u2014 inherits the bulk report's multi-window empty result."
+    ]
+  }
+]

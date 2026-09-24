@@ -2,7 +2,9 @@
 """
 DOPAMAS ETL Pipeline - Chargesheets API
 Fetches chargesheets data in 5-day chunks and loads into PostgreSQL
-Handles 4 tables: chargesheets, chargesheet_files, chargesheet_acts, chargesheet_accused
+Handles: chargesheets, chargesheet_acts, chargesheet_acts_sections, chargesheet_accused,
+and the chargesheet's uploadChargeSheet file/media reference (in the consolidated
+file_media_bookkeeping table -- formerly chargesheet_files/chargesheet_media)
 """
 
 import sys
@@ -77,10 +79,10 @@ else:
 
 # Target tables (allows redirecting ETL into test tables)
 CHARGESHEETS_TABLE = TABLE_CONFIG.get('chargesheets', 'chargesheets')
-CHARGESHEET_FILES_TABLE = TABLE_CONFIG.get('chargesheet_files', 'chargesheet_files')
+# chargesheet_files and chargesheet_media were consolidated into file_media_bookkeeping
+# (source_type='chargesheets', source_field='uploadChargeSheet').
 CHARGESHEET_ACTS_TABLE = TABLE_CONFIG.get('chargesheet_acts', 'chargesheet_acts')
 CHARGESHEET_ACCUSED_TABLE = TABLE_CONFIG.get('chargesheet_accused', 'chargesheet_accused')
-CHARGESHEET_MEDIA_TABLE = TABLE_CONFIG.get('chargesheet_media', 'chargesheet_media')
 CHARGESHEET_ACTS_SECTIONS_TABLE = TABLE_CONFIG.get('chargesheet_acts_sections', 'chargesheet_acts_sections')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
@@ -355,17 +357,18 @@ class ChargesheetsETL:
             # Rollback any previous failed transaction
             self._conn.rollback()
             
-            # Check all 4 tables with their specific date columns
+            # Check the remaining chargesheet-specific tables with their date columns.
+            # chargesheet_files was consolidated into the shared file_media_bookkeeping
+            # table, which is written by every entity ETL -- an unfiltered MAX(date)
+            # scan of that table would bleed in unrelated entities' dates, so it is
+            # intentionally not included here. chargesheets/chargesheet_acts/
+            # chargesheet_accused are written in the same batch per chargesheet and
+            # remain sufficient signal for this resume-date detection.
             table_configs = [
                 {
                     'table': CHARGESHEETS_TABLE,
                     'date_columns': ['date_created', 'date_modified'],  # chargesheets table uses date_created/date_modified
                     'name': 'chargesheets'
-                },
-                {
-                    'table': CHARGESHEET_FILES_TABLE,
-                    'date_columns': ['created_at'],  # related tables use created_at
-                    'name': 'chargesheet_files'
                 },
                 {
                     'table': CHARGESHEET_ACTS_TABLE,
@@ -1045,7 +1048,8 @@ class ChargesheetsETL:
     def insert_chargesheet(self, chargesheet: Dict, chunk_date_range: str = "") -> Tuple[bool, str, Optional[str]]:
         """
         Insert or update single chargesheet into database with smart update logic
-        Also handles related tables: chargesheet_files, chargesheet_acts, chargesheet_accused
+        Also handles related tables: chargesheet_acts, chargesheet_accused, and the
+        uploadChargeSheet file/media reference (file_media_bookkeeping)
         Dates are always from API (never use CURRENT_TIMESTAMP)
         
         Returns:
@@ -1284,49 +1288,59 @@ class ChargesheetsETL:
     def delete_related_tables(self, chargesheet_id: str, charge_sheet_api_id: Optional[str]):
         """Remove stale child rows before reloading the current API snapshot."""
         try:
-            self._cursor.execute(f"DELETE FROM {CHARGESHEET_FILES_TABLE} WHERE chargesheet_id = %s", (chargesheet_id,))
+            self._cursor.execute(
+                "DELETE FROM file_media_bookkeeping WHERE source_type = 'chargesheets' AND source_field = 'uploadChargeSheet' AND parent_id = %s",
+                (charge_sheet_api_id or chargesheet_id,)
+            )
             self._cursor.execute(f"DELETE FROM {CHARGESHEET_ACTS_TABLE} WHERE chargesheet_id = %s", (chargesheet_id,))
             self._cursor.execute(f"DELETE FROM {CHARGESHEET_ACCUSED_TABLE} WHERE chargesheet_id = %s", (chargesheet_id,))
-            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_MEDIA_TABLE, 'chargesheet_id'):
-                self._cursor.execute(f"DELETE FROM {CHARGESHEET_MEDIA_TABLE} WHERE chargesheet_id = %s", (charge_sheet_api_id,))
             if charge_sheet_api_id and self.has_table_column(CHARGESHEET_ACTS_SECTIONS_TABLE, 'chargesheet_id'):
                 self._cursor.execute(f"DELETE FROM {CHARGESHEET_ACTS_SECTIONS_TABLE} WHERE chargesheet_id = %s", (charge_sheet_api_id,))
             self._conn.commit()
         except Exception as e:
             logger.warning(f"⚠️  Failed to clear existing chargesheet children: {e}")
             self._conn.rollback()
-    
+
     def insert_chargesheet_file(self, chargesheet_id: str, charge_sheet_api_id: Optional[str], file_data: Dict):
-        """Insert or update chargesheet file"""
+        """Insert or update the chargesheet's uploadChargeSheet file/media
+        reference in the consolidated file_media_bookkeeping table
+        (source_type='chargesheets', source_field='uploadChargeSheet').
+
+        Replaces the former dedicated chargesheet_files (keyed by the
+        synthetic chargesheets.id) and chargesheet_media (keyed by the
+        natural charge_sheet_id) tables, which both stored the exact same
+        uploadChargeSheet.fileId event -- now written once, keyed by the
+        natural charge_sheet_id (falling back to the synthetic id only if
+        the natural id isn't available yet).
+        """
         try:
             # API uses camelCase: 'fileId'
             file_id = self.normalize_text_value(file_data.get('fileId') or file_data.get('FILE_ID'))
             created_at = self.normalize_date_value(file_data.get('createdAt') or file_data.get('CREATED_AT'))
+            media_payload = json.dumps(file_data, ensure_ascii=False, default=str)
+            parent_id = charge_sheet_api_id or chargesheet_id
 
-            self._cursor.execute(f"""
-                INSERT INTO {CHARGESHEET_FILES_TABLE} (
-                    id, chargesheet_id, file_id, created_at
-                ) VALUES (%s, %s, %s, %s)
-            """, (str(uuid.uuid4()), chargesheet_id, file_id, created_at))
+            self._cursor.execute("""
+                INSERT INTO file_media_bookkeeping (
+                    source_type, source_field, parent_id,
+                    file_index, file_id, media_payload,
+                    created_at, updated_at,
+                    source_system, source_endpoint, fetched_at, etl_run_id
+                ) VALUES ('chargesheets', 'uploadChargeSheet', %s, 0, %s::uuid, %s::jsonb, %s, %s, %s, %s, %s, %s)
+            """, (
+                parent_id,
+                file_id,
+                media_payload,
+                created_at,
+                created_at,
+                SOURCE_SYSTEM,
+                SOURCE_ENDPOINT,
+                datetime.now(timezone.utc),
+                ETL_RUN_ID,
+            ))
             with self.stats_lock:
                 self.stats['total_files_inserted'] += 1
 
-            if charge_sheet_api_id and self.has_table_column(CHARGESHEET_MEDIA_TABLE, 'chargesheet_id'):
-                media_payload = json.dumps(file_data, ensure_ascii=False, default=str)
-                self._cursor.execute(f"""
-                    INSERT INTO {CHARGESHEET_MEDIA_TABLE} (
-                        id, chargesheet_id, media_index, file_id, media_payload, created_at, date_modified
-                    ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
-                """, (
-                    str(uuid.uuid4()),
-                    charge_sheet_api_id,
-                    0,
-                    file_id,
-                    media_payload,
-                    created_at,
-                    created_at,
-                ))
-            
             self._conn.commit()
         except Exception as e:
             logger.error(f"❌ Error processing chargesheet file: {e}")

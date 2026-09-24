@@ -49,9 +49,11 @@ PENDING_WHERE = f"""
       )
       -- not quarantined
       AND NOT EXISTS (
-        SELECT 1 FROM etl_address_failures f
-        WHERE f.person_id = persons.person_id::text
-                    AND f.attempted >= {QUARANTINE_THRESHOLD}
+        SELECT 1 FROM etl_bookkeeping f
+        WHERE f.kind = 'failure'
+          AND f.module_name = 'etl-address'
+          AND f.record_key = persons.person_id::text
+          AND f.attempt_count >= {QUARANTINE_THRESHOLD}
       )
     )
 """

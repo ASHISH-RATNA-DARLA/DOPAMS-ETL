@@ -51,7 +51,7 @@ def check_new_apis_files():
                 COUNT(CASE WHEN file_id IS NOT NULL THEN 1 END) as records_with_file_id,
                 COUNT(CASE WHEN is_downloaded = TRUE THEN 1 END) as already_downloaded,
                 COUNT(CASE WHEN is_downloaded IS NULL OR is_downloaded = FALSE THEN 1 END) as pending_download
-            FROM files
+            FROM file_media_bookkeeping
             WHERE source_type IN ('mo_seizures', 'chargesheets', 'case_property')
             GROUP BY source_type, source_field
             ORDER BY source_type, source_field
@@ -76,7 +76,7 @@ def check_new_apis_files():
                 source_type,
                 source_field,
                 COUNT(*) as files_to_download
-            FROM files
+            FROM file_media_bookkeeping
             WHERE source_type IN ('mo_seizures', 'chargesheets', 'case_property')
               AND file_id IS NOT NULL
               AND has_field IS TRUE
@@ -101,7 +101,7 @@ def check_new_apis_files():
         print("\n3. Testing mapping function with actual database values...")
         cursor.execute("""
             SELECT DISTINCT source_type, source_field
-            FROM files
+            FROM file_media_bookkeeping
             WHERE source_type IN ('mo_seizures', 'chargesheets', 'case_property')
               AND file_id IS NOT NULL
             ORDER BY source_type, source_field
@@ -130,7 +130,7 @@ def check_new_apis_files():
                 is_empty,
                 is_downloaded,
                 file_path
-            FROM files
+            FROM file_media_bookkeeping
             WHERE source_type IN ('mo_seizures', 'chargesheets', 'case_property')
               AND file_id IS NOT NULL
             ORDER BY source_type, source_field
@@ -154,7 +154,7 @@ def check_new_apis_files():
         print("\n5. Testing files media server query...")
         cursor.execute("""
             SELECT source_type, source_field, file_id
-            FROM files
+            FROM file_media_bookkeeping
             WHERE file_id IS NOT NULL
               AND has_field IS TRUE
               AND is_empty IS FALSE

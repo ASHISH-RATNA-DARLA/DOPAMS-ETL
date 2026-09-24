@@ -1,5 +1,6 @@
 """
-Load file records into files table with idempotency
+Load file records into the consolidated file_media_bookkeeping table
+(formerly the dedicated `files` table) with idempotency.
 """
 import sys
 from datetime import datetime, timezone
@@ -119,15 +120,15 @@ class FilesLoader:
             with self.connection.cursor() as cursor:
                 # Check if created_at column exists, if so include it
                 cursor.execute("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'files' AND column_name = 'created_at'
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'file_media_bookkeeping' AND column_name = 'created_at'
                 """)
                 has_created_at = cursor.fetchone() is not None
-                
+
                 if has_created_at:
                     insert_query = """
-                        INSERT INTO files (
+                        INSERT INTO file_media_bookkeeping (
                             source_type, source_field, parent_id, file_id,
                             file_index, identity_type, identity_number,
                             has_field, is_empty, created_at,
@@ -221,7 +222,7 @@ class FilesLoader:
                     # Fallback: don't include created_at (or the provenance columns
                     # added alongside it) if the table predates that migration.
                     insert_query = """
-                        INSERT INTO files (
+                        INSERT INTO file_media_bookkeeping (
                             source_type, source_field, parent_id, file_id,
                             file_index, identity_type, identity_number,
                             has_field, is_empty

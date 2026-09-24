@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Update file_url values in files table with actual file extensions.
+Update file_url values in the consolidated file_media_bookkeeping table with actual file extensions.
 
 THREAD-SAFE MULTI-THREADED VERSION with deadlock prevention and safe concurrent processing.
 
 This script:
-1. Reads file_path from the files table
+1. Reads file_path from the file_media_bookkeeping table
 2. Checks if the file exists on the filesystem
 3. Determines the actual file extension
 4. Updates file_url with the extension
@@ -338,7 +338,7 @@ def update_file_url_with_extension(record_id: str, file_url: str, extension: str
 
             try:
                 update_query = """
-                    UPDATE files
+                    UPDATE file_media_bookkeeping
                     SET file_url = %s
                     WHERE id = %s::uuid AND file_url = %s
                     RETURNING id
@@ -368,7 +368,7 @@ def check_mapping_coverage(connection, source_type: str) -> dict:
     with connection.cursor(cursor_factory=RealDictCursor) as cursor:
         query = """
             SELECT DISTINCT source_field, COUNT(*) as count
-            FROM files
+            FROM file_media_bookkeeping
             WHERE source_type = %s
               AND file_id IS NOT NULL
               AND file_url IS NOT NULL
@@ -460,7 +460,7 @@ def process_source_type_parallel(source_type: str, max_workers: int = NUM_WORKER
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             query = """
                 SELECT id, file_id, source_field, file_path, file_url
-                FROM files
+                FROM file_media_bookkeeping
                 WHERE source_type = %s
                   AND file_id IS NOT NULL
                   AND file_url IS NOT NULL
@@ -582,15 +582,15 @@ def main():
                     # Check if trigger exists first
                     cursor.execute("""
                         SELECT 1 FROM pg_trigger 
-                        WHERE tgrelid = 'files'::regclass 
+                        WHERE tgrelid = 'file_media_bookkeeping'::regclass 
                         AND tgname = 'trigger_auto_generate_file_paths'
                     """)
                     if cursor.fetchone():
-                        cursor.execute("ALTER TABLE files DISABLE TRIGGER trigger_auto_generate_file_paths")
+                        cursor.execute("ALTER TABLE file_media_bookkeeping DISABLE TRIGGER trigger_auto_generate_file_paths")
                         conn.commit()
                         logger.info("✓ Trigger disabled")
                     else:
-                        logger.warning("⚠️  Trigger 'trigger_auto_generate_file_paths' not found on table 'files'. Skipping disable step.")
+                        logger.warning("⚠️  Trigger 'trigger_auto_generate_file_paths' not found on table 'file_media_bookkeeping'. Skipping disable step.")
             except Exception as e:
                 logger.warning(f"⚠️  Could not disable trigger: {e}. Proceeding anyway.")
 
@@ -629,11 +629,11 @@ def main():
                     # Check if trigger exists first
                     cursor.execute("""
                         SELECT 1 FROM pg_trigger 
-                        WHERE tgrelid = 'files'::regclass 
+                        WHERE tgrelid = 'file_media_bookkeeping'::regclass 
                         AND tgname = 'trigger_auto_generate_file_paths'
                     """)
                     if cursor.fetchone():
-                        cursor.execute("ALTER TABLE files ENABLE TRIGGER trigger_auto_generate_file_paths")
+                        cursor.execute("ALTER TABLE file_media_bookkeeping ENABLE TRIGGER trigger_auto_generate_file_paths")
                         conn.commit()
                         logger.info("✓ Trigger re-enabled")
                     else:
@@ -674,12 +674,12 @@ def main():
             with trigger_state_lock:
                 conn = connection_pool.get_connection()
                 with conn.cursor() as cursor:
-                    cursor.execute("ALTER TABLE files ENABLE TRIGGER trigger_auto_generate_file_paths")
+                    cursor.execute("ALTER TABLE file_media_bookkeeping ENABLE TRIGGER trigger_auto_generate_file_paths")
                     conn.commit()
                     logger.info("✓ Trigger re-enabled after error")
         except:
             logger.error("Failed to re-enable trigger - manual intervention required!")
-            logger.error("Run this in pgAdmin: ALTER TABLE files ENABLE TRIGGER trigger_auto_generate_file_paths;")
+            logger.error("Run this in pgAdmin: ALTER TABLE file_media_bookkeeping ENABLE TRIGGER trigger_auto_generate_file_paths;")
         sys.exit(1)
 
     finally:

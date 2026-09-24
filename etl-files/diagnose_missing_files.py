@@ -124,14 +124,14 @@ def analyze_database_vs_disk():
         
         # Query: Count total records with file_id
         cursor.execute("""
-            SELECT COUNT(*) as total_records FROM files WHERE file_id IS NOT NULL
+            SELECT COUNT(*) as total_records FROM file_media_bookkeeping WHERE file_id IS NOT NULL
         """)
         total_records = cursor.fetchone()[0]
         
         # Query: Count records by source_type
         cursor.execute("""
             SELECT source_type, COUNT(*) as count 
-            FROM files 
+            FROM file_media_bookkeeping 
             WHERE file_id IS NOT NULL 
             GROUP BY source_type 
             ORDER BY source_type
@@ -147,7 +147,7 @@ def analyze_database_vs_disk():
         # Query: Check for NULL extensions
         cursor.execute("""
             SELECT COUNT(*) as count 
-            FROM files 
+            FROM file_media_bookkeeping 
             WHERE file_id IS NOT NULL 
             AND file_url IS NOT NULL
             AND file_url NOT LIKE '%.%'

@@ -56,7 +56,7 @@ PROPERTIES_TABLE = TABLE_CONFIG.get('properties', 'properties')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 PENDING_FK_TABLE = 'properties_pending_fk'
 PROPERTY_ADDITIONAL_DETAILS_TABLE = TABLE_CONFIG.get('property_additional_details', 'property_additional_details')
-PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('property_media', 'property_media')
+# property_media was consolidated into file_media_bookkeeping (source_type='property', source_field='MEDIA').
 
 # CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
 SOURCE_SYSTEM = 'CCTNS_V2'
@@ -88,7 +88,7 @@ class PropertiesETL:
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
         self.has_property_additional_details_table = False
-        self.has_property_media_table = False
+        self.has_file_media_bookkeeping_table = False
         self.stats = {
             'total_api_calls': 0,
             'total_properties_fetched': 0,
@@ -143,15 +143,40 @@ class PropertiesETL:
         logger.info("Database connection closed")
 
     def ensure_run_state_table(self):
-        """Ensure ETL run-state table exists."""
+        """Ensure the consolidated ETL bookkeeping table exists (kind='run_state')."""
         with self.db_pool.get_connection_context() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS etl_run_state (
-                        module_name TEXT PRIMARY KEY,
-                        last_successful_end TIMESTAMPTZ NOT NULL,
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    )
+                    DO $$ BEGIN
+                        CREATE TYPE public.etl_bookkeeping_kind AS ENUM ('checkpoint', 'run_state', 'fk_retry', 'failure');
+                    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+                    CREATE TABLE IF NOT EXISTS etl_bookkeeping (
+                        id BIGSERIAL PRIMARY KEY,
+                        kind public.etl_bookkeeping_kind NOT NULL,
+                        module_name TEXT NOT NULL,
+                        record_key TEXT,
+                        run_id TEXT,
+                        checkpoint_value TEXT,
+                        watermark TIMESTAMPTZ,
+                        record_json JSONB,
+                        missing_fk_column VARCHAR(100),
+                        missing_fk_value TEXT,
+                        reason TEXT,
+                        attempt_count INTEGER NOT NULL DEFAULT 0,
+                        last_attempted_at TIMESTAMPTZ,
+                        first_failed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        resolved BOOLEAN NOT NULL DEFAULT FALSE,
+                        resolved_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_singleton
+                        ON etl_bookkeeping (kind, module_name)
+                        WHERE kind IN ('checkpoint', 'run_state');
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_failure
+                        ON etl_bookkeeping (kind, module_name, record_key)
+                        WHERE kind = 'failure';
                 """)
                 conn.commit()
 
@@ -160,7 +185,7 @@ class PropertiesETL:
         with self.db_pool.get_connection_context() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                    "SELECT watermark FROM etl_bookkeeping WHERE kind = 'run_state' AND module_name = %s",
                     (module_name,)
                 )
                 row = cursor.fetchone()
@@ -172,10 +197,10 @@ class PropertiesETL:
         with self.db_pool.get_connection_context() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (module_name) DO UPDATE SET
-                        last_successful_end = EXCLUDED.last_successful_end,
+                    INSERT INTO etl_bookkeeping (kind, module_name, watermark, updated_at)
+                    VALUES ('run_state', %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (kind, module_name) WHERE kind = 'run_state' DO UPDATE SET
+                        watermark = EXCLUDED.watermark,
                         updated_at = CURRENT_TIMESTAMP
                 """, (module_name, end_dt))
                 conn.commit()
@@ -807,31 +832,28 @@ class PropertiesETL:
         cursor,
     ):
         """
-        Keep property_media in overwrite mode.
-        Always delete previous rows first to avoid stale child records.
+        Keep this property's MEDIA[] rows in the consolidated
+        file_media_bookkeeping table in overwrite mode (source_type='property',
+        source_field='MEDIA'). Always delete previous rows first to avoid
+        stale child records. Replaces the former dedicated property_media
+        table.
         """
-        if not self.has_property_media_table:
+        if not self.has_file_media_bookkeeping_table:
             return
 
         cursor.execute(
-            f"DELETE FROM {PROPERTY_MEDIA_TABLE} WHERE property_id = %s",
+            "DELETE FROM file_media_bookkeeping WHERE source_type = 'property' AND source_field = 'MEDIA' AND parent_id = %s",
             (property_id,),
         )
 
         if not media:
             return
 
-        insert_sql = f"""
-            INSERT INTO {PROPERTY_MEDIA_TABLE}
-                (property_id, media_index, media_file_id, media_url, media_payload, date_created, date_modified)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (property_id, media_index)
-            DO UPDATE SET
-                media_file_id = EXCLUDED.media_file_id,
-                media_url = EXCLUDED.media_url,
-                media_payload = EXCLUDED.media_payload,
-                date_created = EXCLUDED.date_created,
-                date_modified = EXCLUDED.date_modified
+        insert_sql = """
+            INSERT INTO file_media_bookkeeping
+                (source_type, source_field, parent_id, file_index, file_id, media_url, media_payload,
+                 created_at, updated_at, source_system, source_endpoint, fetched_at, etl_run_id)
+            VALUES ('property', 'MEDIA', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         for idx, media_item in enumerate(media):
@@ -846,6 +868,10 @@ class PropertiesETL:
                     self.to_jsonb_param(media_payload),
                     date_created,
                     date_modified,
+                    SOURCE_SYSTEM,
+                    SOURCE_ENDPOINT,
+                    datetime.now(timezone.utc),
+                    ETL_RUN_ID,
                 ),
             )
     
@@ -1155,7 +1181,7 @@ class PropertiesETL:
             self.ensure_pending_table()
 
             self.has_property_additional_details_table = self.table_exists(PROPERTY_ADDITIONAL_DETAILS_TABLE)
-            self.has_property_media_table = self.table_exists(PROPERTY_MEDIA_TABLE)
+            self.has_file_media_bookkeeping_table = self.table_exists('file_media_bookkeeping')
             if self.has_property_additional_details_table:
                 logger.info(f"✅ Child table detected: {PROPERTY_ADDITIONAL_DETAILS_TABLE}")
             else:
@@ -1163,12 +1189,12 @@ class PropertiesETL:
                     f"⚠️  Child table missing: {PROPERTY_ADDITIONAL_DETAILS_TABLE} "
                     f"(run migration to enable normalized ADDITIONAL_DETAILS sync)"
                 )
-            if self.has_property_media_table:
-                logger.info(f"✅ Child table detected: {PROPERTY_MEDIA_TABLE}")
+            if self.has_file_media_bookkeeping_table:
+                logger.info("✅ Consolidated table detected: file_media_bookkeeping")
             else:
                 logger.warning(
-                    f"⚠️  Child table missing: {PROPERTY_MEDIA_TABLE} "
-                    f"(run migration to enable normalized MEDIA sync)"
+                    "⚠️  Consolidated table missing: file_media_bookkeeping "
+                    "(run migration to enable normalized MEDIA sync)"
                 )
             
             # Load crime IDs into memory

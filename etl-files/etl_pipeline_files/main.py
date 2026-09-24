@@ -99,22 +99,22 @@ class ETLPipeline:
             # Check if created_at column exists
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'files' AND column_name = 'created_at'
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'file_media_bookkeeping' AND column_name = 'created_at'
                 """)
                 has_created_at = cursor.fetchone() is not None
-                
+
                 if not has_created_at:
-                    self.logger.warning("⚠️  created_at column does not exist in files table - cannot resume from last date")
+                    self.logger.warning("⚠️  created_at column does not exist in file_media_bookkeeping table - cannot resume from last date")
                     return {}
-                
+
                 # Get maximum created_at date per source_type
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         source_type,
                         MAX(DATE(created_at)) as last_processed_date
-                    FROM files
+                    FROM file_media_bookkeeping
                     WHERE created_at IS NOT NULL
                     GROUP BY source_type
                 """)

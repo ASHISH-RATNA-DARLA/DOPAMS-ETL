@@ -73,10 +73,10 @@ else:
 
 # Target tables (allows redirecting ETL into test tables)
 FSL_CASE_PROPERTY_TABLE = TABLE_CONFIG.get('fsl_case_property', 'fsl_case_property')
-FSL_CASE_PROPERTY_MEDIA_TABLE = TABLE_CONFIG.get('fsl_case_property_media', 'fsl_case_property_media')
+# fsl_case_property_media (and the legacy case_property_media alt table) were
+# consolidated into file_media_bookkeeping (source_type='case_property', source_field='MEDIA').
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 MO_SEIZURES_TABLE = TABLE_CONFIG.get('mo_seizures', 'mo_seizures')
-ALT_FSL_MEDIA_TABLE = 'case_property_media'
 
 # CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
 SOURCE_SYSTEM = 'CCTNS_V2'
@@ -296,90 +296,26 @@ class FSLCasePropertyETL:
             return set()
 
     def ensure_media_table_ready(self):
-        """Ensure configured media table exists and backfill from alternate table when available."""
+        """Verify the consolidated file_media_bookkeeping table exists.
+
+        This replaces the former dedicated fsl_case_property_media table
+        (and its own backfill-from-case_property_media / auto-create /
+        best-effort FK logic). file_media_bookkeeping is provisioned
+        centrally by cctns-v2_schema.sql; this is now only a defensive
+        existence check -- MEDIA[] rows for this entity are written with
+        source_type='case_property', source_field='MEDIA'.
+        """
         try:
-            self.db_cursor.execute("SELECT to_regclass(%s)", (f"public.{FSL_CASE_PROPERTY_MEDIA_TABLE}",))
+            self.db_cursor.execute("SELECT to_regclass('public.file_media_bookkeeping')")
             target_exists = self.db_cursor.fetchone()[0] is not None
-
-            self.db_cursor.execute("SELECT to_regclass(%s)", (f"public.{ALT_FSL_MEDIA_TABLE}",))
-            alt_exists = self.db_cursor.fetchone()[0] is not None
-
             if not target_exists:
                 logger.warning(
-                    "⚠️  Media table %s is missing. Creating it now.",
-                    FSL_CASE_PROPERTY_MEDIA_TABLE,
+                    "⚠️  Consolidated table file_media_bookkeeping is missing. "
+                    "Apply cctns-v2_schema.sql to enable case-property MEDIA sync."
                 )
-                self.db_cursor.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (
-                        case_property_id character varying(255) NOT NULL,
-                        media_index integer NOT NULL,
-                        file_id character varying(255),
-                        media_payload jsonb,
-                        created_at timestamptz NOT NULL DEFAULT now(),
-                        updated_at timestamptz NOT NULL DEFAULT now(),
-                        CONSTRAINT {FSL_CASE_PROPERTY_MEDIA_TABLE}_pkey PRIMARY KEY (case_property_id, media_index)
-                    )
-                    """
-                )
-                self.db_cursor.execute(
-                    f"""
-                    CREATE INDEX IF NOT EXISTS idx_{FSL_CASE_PROPERTY_MEDIA_TABLE}_case_property_id
-                    ON public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (case_property_id)
-                    """
-                )
-                self.db_cursor.execute(
-                    f"""
-                    CREATE INDEX IF NOT EXISTS idx_{FSL_CASE_PROPERTY_MEDIA_TABLE}_file_id
-                    ON public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (file_id)
-                    """
-                )
-
-                if alt_exists and ALT_FSL_MEDIA_TABLE != FSL_CASE_PROPERTY_MEDIA_TABLE:
-                    logger.info(
-                        "ℹ️  Backfilling media rows from %s -> %s",
-                        ALT_FSL_MEDIA_TABLE,
-                        FSL_CASE_PROPERTY_MEDIA_TABLE,
-                    )
-                    self.db_cursor.execute(
-                        f"""
-                        INSERT INTO public.{FSL_CASE_PROPERTY_MEDIA_TABLE} (case_property_id, media_index, file_id, media_payload)
-                        SELECT
-                            case_property_id,
-                            COALESCE(media_index, 0) AS media_index,
-                            NULLIF(BTRIM(file_id), '') AS file_id,
-                            media_payload
-                        FROM public.{ALT_FSL_MEDIA_TABLE}
-                        ON CONFLICT (case_property_id, media_index) DO NOTHING
-                        """
-                    )
-
-                self.db_conn.commit()
-
-                # Add FK only when parent key supports it (some prod schemas are missing PK/UNIQUE).
-                try:
-                    self.db_cursor.execute(
-                        f"""
-                        ALTER TABLE public.{FSL_CASE_PROPERTY_MEDIA_TABLE}
-                        ADD CONSTRAINT {FSL_CASE_PROPERTY_MEDIA_TABLE}_case_property_id_fkey
-                        FOREIGN KEY (case_property_id)
-                        REFERENCES public.{FSL_CASE_PROPERTY_TABLE}(case_property_id)
-                        ON DELETE CASCADE
-                        """
-                    )
-                    self.db_conn.commit()
-                except Exception as fk_error:
-                    self.db_conn.rollback()
-                    logger.warning(
-                        "⚠️  FK skipped for %s.case_property_id -> %s.case_property_id: %s",
-                        FSL_CASE_PROPERTY_MEDIA_TABLE,
-                        FSL_CASE_PROPERTY_TABLE,
-                        fk_error,
-                    )
-
         except Exception as e:
             self.db_conn.rollback()
-            logger.warning("⚠️  Could not auto-prepare media table %s: %s", FSL_CASE_PROPERTY_MEDIA_TABLE, e)
+            logger.warning("⚠️  Could not verify file_media_bookkeeping: %s", e)
     
     def get_effective_start_date(self) -> str:
         """
@@ -1101,77 +1037,72 @@ class FSLCasePropertyETL:
     
     def insert_media_files(self, case_property_id, media_files: List[Dict]) -> int:
         """
-        Insert or update media files for a case property.
+        Insert or update media files for a case property, in the
+        consolidated file_media_bookkeeping table (source_type='case_property',
+        source_field='MEDIA'). Replaces the former dedicated
+        fsl_case_property_media table.
         Uses replace strategy: delete existing rows then insert API snapshot rows.
-        
+
         Args:
             case_property_id: MongoDB ObjectId (string) of the case property
             media_files: List of normalized media entries with media_index, file_id, media_payload
-        
+
         Returns:
             Number of media files inserted
         """
         if not case_property_id:
             return 0
-        
-        try:
-            # Delete existing media files for this case property
+
+        insert_sql = """
+            INSERT INTO file_media_bookkeeping
+                (source_type, source_field, parent_id, file_index, file_id, media_payload,
+                 created_at, updated_at, source_system, source_endpoint, fetched_at, etl_run_id)
+            VALUES ('case_property', 'MEDIA', %s, %s, %s::uuid, %s, now(), now(), %s, %s, %s, %s)
+        """
+
+        def _run(media_files):
             self.db_cursor.execute(
-                f"DELETE FROM {FSL_CASE_PROPERTY_MEDIA_TABLE} WHERE case_property_id = %s",
+                "DELETE FROM file_media_bookkeeping WHERE source_type = 'case_property' AND source_field = 'MEDIA' AND parent_id = %s",
                 (case_property_id,)
             )
-            
             inserted_count = 0
             if not media_files:
                 return 0
+            now_utc = datetime.now(timezone.utc)
             for media_item in media_files:
                 media_index = media_item.get('media_index', inserted_count)
-                file_id = media_item.get('file_id')
+                file_id = media_item.get('file_id') or None
                 media_payload = media_item.get('media_payload')
-
-                # Insert media row with preserved payload snapshot
                 self.db_cursor.execute(
-                    f"""
-                    INSERT INTO {FSL_CASE_PROPERTY_MEDIA_TABLE}
-                        (case_property_id, media_index, file_id, media_payload)
-                    VALUES (%s, %s, %s, %s)
-                    """,
-                    (case_property_id, media_index, file_id, Json(media_payload) if media_payload is not None else None)
+                    insert_sql,
+                    (
+                        case_property_id,
+                        media_index,
+                        file_id,
+                        Json(media_payload) if media_payload is not None else None,
+                        SOURCE_SYSTEM,
+                        SOURCE_ENDPOINT,
+                        now_utc,
+                        ETL_RUN_ID,
+                    )
                 )
                 inserted_count += 1
-            
+            return inserted_count
+
+        try:
+            inserted_count = _run(media_files)
             if inserted_count > 0:
                 logger.trace(f"Inserted {inserted_count} media files for case_property_id={case_property_id}")
-            
             return inserted_count
-            
+
         except psycopg2.errors.UndefinedTable:
             self.db_conn.rollback()
             logger.warning(
-                "⚠️  Media table %s missing at runtime; attempting auto-recovery",
-                FSL_CASE_PROPERTY_MEDIA_TABLE,
+                "⚠️  Consolidated table file_media_bookkeeping missing at runtime; attempting auto-recovery"
             )
             self.ensure_media_table_ready()
             try:
-                self.db_cursor.execute(
-                    f"DELETE FROM {FSL_CASE_PROPERTY_MEDIA_TABLE} WHERE case_property_id = %s",
-                    (case_property_id,)
-                )
-                inserted_count = 0
-                for media_item in media_files:
-                    media_index = media_item.get('media_index', inserted_count)
-                    file_id = media_item.get('file_id')
-                    media_payload = media_item.get('media_payload')
-                    self.db_cursor.execute(
-                        f"""
-                        INSERT INTO {FSL_CASE_PROPERTY_MEDIA_TABLE}
-                            (case_property_id, media_index, file_id, media_payload)
-                        VALUES (%s, %s, %s, %s)
-                        """,
-                        (case_property_id, media_index, file_id, Json(media_payload) if media_payload is not None else None)
-                    )
-                    inserted_count += 1
-                return inserted_count
+                return _run(media_files)
             except Exception as retry_error:
                 logger.error("Error inserting media files after auto-recovery: %s", retry_error)
                 return 0

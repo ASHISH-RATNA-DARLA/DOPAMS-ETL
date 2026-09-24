@@ -703,15 +703,40 @@ class PersonsETL:
         logger.info("Database connection pool closed")
 
     def ensure_run_state_table(self):
-        """Ensure ETL run-state table exists."""
+        """Ensure the consolidated ETL bookkeeping table exists (kind='run_state')."""
         with self.db_pool.get_connection_context() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS etl_run_state (
-                    module_name TEXT PRIMARY KEY,
-                    last_successful_end TIMESTAMPTZ NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
+                DO $$ BEGIN
+                    CREATE TYPE public.etl_bookkeeping_kind AS ENUM ('checkpoint', 'run_state', 'fk_retry', 'failure');
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+                CREATE TABLE IF NOT EXISTS etl_bookkeeping (
+                    id BIGSERIAL PRIMARY KEY,
+                    kind public.etl_bookkeeping_kind NOT NULL,
+                    module_name TEXT NOT NULL,
+                    record_key TEXT,
+                    run_id TEXT,
+                    checkpoint_value TEXT,
+                    watermark TIMESTAMPTZ,
+                    record_json JSONB,
+                    missing_fk_column VARCHAR(100),
+                    missing_fk_value TEXT,
+                    reason TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    last_attempted_at TIMESTAMPTZ,
+                    first_failed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    resolved BOOLEAN NOT NULL DEFAULT FALSE,
+                    resolved_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_singleton
+                    ON etl_bookkeeping (kind, module_name)
+                    WHERE kind IN ('checkpoint', 'run_state');
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_failure
+                    ON etl_bookkeeping (kind, module_name, record_key)
+                    WHERE kind = 'failure';
             """)
             conn.commit()
 
@@ -720,7 +745,7 @@ class PersonsETL:
         with self.db_pool.get_connection_context() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT last_successful_end FROM etl_run_state WHERE module_name = %s",
+                "SELECT watermark FROM etl_bookkeeping WHERE kind = 'run_state' AND module_name = %s",
                 (module_name,)
             )
             row = cursor.fetchone()
@@ -732,10 +757,10 @@ class PersonsETL:
         with self.db_pool.get_connection_context() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO etl_run_state (module_name, last_successful_end, updated_at)
-                VALUES (%s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (module_name) DO UPDATE SET
-                    last_successful_end = EXCLUDED.last_successful_end,
+                INSERT INTO etl_bookkeeping (kind, module_name, watermark, updated_at)
+                VALUES ('run_state', %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (kind, module_name) WHERE kind = 'run_state' DO UPDATE SET
+                    watermark = EXCLUDED.watermark,
                     updated_at = CURRENT_TIMESTAMP
             """, (module_name, end_dt))
             conn.commit()
