@@ -26,6 +26,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool
 from env_utils import get_float_env, get_int_env, get_etl_run_id
 
+try:
+    from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
+except ImportError:  # pragma: no cover
+    push_fk_failure = None
+    _drain_fk_queue = None
+
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 
 # ==========================================
@@ -132,7 +138,11 @@ class AccusedETL:
             'errors': []
         }
         self.db_limiter = None
-        
+        # brief_facts_ai is an AI/LLM-derived table, out of scope for the
+        # pure-CCTNS pipeline and absent from the cctns-v2 schema. Checked
+        # once per run in route_accused_status()'s caller; None = not yet checked.
+        self.has_brief_facts_ai_table = None
+
         # Setup chunk-wise logging files
         self.setup_chunk_loggers()
     
@@ -225,7 +235,18 @@ class AccusedETL:
 
     def route_accused_status(self, accused: Dict, cursor):
         """
-        Route ACCUSED_STATUS field to arrests and brief_facts_ai tables.
+        Route ACCUSED_STATUS field to arrests and (when present -- full/
+        default pipeline only) brief_facts_ai tables.
+
+        Both sub-updates run inside their own SAVEPOINT so a failure here
+        (e.g. brief_facts_ai not existing in the pure-CCTNS cctns-v2 schema,
+        which is AI-derived and intentionally out of scope) rolls back only
+        that savepoint, not the caller's whole transaction -- an uncaught
+        UndefinedTable/UndefinedColumn error here previously poisoned the
+        entire enclosing transaction (PostgreSQL aborts the transaction on
+        any statement error until an explicit ROLLBACK), silently discarding
+        the accused row this function is called from within, even though the
+        stats counters had already recorded it as inserted.
         """
         accused_status = accused.get('accused_status')
         if not accused_status:
@@ -236,42 +257,61 @@ class AccusedETL:
         seq_num = accused.get('seq_num')
         person_id = accused.get('person_id')
 
-        # 1. Update brief_facts_ai status
+        # 1. Update brief_facts_ai status (full/default pipeline only -- the
+        #    table does not exist in the pure-CCTNS cctns-v2 schema).
         if accused_id:
-            try:
-                cursor.execute(f"""
-                    UPDATE {BRIEF_FACTS_ACCUSED_TABLE}
-                    SET status = %s
-                    WHERE accused_id = %s
-                """, (accused_status, accused_id))
-                logger.trace(f"Updated status in brief_facts_ai for accused_id {accused_id}")
-            except Exception as e:
-                logger.error(f"Error updating {BRIEF_FACTS_ACCUSED_TABLE} status: {e}")
+            if self.has_brief_facts_ai_table is None:
+                try:
+                    cursor.execute(
+                        "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                        "WHERE table_schema='public' AND table_name=%s)",
+                        (BRIEF_FACTS_ACCUSED_TABLE,)
+                    )
+                    self.has_brief_facts_ai_table = bool(cursor.fetchone()[0])
+                except Exception:
+                    self.has_brief_facts_ai_table = False
+            if self.has_brief_facts_ai_table:
+                try:
+                    cursor.execute("SAVEPOINT sp_brief_facts_status")
+                    cursor.execute(f"""
+                        UPDATE {BRIEF_FACTS_ACCUSED_TABLE}
+                        SET status = %s
+                        WHERE accused_id = %s
+                    """, (accused_status, accused_id))
+                    cursor.execute("RELEASE SAVEPOINT sp_brief_facts_status")
+                    logger.trace(f"Updated status in brief_facts_ai for accused_id {accused_id}")
+                except Exception as e:
+                    try:
+                        cursor.execute("ROLLBACK TO SAVEPOINT sp_brief_facts_status")
+                    except Exception:
+                        pass
+                    logger.error(f"Error updating {BRIEF_FACTS_ACCUSED_TABLE} status: {e}")
 
         # 2. Update arrests table with parsed 41A info
         parsed_status = self.parse_accused_status(accused_status)
         if parsed_status and crime_id and seq_num:
             update_fields = []
             update_values = []
-            
+
             if 'is_41a_crpc' in parsed_status:
                 update_fields.append("is_41a_crpc = %s")
                 update_values.append(parsed_status['is_41a_crpc'])
-            
+
             if 'date_of_issue_41a' in parsed_status:
                 update_fields.append("date_of_issue_41a = %s")
                 update_values.append(parsed_status['date_of_issue_41a'])
-            
+
             if 'is_arrested' in parsed_status:
                 update_fields.append("is_arrested = %s")
                 update_values.append(parsed_status['is_arrested'])
-                
+
             if 'is_absconding' in parsed_status:
                 update_fields.append("is_absconding = %s")
                 update_values.append(parsed_status['is_absconding'])
 
             if update_fields:
                 try:
+                    cursor.execute("SAVEPOINT sp_arrests_41a")
                     update_query = f"""
                         UPDATE {ARRESTS_TABLE}
                         SET {', '.join(update_fields)}
@@ -279,8 +319,13 @@ class AccusedETL:
                     """
                     update_values.extend([crime_id, str(seq_num)])
                     cursor.execute(update_query, tuple(update_values))
+                    cursor.execute("RELEASE SAVEPOINT sp_arrests_41a")
                     logger.trace(f"Updated 41A info in {ARRESTS_TABLE} for crime_id {crime_id}, seq_num {seq_num}")
                 except Exception as e:
+                    try:
+                        cursor.execute("ROLLBACK TO SAVEPOINT sp_arrests_41a")
+                    except Exception:
+                        pass
                     logger.error(f"Error updating {ARRESTS_TABLE} info: {e}")
 
     def close_chunk_loggers(self):
@@ -1224,6 +1269,24 @@ class AccusedETL:
             logger.error(f"❌ Error inserting fallback accused {accused_id}: {e}")
             return False, f'insert_error: {str(e)}'
     
+    def _retry_accused_record(self, conn, record):
+        """Retry insertion of a queued accused record once its crime_id is present.
+
+        Called by drain_fk_queue. Returns True on success, False if still unresolvable.
+        """
+        crime_id = record.get('crime_id')
+        if not crime_id:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s",
+                (crime_id,)
+            )
+            if not cur.fetchone():
+                return False  # Still missing
+            success, _ = self.insert_accused(record, conn, cur, 'FK_RETRY')
+            return success
+
     def insert_accused(self, accused: Dict, conn, cursor, chunk_date_range: str = "",
                        existing_crimes=None, existing_persons=None, person_stubs_to_create=None) -> Tuple[bool, str]:
         """
@@ -1290,6 +1353,28 @@ class AccusedETL:
                     self.stats['total_accused_failed'] += 1
                     self.stats['accused_without_crime'] += 1
                 self.log_failed_record(accused, reason, error_details)
+                # Park in FK retry queue — recovers when the crime record
+                # arrives on a later run. record_id is crime_id|accused_id:
+                # accused_id alone is already unique per record, but the
+                # composite matches the collision-safe convention used by
+                # every other module on this shared queue.
+                if push_fk_failure is not None:
+                    try:
+                        push_fk_failure(
+                            conn, 'accused',
+                            record_id=f"{crime_id}|{accused_id}",
+                            # default=str only (not a per-key stringify): a
+                            # per-key str() would flatten any non-scalar field
+                            # (e.g. a future list/dict column) into a string
+                            # drain_fk_queue can't reconstruct.
+                            record_json=json.dumps(accused, default=str),
+                            missing_fk_column='crime_id',
+                            missing_fk_value=crime_id,
+                        )
+                        conn.commit()
+                    except Exception as _qe:
+                        logger.warning("FK queue push failed for accused %s: %s",
+                                       accused_id, _qe)
                 return False, reason
             
             # Check if person exists (create stub if needed) - only if person_id is provided
@@ -2017,7 +2102,16 @@ class AccusedETL:
         if not self.connect_db():
             logger.error("Failed to connect to database. Exiting.")
             return False
-        
+
+        # Retry any accused records queued from previous runs due to FK misses.
+        if _drain_fk_queue is not None:
+            try:
+                with self.db_pool.get_connection_context() as _drain_conn:
+                    _drain_fk_queue(_drain_conn, 'accused', self._retry_accused_record)
+                    _drain_conn.commit()
+            except Exception as _de:
+                logger.warning("FK queue drain failed at startup: %s (non-fatal)", _de)
+
         try:
             self.ensure_run_state_table()
 

@@ -28,6 +28,12 @@ from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 from env_utils import get_etl_run_id
 
+try:
+    from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
+except ImportError:  # pragma: no cover
+    push_fk_failure = None
+    _drain_fk_queue = None
+
 # Add TRACE level support (lower than DEBUG)
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
@@ -1046,6 +1052,27 @@ class MoSeizureETL:
             
             self.duplicates_log.flush()
     
+    def _retry_mo_seizure_record(self, conn, record):
+        """Retry insertion of a queued mo_seizures record once its crime_id is present.
+
+        Called by drain_fk_queue. Returns True on success, False if still unresolvable.
+        """
+        original_crime_id = record.get('_original_crime_id') or record.get('crime_id')
+        if not original_crime_id:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT crime_id FROM {CRIMES_TABLE} WHERE crime_id = %s",
+                (original_crime_id,)
+            )
+            if not cur.fetchone():
+                return False  # Still missing
+            # Crime now exists — re-inject validated crime_id.
+            record['crime_id'] = original_crime_id
+            record['_original_crime_id'] = original_crime_id
+            success, _ = self.insert_seizure(record, conn, cur, 'FK_RETRY')
+            return success
+
     def insert_seizure(self, seizure: Dict, conn, cursor, chunk_date_range: str = "") -> Tuple[bool, str]:
         """
         Insert or update single seizure into database with smart update logic
@@ -1086,6 +1113,27 @@ class MoSeizureETL:
                 self.stats['total_seizures_failed_crime_id'] += 1
             self.log_failed_record(seizure, reason, error_details)
             self.log_invalid_crime_id(seizure, original_crime_id, chunk_date_range)
+            # Park in FK retry queue — recovers when the crime record arrives
+            # on a later run. record_id is crime_id|mo_seizure_id (composite,
+            # collision-safe: multiple seizures can share one still-missing
+            # crime_id).
+            if push_fk_failure is not None:
+                try:
+                    push_fk_failure(
+                        conn, 'mo_seizures',
+                        record_id=f"{original_crime_id or 'UNKNOWN'}|{mo_seizure_id or ''}",
+                        # default=str only (not a per-key stringify): seizure
+                        # contains a real list field (media_entries) that must
+                        # round-trip as JSON array, not become the literal
+                        # string "[]" that drain_fk_queue can't reconstruct.
+                        record_json=json.dumps(seizure, default=str),
+                        missing_fk_column='crime_id',
+                        missing_fk_value=original_crime_id or '',
+                    )
+                    conn.commit()
+                except Exception as _qe:
+                    logger.warning("FK queue push failed for mo_seizure %s: %s",
+                                   original_crime_id, _qe)
             return False, reason
         
         if not mo_seizure_id:
@@ -1201,7 +1249,7 @@ class MoSeizureETL:
                         source_system, source_endpoint, fetched_at, etl_run_id
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s
+                        %s, %s, %s, %s, %s
                     )
                 """
                 cursor.execute(insert_query, (
@@ -1290,6 +1338,27 @@ class MoSeizureETL:
                             self.stats['total_seizures_failed'] += 1
                             self.stats['total_seizures_failed_crime_id'] += 1
                         self.log_invalid_crime_id(seizure, original_crime_id, chunk_range)
+
+                        # Park in FK retry queue — recovers when the crime
+                        # record arrives on a later run. This worker returns
+                        # before insert_seizure() is ever called for an
+                        # invalid crime_id, so insert_seizure()'s own
+                        # push_fk_failure call never runs for this case.
+                        if push_fk_failure is not None:
+                            try:
+                                push_fk_failure(
+                                    conn, 'mo_seizures',
+                                    record_id=f"{original_crime_id or 'UNKNOWN'}|{mo_seizure_id or ''}",
+                                    # default=str only: seizure contains a
+                                    # real list field (media_entries).
+                                    record_json=json.dumps(seizure, default=str),
+                                    missing_fk_column='crime_id',
+                                    missing_fk_value=original_crime_id or '',
+                                )
+                                conn.commit()
+                            except Exception as _qe:
+                                logger.warning("FK queue push failed for mo_seizure %s: %s",
+                                               original_crime_id, _qe)
                         return
                     
                     unique_key = mo_seizure_id
@@ -1559,7 +1628,16 @@ class MoSeizureETL:
         if not self.connect_db():
             logger.error("Failed to connect to database. Exiting.")
             return False
-        
+
+        # Retry any mo_seizures records queued from previous runs due to FK misses.
+        if _drain_fk_queue is not None:
+            try:
+                with self.db_pool.get_connection_context() as _drain_conn:
+                    _drain_fk_queue(_drain_conn, 'mo_seizures', self._retry_mo_seizure_record)
+                    _drain_conn.commit()
+            except Exception as _de:
+                logger.warning("FK queue drain failed at startup: %s (non-fatal)", _de)
+
         try:
             # Get effective start date (check if table has data)
             effective_start_date = self.get_effective_start_date()

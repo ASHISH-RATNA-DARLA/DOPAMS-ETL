@@ -965,11 +965,17 @@ class UpdatedChargesheetETL:
             self.log_failed_record(chargesheet, reason, error_details)
             self.log_invalid_crime_id(chargesheet, original_crime_id, chunk_date_range)
             # Park in FK retry queue — recovers when crime record arrives.
+            # record_id must be unique per source record, not just per
+            # crime_id: multiple distinct updated-chargesheets can share the
+            # same still-missing crime_id, and the queue's unique index
+            # (kind, module_name, record_key) would silently drop all but
+            # the first if record_id were the bare crime_id.
             if push_fk_failure is not None:
                 try:
+                    record_key = f"{original_crime_id or 'UNKNOWN'}|{update_charge_sheet_id or ''}"
                     push_fk_failure(
                         self._conn, 'updated_chargesheet',
-                        record_id=original_crime_id or 'UNKNOWN',
+                        record_id=record_key,
                         record_json=json.dumps(
                             {k: str(v) if v is not None else None
                              for k, v in chargesheet.items()},
@@ -1198,6 +1204,31 @@ class UpdatedChargesheetETL:
                         'crime_id': original_crime_id
                     })
                 self.log_invalid_crime_id(chargesheet, original_crime_id, chunk_range)
+
+                # Park in FK retry queue — recovers when crime record arrives.
+                # This worker returns before insert_chargesheet() is ever called
+                # for an invalid crime_id, so insert_chargesheet()'s own
+                # push_fk_failure call never runs for this case; without this,
+                # the record was silently and permanently dropped. record_key
+                # matches insert_chargesheet()'s construction (crime_id alone
+                # is not unique per record — see comment there).
+                if push_fk_failure is not None:
+                    try:
+                        record_key = f"{original_crime_id or 'UNKNOWN'}|{update_charge_sheet_id or ''}"
+                        push_fk_failure(
+                            self._conn, 'updated_chargesheet',
+                            record_id=record_key,
+                            record_json=json.dumps(
+                                {k: str(v) if v is not None else None
+                                 for k, v in chargesheet.items()},
+                            ),
+                            missing_fk_column='crime_id',
+                            missing_fk_value=original_crime_id or '',
+                        )
+                        self._conn.commit()
+                    except Exception as _qe:
+                        logger.warning("FK queue push failed for updated_chargesheet %s: %s",
+                                       original_crime_id, _qe)
                 return
 
             unique_key = update_charge_sheet_id or f"NO_ID_{idx}"

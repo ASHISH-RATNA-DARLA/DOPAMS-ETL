@@ -77,6 +77,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_failure
     ON public.etl_bookkeeping (kind, module_name, record_key)
     WHERE kind = 'failure';
 
+-- Without this, ON CONFLICT DO NOTHING below has no matching constraint to
+-- target, so re-queuing a still-unresolved record on a later run inserts a
+-- duplicate row instead of being skipped.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_etl_bookkeeping_fk_retry
+    ON public.etl_bookkeeping (kind, module_name, record_key)
+    WHERE kind = 'fk_retry';
+
 -- Index for per-table drain scans
 CREATE INDEX IF NOT EXISTS idx_etl_bookkeeping_fk_retry_unresolved
     ON public.etl_bookkeeping (module_name)

@@ -209,33 +209,10 @@ class PropertiesETL:
                 """, (module_name, end_dt))
                 conn.commit()
     
-    def ensure_pending_table(self):
-        """Create the properties_pending_fk table if it doesn't exist."""
-        try:
-            with self.db_pool.get_connection_context() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS {PENDING_FK_TABLE} (
-                            id SERIAL PRIMARY KEY,
-                            property_id VARCHAR(50) NOT NULL,
-                            crime_id VARCHAR(50) NOT NULL,
-                            raw_data JSONB NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            retry_count INTEGER DEFAULT 0,
-                            last_retry_at TIMESTAMP,
-                            resolved BOOLEAN DEFAULT FALSE,
-                            resolved_at TIMESTAMP
-                        )
-                    """)
-                    cur.execute(f"""
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_fk_property_id
-                        ON {PENDING_FK_TABLE}(property_id) WHERE NOT resolved
-                    """)
-                    conn.commit()
-            logger.info(f"✅ Pending FK retry table ready: {PENDING_FK_TABLE}")
-        except Exception as e:
-            logger.error(f"❌ Failed to create pending FK table: {e}")
-            raise
+    # properties_pending_fk was consolidated into etl_bookkeeping (kind='fk_retry',
+    # module_name='properties'), written via push_fk_failure()/queue_pending_fk()
+    # below and drained via drain_fk_queue()/retry_pending_fk(). No dedicated
+    # pending-FK table or bootstrap method is needed any more.
 
     def load_crime_ids(self) -> bool:
         """Load all crime IDs into an in-memory set for O(1) lookups."""
@@ -263,9 +240,15 @@ class PropertiesETL:
             with self.stats_lock:
                 self.stats['total_pending_fk'] += 1
 
-    def _retry_property_record(self, conn, record_json_str: str) -> bool:
+    def _retry_property_record(self, conn, record: Dict) -> bool:
+        """Retry insertion of a queued property record once its crime_id is present.
+
+        Called by drain_fk_queue, which already deserializes the JSONB
+        record_json column into a dict before calling this. Returns True on
+        success, False if still unresolvable.
+        """
         try:
-            raw_data = json.loads(record_json_str)
+            raw_data = record
             crime_id = raw_data.get('CRIME_ID')
             # Check if crime_id exists in our in-memory set (or reload if needed)
             if crime_id not in self.crime_ids:
@@ -883,7 +866,6 @@ class PropertiesETL:
                     {PROPERTIES_TABLE}.particular_of_property IS DISTINCT FROM EXCLUDED.particular_of_property OR
                     {PROPERTIES_TABLE}.category IS DISTINCT FROM EXCLUDED.category OR
                     {PROPERTIES_TABLE}.additional_details IS DISTINCT FROM EXCLUDED.additional_details OR
-                    {PROPERTIES_TABLE}.media IS DISTINCT FROM EXCLUDED.media OR
                     {PROPERTIES_TABLE}.date_created IS DISTINCT FROM EXCLUDED.date_created OR
                     {PROPERTIES_TABLE}.date_modified IS DISTINCT FROM EXCLUDED.date_modified
                 )
@@ -905,7 +887,6 @@ class PropertiesETL:
                 prop['particular_of_property'],
                 prop['category'],
                 self.to_jsonb_param(prop['additional_details']),
-                self.to_jsonb_param(prop['media']),
                 prop['date_created'],
                 prop['date_modified'],
                 SOURCE_SYSTEM,
@@ -1071,16 +1052,7 @@ class PropertiesETL:
         try:
             self.ensure_run_state_table()
 
-            # Ensure the pending FK retry queue table exists
-            self.ensure_pending_table()
             self.has_file_media_bookkeeping_table = self.table_exists('file_media_bookkeeping')
-            if self.has_property_additional_details_table:
-                logger.info(f"✅ Child table detected: {PROPERTY_ADDITIONAL_DETAILS_TABLE}")
-            else:
-                logger.warning(
-                    f"⚠️  Child table missing: {PROPERTY_ADDITIONAL_DETAILS_TABLE} "
-                    f"(run migration to enable normalized ADDITIONAL_DETAILS sync)"
-                )
             if self.has_file_media_bookkeeping_table:
                 logger.info("✅ Consolidated table detected: file_media_bookkeeping")
             else:

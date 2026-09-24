@@ -19,36 +19,47 @@
 --      pg_dump of the live "dev_dopamas"-owned database).
 --
 -- Scope
---   Only entities populated by the pure-CCTNS pipeline are included:
+--   16 tables total. Only entities populated by the pure-CCTNS pipeline
+--   are included:
 --     hierarchy, crimes, persons (+ geo/address audit columns), accused,
---     arrests, disposal, properties (+ pending-fk / additional-details
---     child tables), mo_seizures, chargesheets (+ acts / acts_sections /
---     accused child tables), charge_sheet_updates, fsl_case_property,
---     interrogation_reports (+ 22 child tables incl. ir_pending_fk),
+--     arrests, disposal, properties, mo_seizures, chargesheets (+
+--     actsAndSections[]/accusedParticulars[] as parallel arrays, see
+--     below), charge_sheet_updates, fsl_case_property,
+--     interrogation_reports (+ IR sub-entities as parallel arrays /
+--     limited JSONB directly on the table, see below), plus
 --     file_media_bookkeeping (ALL file/media references + download
---     tracking, for every entity above -- consolidated, see below), and
---     etl_bookkeeping (ALL ETL checkpoint/watermark/retry/failure state --
---     consolidated, see below), plus the two read-only geo reference/
---     lookup tables used by the non-LLM address resolver (geo_countries,
---     geo_reference).
+--     tracking, for every entity above) and etl_bookkeeping (ALL ETL
+--     checkpoint/watermark/retry/failure state), plus the two read-only
+--     geo reference/lookup tables used by the non-LLM address resolver
+--     (geo_countries, geo_reference).
 --
---   Consolidation (this revision): the prior version of this schema had
---   one bookkeeping table per concern. Both families are now single
---   tables with a discriminator column, since every "old" table in each
---   family stored the same underlying kind of row and existed only
---   because each ETL module was extended independently over time:
---     * etl_bookkeeping (kind: checkpoint | run_state | fk_retry | failure)
---       replaces etl_checkpoint, etl_run_state, etl_fk_retry_queue,
---       etl_address_failures.
---     * file_media_bookkeeping (source_type / source_field, reusing the
---       enums already used by the old `files` table) replaces files,
---       property_media, mo_seizure_media, chargesheet_files,
---       chargesheet_media, fsl_case_property_media, and ir_media -- all
---       seven were "one file/media reference belonging to one parent
---       record" rows with only cosmetic per-module differences (which
---       columns were populated, which natural key was used as parent_id).
---   See cctns-v2_schema_mapping_report.md for the full old-table ->
---   new-table mapping and the classification of every remaining table.
+--   Consolidation history (see cctns-v2_schema_mapping_report.md for the
+--   full old-table -> new-table mapping, field-level evidence, and the
+--   classification of every table):
+--     1. etl_bookkeeping (kind: checkpoint | run_state | fk_retry |
+--        failure) replaces etl_checkpoint, etl_run_state,
+--        etl_fk_retry_queue, etl_address_failures, AND (this revision)
+--        the two remaining per-entity retry tables properties_pending_fk
+--        and ir_pending_fk (kind=fk_retry, module_name='properties' /
+--        'interrogation_reports') -- all six stored the same underlying
+--        "which ETL module, what state, when" row shape.
+--     2. file_media_bookkeeping (source_type / source_field enums)
+--        replaces files, property_media, mo_seizure_media,
+--        chargesheet_files, chargesheet_media, fsl_case_property_media,
+--        and ir_media -- all seven were "one file/media reference
+--        belonging to one parent record" rows with only cosmetic
+--        per-module differences.
+--     3. chargesheet_acts / chargesheet_acts_sections / chargesheet_accused
+--        and all 23 ir_* interrogation-report child tables were removed.
+--        Business data that has a confirmed stable field schema from real
+--        captured CCTNS responses is stored as parallel PostgreSQL arrays
+--        directly on chargesheets / interrogation_reports (one array
+--        position per source API array item); IR sub-entities with zero
+--        real captured records anywhere in the response samples remain
+--        JSONB with a documented reason (see the interrogation_reports
+--        table definition). This is a per-field, evidence-based decision,
+--        not "flatten everything" or "JSONB everything" -- see the
+--        mapping report for the full audit of every field.
 --
 --   Explicitly EXCLUDED as out of pure-CCTNS scope (AI/LLM-derived or
 --   legacy/unrelated, not populated by the pure-CCTNS pipeline):
@@ -58,25 +69,19 @@
 --     etl_crime_processing_log (populated only by brief_facts_ai),
 --     old_interragation_report (dead/legacy table), "user" (chatbot app
 --     table) and all materialized views built on brief_facts_ai.
---   Also excluded from this revision: properties_pending_fk and
---   ir_pending_fk are NOT part of the etl_bookkeeping consolidation --
---   they are per-entity FK-retry tables distinct from the *shared*
---   etl_fk_retry_queue (used only by disposal/arrests/chargesheets/
---   update-chargesheets/fsl_case_property), were not named in the
---   consolidation request, and remain as-is.
 --
 -- Design notes
 --   * No hard FOREIGN KEY constraints are declared between crime_id-linked
 --     tables. This matches the CURRENT production schema (confirmed: zero
 --     FOREIGN KEY constraints exist there) and current ETL behavior: child
 --     ETL modules validate parent existence with an application-level
---     SELECT before insert, and queue unresolved rows in the *_pending_fk
---     tables / etl_bookkeeping (kind=fk_retry) for later retry, because
---     CCTNS delivers entities out of dependency order (e.g. a chargesheet
---     can arrive before its crime). Adding hard FKs here would change that
---     behavior and is intentionally avoided per the "no functionality
---     change" requirement. Logical FK relationships are documented as SQL
---     comments on each column instead.
+--     SELECT before insert, and queue unresolved rows in etl_bookkeeping
+--     (kind=fk_retry) for later retry, because CCTNS delivers entities out
+--     of dependency order (e.g. a chargesheet can arrive before its
+--     crime). Adding hard FKs here would change that behavior and is
+--     intentionally avoided per the "no functionality change" requirement.
+--     Logical FK relationships are documented as SQL comments on each
+--     column instead.
 --   * All CCTNS-origin IDs (crime_id, accused_id, person_id, mo_seizure_id,
 --     property_id, interrogation_report_id, ...) are 24-character
 --     MongoDB ObjectId-style strings, not UUIDs -> stored as
@@ -332,9 +337,7 @@ CREATE TABLE public.hierarchy (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT hierarchy_pkey PRIMARY KEY (ps_code)
 );
 COMMENT ON TABLE public.hierarchy IS 'Police organizational hierarchy (ADG -> Zone -> Range -> District -> Sub-Zone -> SDPO -> Circle -> Police Station), one row per PS. Source: GET /master-data/hierarchy.';
@@ -393,9 +396,7 @@ CREATE TABLE public.crimes (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT crimes_pkey PRIMARY KEY (crime_id)
 );
 COMMENT ON TABLE public.crimes IS 'Crime/FIR records. Source: GET /crimes (bulk) and GET /crimes/{crimeId} (detail). additional_json_data holds the CCTNS response fields not individually mapped to a column (e.g. OCCURRENCE_DATE, PLACE_OF_OFFENCE, GD, COMPLAINANT_ID, IO_MOBILE).';
@@ -459,9 +460,7 @@ CREATE TABLE public.persons (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT persons_pkey PRIMARY KEY (person_id)
 );
 COMMENT ON TABLE public.persons IS 'Person master (accused/complainant/associate/etc.), 1:1 with CCTNS PERSON_ID. Source: GET /person-details/{personId}. geo_resolution_source/confidence and domicile_classification are written by the deterministic (LLM-off in pure-CCTNS mode) address/domicile steps that run after ingestion.';
@@ -493,9 +492,7 @@ CREATE TABLE public.accused (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT accused_pkey PRIMARY KEY (accused_id)
 );
 COMMENT ON TABLE public.accused IS 'Links a person to a crime as an accused, with physical features. Source: GET /accused (bulk) and GET /accused/{crimeId} (detail).';
@@ -521,9 +518,7 @@ CREATE TABLE public.arrests (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT arrests_pkey PRIMARY KEY (id)
 );
 COMMENT ON TABLE public.arrests IS 'Arrest status per accused-per-crime. No ARREST_ID in the API; natural/application-level key is (crime_id, accused_seq_no). Source: GET /arrests (bulk) and GET /arrests/{crimeId} (detail).';
@@ -540,9 +535,7 @@ CREATE TABLE public.disposal (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT disposal_pkey PRIMARY KEY (id),
     CONSTRAINT disposal_unique UNIQUE (crime_id, disposal_type, disposed_at)
 );
@@ -573,9 +566,7 @@ CREATE TABLE public.properties (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT properties_pkey PRIMARY KEY (property_id)
 );
 COMMENT ON TABLE public.properties IS 'Recovered/seized property. additional_details shape varies by CATEGORY (Drugs/Narcotics, Electrical and Electronic Goods, Miscellaneous, ...). Source: GET /property-details (bulk) and GET /property-details/{crimeId} (detail).';
@@ -616,9 +607,7 @@ CREATE TABLE public.mo_seizures (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT mo_seizures_pkey PRIMARY KEY (mo_seizure_id)
 );
 COMMENT ON TABLE public.mo_seizures IS 'Modus-operandi seizure records. Natural key is mo_seizure_id; (crime_id, mo_id) is the API-level ordinal key. Source: GET /mo-seizures (bulk) and GET /mo-seizures/{crimeId} (detail).';
@@ -641,16 +630,29 @@ CREATE TABLE public.chargesheets (
     date_created timestamp with time zone,
     date_modified timestamp with time zone,
     charge_sheet_id character varying(50),
+    -- actsAndSections[] (confirmed stable 5-field schema, 287 real items
+    -- across 21 captured chargesheets: sectionDescription missing in
+    -- 111/287, graveParticulars missing in 43/287 -- both nullable).
+    -- One CCTNS API array item = one position across all 5 parallel arrays.
+    acts_descriptions text[],
+    acts_sections text[],
+    acts_section_descriptions text[],
+    acts_grave_particulars text[],
+    acts_rw_required boolean[],
+    -- accusedParticulars[] (confirmed stable 4-field schema, 90 real items
+    -- across 21 captured chargesheets).
+    accused_person_ids text[],
+    accused_charge_statuses text[],
+    accused_reasons_for_no_charge text[],
+    accused_requested_for_nbw boolean[],
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
     CONSTRAINT chargesheets_pkey PRIMARY KEY (id),
     CONSTRAINT chargesheets_unique UNIQUE (charge_sheet_id)
 );
-COMMENT ON TABLE public.chargesheets IS 'Chargesheet records (camelCase API, unlike most other CCTNS endpoints). Source: GET /chargesheets (bulk) and GET /chargesheets/{crimeId} (detail). id is a synthetic surrogate key; charge_sheet_id carries the natural CCTNS chargeSheetId.';
+COMMENT ON TABLE public.chargesheets IS 'Chargesheet records (camelCase API, unlike most other CCTNS endpoints). Source: GET /chargesheets (bulk) and GET /chargesheets/{crimeId} (detail). id is a synthetic surrogate key; charge_sheet_id carries the natural CCTNS chargeSheetId. actsAndSections[]/accusedParticulars[] are stored as parallel PostgreSQL arrays (one array position per source API array item) rather than a child table or JSONB, since both have confirmed stable field sets from real captured data -- replaces the former dedicated chargesheet_acts/chargesheet_acts_sections/chargesheet_accused tables.';
 
 
 
@@ -675,9 +677,7 @@ CREATE TABLE public.charge_sheet_updates (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT charge_sheet_updates_pkey PRIMARY KEY (id),
     CONSTRAINT charge_sheet_updates_unique UNIQUE (update_charge_sheet_id)
 );
@@ -728,9 +728,7 @@ CREATE TABLE public.fsl_case_property (
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
-    etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
+    etl_run_id uuid,    
     CONSTRAINT fsl_case_property_pkey PRIMARY KEY (case_property_id)
 );
 COMMENT ON TABLE public.fsl_case_property IS 'Forensic/case-property register entries. CCTNS calls this endpoint "case-property" (CASE_PROPERTY_ID, SCREAMING_SNAKE_CASE); DOPAMS models it as fsl_case_property. Source: GET /case-property (bulk) and GET /case-property/{crimeId} (detail).';
@@ -796,6 +794,11 @@ CREATE TABLE public.interrogation_reports (
     facing_trial_crime_num character varying(255),
     other_regular_habits text,
     other_indulgence_before_offence text,
+    -- INDULGANCE_BEFORE_OFFENCE is a mixed-type API field: an empty array
+    -- `[]` in 187/191 sampled records, a plain free-text string in the
+    -- other 4/191 (e.g. "Consuming ganja"). Never actually a multi-item
+    -- array in practice -- stored as nullable text, not JSONB/array.
+    indulgance_before_offence text,
     time_since_modus_operandi text,
     date_created timestamp without time zone,
     date_modified timestamp without time zone,
@@ -803,67 +806,123 @@ CREATE TABLE public.interrogation_reports (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
-    associate_details jsonb,
-    consumer_details jsonb,
+
+    -- FAMILY_HISTORY[] (confirmed stable 6-field schema, 233 real items).
+    family_history_person_ids text[],
+    family_history_relations text[],
+    family_history_peculiarities text[],
+    family_history_criminal_background boolean[],
+    family_history_is_alive boolean[],
+    family_history_stay_together boolean[],
+
+    -- ASSOCIATE_DETAILS[] (confirmed stable 3-field schema, 4 real items).
+    associate_person_ids text[],
+    associate_gangs text[],
+    associate_relations text[],
+
+    -- LOCAL_CONTACTS[] (confirmed stable 4-field schema, 3 real items).
+    local_contact_person_ids text[],
+    local_contact_towns text[],
+    local_contact_addresses text[],
+    local_contact_jurisdiction_ps text[],
+
+    -- MODUS_OPERANDI[] (confirmed stable 3-field schema, 9 real items).
+    mo_crime_heads text[],
+    mo_crime_sub_heads text[],
+    mo_descriptions text[],
+
+    -- SHELTER[] (confirmed stable 5-field schema, 3 real items).
+    shelter_preparation_of_offence text[],
+    shelter_after_offence text[],
+    shelter_regular_residency text[],
+    shelter_remarks text[],
+    shelter_other_regular_residency text[],
+
+    -- DOPAMS_LINKS[] (confirmed stable schema, 71 real items). Each item is
+    -- {PHONE_NUMBER, DOPAMS_DATA: [uuid, ...]}; DOPAMS_DATA is itself a
+    -- ragged (variable-length per phone number) array of media reference
+    -- UUIDs, which native Postgres arrays cannot represent as a rectangular
+    -- 2-D array -- each element of dopams_link_data is instead the
+    -- comma-joined UUID list for that phone number (UUIDs never contain
+    -- commas, so this is lossless).
+    dopams_link_phone_numbers text[],
+    dopams_link_data text[],
+
+    -- TYPES_OF_DRUGS[] (confirmed stable 7-field schema, 83 real items).
+    drug_types text[],
+    drug_quantities text[],
+    drug_purchase_amounts_inr text[],
+    drug_modes_of_payment text[],
+    drug_modes_of_transport text[],
+    drug_supplier_person_ids text[],
+    drug_receiver_person_ids text[],
+
+    -- CONSUMER_DETAILS[] (confirmed stable 6-field schema, 75 real items).
+    consumer_person_ids text[],
+    consumer_places_of_consumption text[],
+    consumer_other_sources text[],
+    consumer_other_sources_phone_nos text[],
+    consumer_aadhar_numbers text[],
+    consumer_aadhar_phone_nos text[],
+
+    -- FINANCIAL_HISTORY[] (confirmed stable 9-field schema, 70 real items).
+    financial_account_holder_person_ids text[],
+    financial_pan_nos text[],
+    financial_upi_ids text[],
+    financial_bank_names text[],
+    financial_account_numbers text[],
+    financial_branch_names text[],
+    financial_ifsc_codes text[],
+    financial_immovable_property text[],
+    financial_movable_property text[],
+
+    -- SIM_DETAILS[] (confirmed stable 5-field schema, 90 real items).
+    sim_phone_numbers text[],
+    sim_sdrs text[],
+    sim_imeis text[],
+    sim_true_caller_names text[],
+    sim_person_ids text[],
+
+    -- REGULAR_HABITS[] is a flat array of enum-like strings (203 real
+    -- items), not an array of objects -- a plain text[] is the exact
+    -- representation, no flattening needed.
+    regular_habits text[],
+
+    -- The following 10 arrays were NEVER observed populated in any
+    -- captured CCTNS V2 IR response (0/191 sampled records had data for
+    -- any of them). Their structure cannot be verified against the actual
+    -- API contract this schema is required to match. JSONB is retained
+    -- deliberately here (Case 5): inventing ~10 columns each from the
+    -- pre-existing production database's column list (a different, older
+    -- system) risks fabricating a structure the current CCTNS V2 API may
+    -- not actually send, which is a worse violation of "do not invent
+    -- structure" than storing the raw object/array as-is. If/when real
+    -- data is observed for any of these, re-run this audit against that
+    -- data and flatten into columns/arrays per the same method used above.
     conviction_acquittal jsonb,
     defence_counsel jsonb,
-    dopams_links jsonb,
     execution_of_nbw jsonb,
-    family_history jsonb,
-    financial_history jsonb,
-    indulgance_before_offence jsonb,
-    interrogation_report_refs jsonb,
     jail_sentence jsonb,
-    local_contacts jsonb,
-    modus_operandi jsonb,
     new_gang_formation jsonb,
     pending_nbw jsonb,
     previous_offences_confessed jsonb,
     property_disposal jsonb,
-    regular_habits jsonb,
     regularization_transit_warrants jsonb,
-    shelter jsonb,
-    sim_details jsonb,
     sureties jsonb,
-    types_of_drugs jsonb,
+
     CONSTRAINT interrogation_reports_pkey PRIMARY KEY (interrogation_report_id)
 );
-COMMENT ON TABLE public.interrogation_reports IS 'Interrogation report main record, 1:1 with (crime_id, person_id) per interrogated subject. PHYSICAL_FEATURES/SOCIO_ECONOMIC_PROFILE/COMMISSION_OF_OFFENCE/SHARE_OF_AMOUNT_SPENT/PRESENT_WHEREABOUTS nested objects are flattened into columns here. Source: GET /interrogation-reports/v1/ (bulk) and GET /interrogation-reports/v1/{crimeId} (detail).';
+COMMENT ON TABLE public.interrogation_reports IS 'Interrogation report main record, 1:1 with (crime_id, person_id) per interrogated subject. PHYSICAL_FEATURES/SOCIO_ECONOMIC_PROFILE/COMMISSION_OF_OFFENCE/SHARE_OF_AMOUNT_SPENT/PRESENT_WHEREABOUTS nested objects are flattened into columns here. Source: GET /interrogation-reports/v1/ (bulk) and GET /interrogation-reports/v1/{crimeId} (detail). MEDIA[] and INTERROGATION_REPORT[] (report/document file references) are stored in file_media_bookkeeping (source_type=''interrogation''), not here, since they are file/media references rather than business data. 11 array-of-object fields with confirmed stable schemas from real captured data are stored as parallel arrays (one array position per source API array item); 10 fields never observed populated in any capture remain JSONB with a documented reason (see comments above). Replaces the former 23 ir_* child tables.';
 
 
 
-COMMENT ON TABLE public.ir_conviction_acquittal IS 'Interrogation report child table for CONVICTION_ACQUITTAL[] (always empty in sampled data; shape unconfirmed beyond column list).';
-
-COMMENT ON TABLE public.ir_defence_counsel IS 'Interrogation report child table for DEFENCE_COUNSEL[] (always empty in sampled data; shape unconfirmed beyond column list).';
-
-
-COMMENT ON TABLE public.ir_execution_of_nbw IS 'Interrogation report child table for EXECUTION_OF_NBW[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
 
 
-COMMENT ON TABLE public.ir_indulgance_before_offence IS 'Interrogation report child table for INDULGANCE_BEFORE_OFFENCE (mixed array/string type in the API; stored as free text, not a relational list, per the observed type instability).';
-
-
-COMMENT ON TABLE public.ir_jail_sentence IS 'Interrogation report child table for JAIL_SENTENCE[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
 
 
-COMMENT ON TABLE public.ir_new_gang_formation IS 'Interrogation report child table for NEW_GANG_FORMATION[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-COMMENT ON TABLE public.ir_pending_nbw IS 'Interrogation report child table for PENDING_NBW[] (always empty in sampled data; shape unconfirmed beyond column list).';
-
-COMMENT ON TABLE public.ir_previous_offences_confessed IS 'Interrogation report child table for PREVIOUS_OFFENCES_CONFESSED[] (always empty in sampled data; shape unconfirmed beyond column list).';
-
-COMMENT ON TABLE public.ir_property_disposal IS 'Interrogation report child table for PROPERTY_DISPOSAL[] (always empty in sampled data; shape unconfirmed beyond column list).';
-
-
-COMMENT ON TABLE public.ir_regularization_transit_warrants IS 'Interrogation report child table for REGULARIZATION_OF_TRANSIT_WARRANTS[] (always empty in sampled data; shape unconfirmed beyond column list).';
-
-
-
-COMMENT ON TABLE public.ir_sureties IS 'Interrogation report child table for SURETIES[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
 
 
@@ -897,8 +956,6 @@ CREATE TABLE public.file_media_bookkeeping (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
-    acts_and_sections jsonb,
-    accused_particulars jsonb,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT file_media_bookkeeping_pkey PRIMARY KEY (id)
@@ -978,9 +1035,7 @@ CREATE INDEX idx_fsl_mo_id ON public.fsl_case_property USING btree (mo_id);
 CREATE INDEX idx_fsl_status ON public.fsl_case_property USING btree (status);
 CREATE INDEX idx_fsl_created ON public.fsl_case_property USING btree (date_created DESC NULLS LAST);
 
--- properties child/pending-fk tables
-
--- interrogation_reports + remaining child tables
+-- interrogation_reports
 CREATE INDEX idx_ir_reports_crime_person ON public.interrogation_reports USING btree (crime_id, person_id);
 CREATE INDEX idx_ir_reports_created_modified ON public.interrogation_reports USING btree (date_created, date_modified);
 
@@ -1014,6 +1069,12 @@ CREATE INDEX idx_file_media_bookkeeping_created_at ON public.file_media_bookkeep
 -- module_name='etl-address' since that was the only writer).
 CREATE UNIQUE INDEX uq_etl_bookkeeping_singleton ON public.etl_bookkeeping (kind, module_name) WHERE (kind IN ('checkpoint', 'run_state'));
 CREATE UNIQUE INDEX uq_etl_bookkeeping_failure ON public.etl_bookkeeping (kind, module_name, record_key) WHERE (kind = 'failure');
+-- Without this, push_fk_failure's `ON CONFLICT DO NOTHING` has no matching
+-- constraint to target, so every ETL run that revisits an unresolved record
+-- re-queues it as a brand-new row instead of deduping (confirmed live: the
+-- IR module's queue grew from 93 to 186 rows across two runs of the same
+-- date window before this index was added).
+CREATE UNIQUE INDEX uq_etl_bookkeeping_fk_retry ON public.etl_bookkeeping (kind, module_name, record_key) WHERE (kind = 'fk_retry');
 CREATE INDEX idx_etl_bookkeeping_fk_retry_unresolved ON public.etl_bookkeeping USING btree (module_name) WHERE (kind = 'fk_retry' AND resolved = false);
 CREATE INDEX idx_etl_bookkeeping_kind_module ON public.etl_bookkeeping USING btree (kind, module_name);
 CREATE INDEX idx_etl_bookkeeping_failure_reason ON public.etl_bookkeeping USING btree (reason) WHERE (kind = 'failure');

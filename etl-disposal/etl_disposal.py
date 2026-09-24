@@ -988,11 +988,18 @@ class DisposalETL:
             self.log_failed_record(disposal, reason, error_details)
             self.log_invalid_crime_id(disposal, original_crime_id, chunk_date_range)
             # Park in FK retry queue so the record recovers when the crime arrives.
+            # record_id must be unique per source record, not just per
+            # crime_id: multiple distinct disposals (different disposal_type/
+            # disposed_at) can share the same still-missing crime_id, and the
+            # queue's unique index (kind, module_name, record_key) would
+            # silently drop all but the first if record_id were the bare
+            # crime_id.
             if push_fk_failure is not None:
                 try:
+                    record_key = f"{original_crime_id or 'UNKNOWN'}|{disposal_type or ''}|{disposed_at or ''}"
                     push_fk_failure(
                         conn, 'disposal',
-                        record_id=original_crime_id or 'UNKNOWN',
+                        record_id=record_key,
                         record_json=json.dumps(
                             {k: str(v) if v is not None else None
                              for k, v in disposal.items()},

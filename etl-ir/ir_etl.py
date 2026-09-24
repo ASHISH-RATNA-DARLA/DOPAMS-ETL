@@ -66,6 +66,7 @@ logger.setLevel(LOG_CONFIG['level'])
 
 # Target tables (allows redirecting ETL runs to test tables)
 IR_TABLE = TABLE_CONFIG.get('interrogation_reports', 'interrogation_reports')
+CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
 def parse_iso_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string (with optional time component) to datetime."""
@@ -122,6 +123,170 @@ def truncate_string(value: Optional[str], max_length: int) -> Optional[str]:
     if isinstance(value, str) and len(value) > max_length:
         return value[:max_length]
     return value
+
+
+def _clean(value):
+    """Blank-string -> None, otherwise pass through."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else None
+    return value
+
+
+def _pluck(items: List[Dict], *keys, cast=None) -> List:
+    """Extract one field (first matching key) from each dict in items, in order.
+    Non-dict items are skipped. Used to build the parallel-array columns for
+    IR sub-entities with a confirmed stable schema (see cctns-v2_schema.sql)."""
+    out = []
+    for item in (items or []):
+        if not isinstance(item, dict):
+            continue
+        val = None
+        for k in keys:
+            val = item.get(k)
+            if val is not None:
+                break
+        val = _clean(val)
+        if cast is not None and val is not None:
+            try:
+                val = cast(val)
+            except (TypeError, ValueError):
+                pass
+        out.append(val)
+    return out
+
+
+def build_ir_arrays(record: Dict[str, Any]) -> Dict[str, List]:
+    """
+    Build the parallel-array columns for the 11 IR sub-entities with a
+    confirmed stable field schema from real captured CCTNS V2 responses
+    (see cctns-v2_schema.sql / cctns-v2_schema_mapping_report.md for the
+    field-level evidence). Each source array item becomes one position
+    across all of that group's parallel arrays.
+    """
+    family_history = record.get('FAMILY_HISTORY') or []
+    associate_details = record.get('ASSOCIATE_DETAILS') or []
+    local_contacts = record.get('LOCAL_CONTACTS') or []
+    modus_operandi = record.get('MODUS_OPERANDI') or []
+    shelter = record.get('SHELTER') or []
+    dopams_links = record.get('DOPAMS_LINKS') or []
+    types_of_drugs = record.get('TYPES_OF_DRUGS') or []
+    consumer_details = record.get('CONSUMER_DETAILS') or []
+    financial_history = record.get('FINANCIAL_HISTORY') or []
+    sim_details = record.get('SIM_DETAILS') or []
+    regular_habits = record.get('REGULAR_HABITS') or []
+
+    dopams_phone_numbers = _pluck(dopams_links, 'PHONE_NUMBER')
+    dopams_data_joined = []
+    for item in dopams_links:
+        if not isinstance(item, dict):
+            continue
+        data = item.get('DOPAMS_DATA')
+        if isinstance(data, list):
+            dopams_data_joined.append(','.join(str(_clean(x)) for x in data if _clean(x)) or None)
+        else:
+            dopams_data_joined.append(_clean(data))
+
+    return {
+        'family_history_person_ids': _pluck(family_history, 'PERSON_ID'),
+        'family_history_relations': _pluck(family_history, 'RELATION'),
+        'family_history_peculiarities': _pluck(family_history, 'FAMILY_MEMBER_PECULIARITY'),
+        'family_history_criminal_background': _pluck(family_history, 'CRIMINAL_BACKGROUND'),
+        'family_history_is_alive': _pluck(family_history, 'IS_ALIVE'),
+        'family_history_stay_together': _pluck(family_history, 'FAMILY_STAY_TOGETHER'),
+
+        'associate_person_ids': _pluck(associate_details, 'PERSON_ID'),
+        'associate_gangs': _pluck(associate_details, 'GANG'),
+        'associate_relations': _pluck(associate_details, 'RELATION'),
+
+        'local_contact_person_ids': _pluck(local_contacts, 'PERSON_ID'),
+        'local_contact_towns': _pluck(local_contacts, 'TOWN'),
+        'local_contact_addresses': _pluck(local_contacts, 'ADDRESS'),
+        'local_contact_jurisdiction_ps': _pluck(local_contacts, 'JURISDICTION_PS'),
+
+        'mo_crime_heads': _pluck(modus_operandi, 'CRIME_HEAD'),
+        'mo_crime_sub_heads': _pluck(modus_operandi, 'CRIME_SUB_HEAD'),
+        'mo_descriptions': _pluck(modus_operandi, 'MODUS_OPERANDI'),
+
+        'shelter_preparation_of_offence': _pluck(shelter, 'PREPARATION_OF_OFFENCE'),
+        'shelter_after_offence': _pluck(shelter, 'AFTER_OFFENCE'),
+        'shelter_regular_residency': _pluck(shelter, 'REGULAR_RESIDENCY'),
+        'shelter_remarks': _pluck(shelter, 'REMARKS'),
+        'shelter_other_regular_residency': _pluck(shelter, 'OTHER_REGULAR_RESIDENCY'),
+
+        'dopams_link_phone_numbers': dopams_phone_numbers,
+        'dopams_link_data': dopams_data_joined,
+
+        'drug_types': _pluck(types_of_drugs, 'TYPE_OF_DRUG'),
+        'drug_quantities': _pluck(types_of_drugs, 'QUANTITY'),
+        'drug_purchase_amounts_inr': _pluck(types_of_drugs, 'PURCHASE_AMOUN_IN_INR', 'PURCHASE_AMOUNT_IN_INR'),
+        'drug_modes_of_payment': _pluck(types_of_drugs, 'MODE_OF_PAYMENT'),
+        'drug_modes_of_transport': _pluck(types_of_drugs, 'MODE_OF_TRANSPORT'),
+        'drug_supplier_person_ids': _pluck(types_of_drugs, 'SUPPLIER_PERSON_ID'),
+        'drug_receiver_person_ids': _pluck(types_of_drugs, 'RECEIVERS_PERSON_ID'),
+
+        'consumer_person_ids': _pluck(consumer_details, 'CONSUMER_PERSON_ID'),
+        'consumer_places_of_consumption': _pluck(consumer_details, 'PLACE_OF_CONSUMPTION'),
+        'consumer_other_sources': _pluck(consumer_details, 'OTHER_SOURCES'),
+        'consumer_other_sources_phone_nos': _pluck(consumer_details, 'OTHER_SOURCES_PHONE_NO'),
+        'consumer_aadhar_numbers': _pluck(consumer_details, 'AADHAR_CARD_NUMBER'),
+        'consumer_aadhar_phone_nos': _pluck(consumer_details, 'AADHAR_CARD_NUMBER_PHONE_NO'),
+
+        'financial_account_holder_person_ids': _pluck(financial_history, 'ACCOUNT_HOLDER_PERSON_ID'),
+        'financial_pan_nos': _pluck(financial_history, 'PAN_NO'),
+        'financial_upi_ids': _pluck(financial_history, 'UPI_ID'),
+        'financial_bank_names': _pluck(financial_history, 'NAME_OF_BANK'),
+        'financial_account_numbers': _pluck(financial_history, 'ACCOUNT_NUMBER'),
+        'financial_branch_names': _pluck(financial_history, 'BRANCH_NAME'),
+        'financial_ifsc_codes': _pluck(financial_history, 'IFSC_CODE'),
+        'financial_immovable_property': _pluck(financial_history, 'IMMOVABLE_PROPERTY_ACQUIRED'),
+        'financial_movable_property': _pluck(financial_history, 'MOVABLE_PROPERTY_ACQUIRED'),
+
+        'sim_phone_numbers': _pluck(sim_details, 'PHONE_NUMBER'),
+        'sim_sdrs': _pluck(sim_details, 'SDR'),
+        'sim_imeis': _pluck(sim_details, 'IMEI'),
+        'sim_true_caller_names': _pluck(sim_details, 'TRUE_CALLER_NAME'),
+        'sim_person_ids': _pluck(sim_details, 'PERSON_ID'),
+
+        'regular_habits': [h for h in (regular_habits if isinstance(regular_habits, list) else []) if _clean(h)],
+    }
+
+
+IR_ARRAY_COLUMNS = [
+    'family_history_person_ids', 'family_history_relations', 'family_history_peculiarities',
+    'family_history_criminal_background', 'family_history_is_alive', 'family_history_stay_together',
+    'associate_person_ids', 'associate_gangs', 'associate_relations',
+    'local_contact_person_ids', 'local_contact_towns', 'local_contact_addresses', 'local_contact_jurisdiction_ps',
+    'mo_crime_heads', 'mo_crime_sub_heads', 'mo_descriptions',
+    'shelter_preparation_of_offence', 'shelter_after_offence', 'shelter_regular_residency',
+    'shelter_remarks', 'shelter_other_regular_residency',
+    'dopams_link_phone_numbers', 'dopams_link_data',
+    'drug_types', 'drug_quantities', 'drug_purchase_amounts_inr', 'drug_modes_of_payment',
+    'drug_modes_of_transport', 'drug_supplier_person_ids', 'drug_receiver_person_ids',
+    'consumer_person_ids', 'consumer_places_of_consumption', 'consumer_other_sources',
+    'consumer_other_sources_phone_nos', 'consumer_aadhar_numbers', 'consumer_aadhar_phone_nos',
+    'financial_account_holder_person_ids', 'financial_pan_nos', 'financial_upi_ids',
+    'financial_bank_names', 'financial_account_numbers', 'financial_branch_names',
+    'financial_ifsc_codes', 'financial_immovable_property', 'financial_movable_property',
+    'sim_phone_numbers', 'sim_sdrs', 'sim_imeis', 'sim_true_caller_names', 'sim_person_ids',
+    'regular_habits',
+]
+
+# The 10 IR sub-entities never observed populated in any captured CCTNS V2
+# response (see cctns-v2_schema.sql for the documented Case-5 reasoning).
+# Stored as JSONB, keyed by their column name == lowercased API field name.
+IR_JSONB_COLUMNS = {
+    'conviction_acquittal': 'CONVICTION_ACQUITTAL',
+    'defence_counsel': 'DEFENCE_COUNSEL',
+    'execution_of_nbw': 'EXECUTION_OF_NBW',
+    'jail_sentence': 'JAIL_SENTENCE',
+    'new_gang_formation': 'NEW_GANG_FORMATION',
+    'pending_nbw': 'PENDING_NBW',
+    'previous_offences_confessed': 'PREVIOUS_OFFENCES_CONFESSED',
+    'property_disposal': 'PROPERTY_DISPOSAL',
+    'regularization_transit_warrants': 'REGULARIZATION_OF_TRANSIT_WARRANTS',
+    'sureties': 'SURETIES',
+}
 
 
 class InterrogationReportsETL:
@@ -193,9 +358,15 @@ class InterrogationReportsETL:
             with self.stats_lock:
                 self.stats['total_pending_fk'] += 1
 
-    def _retry_ir_record(self, conn, record_json_str: str) -> bool:
+    def _retry_ir_record(self, conn, record: Dict) -> bool:
+        """Retry insertion of a queued IR record once its crime_id is present.
+
+        Called by drain_fk_queue, which already deserializes the JSONB
+        record_json column into a dict before calling this. Returns True on
+        success, False if still unresolvable.
+        """
         try:
-            raw_data = json.loads(record_json_str)
+            raw_data = record
             crime_id = raw_data.get('CRIME_ID')
             if crime_id not in self.crime_ids:
                 return False
@@ -595,42 +766,13 @@ class InterrogationReportsETL:
             )
         return has_diff
 
-    def delete_related_records(self, ir_id: str, cursor):
-        """Delete all related records for an IR before re-inserting."""
-        tables = [
-            IR_ASSOCIATE_DETAILS_TABLE,
-            IR_SHELTER_TABLE,
-            IR_INTERROGATION_REPORT_REFS_TABLE,
-            IR_DOPAMS_LINKS_TABLE,
-            IR_INDULGANCE_BEFORE_OFFENCE_TABLE,
-            IR_PROPERTY_DISPOSAL_TABLE,
-            IR_REGULARIZATION_TRANSIT_WARRANTS_TABLE,
-            IR_EXECUTION_OF_NBW_TABLE,
-            IR_PENDING_NBW_TABLE,
-            IR_SURETIES_TABLE,
-            IR_JAIL_SENTENCE_TABLE,
-            IR_NEW_GANG_FORMATION_TABLE,
-            IR_CONVICTION_ACQUITTAL_TABLE
-        ]
-
-        for table in tables:
-            cursor.execute(f"DELETE FROM {table} WHERE interrogation_report_id = %s", (ir_id,))
-
-        # ir_media was consolidated into file_media_bookkeeping (source_type='interrogation',
-        # source_field='MEDIA'), which is keyed by parent_id rather than interrogation_report_id.
-        cursor.execute(
-            "DELETE FROM file_media_bookkeeping WHERE source_type = 'interrogation' AND source_field = 'MEDIA' AND parent_id = %s",
-            (ir_id,)
-        )
-
-
     def insert_main_record(self, record: Dict[str, Any], cursor, is_update: bool = False):
         pf = record.get('PHYSICAL_FEATURES', {})
         sep = record.get('SOCIO_ECONOMIC_PROFILE', {})
         coo = record.get('COMMISSION_OF_OFFENCE', {})
         soas = record.get('SHARE_OF_AMOUNT_SPENT', {})
         pw = record.get('PRESENT_WHEREABOUTS', {})
-        
+
         in_jail = pw.get('IN_JAIL', {})
         on_bail = pw.get('ON_BAIL', {})
         absconding = pw.get('ABSCONDING', {})
@@ -638,288 +780,199 @@ class InterrogationReportsETL:
         rehabilitated = pw.get('REHABILITATED', {})
         dead = pw.get('DEAD', {})
         facing_trial = pw.get('FACING_TRIAL', {})
-        
+
         lang_dialect = pf.get('LANGUAGE_OR_DIALECT', [])
         if not isinstance(lang_dialect, list):
             lang_dialect = []
-            
+
         ir_id = record.get('INTERROGATION_REPORT_ID')
-        
-        # Insert Media into file_media_bookkeeping
-        media = record.get('MEDIA', [])
-        if media:
-            now_utc = datetime.now(timezone.utc)
-            media_values = [
-                (ir_id, idx, media_id, SOURCE_SYSTEM, SOURCE_ENDPOINT, now_utc, ETL_RUN_ID)
-                for idx, media_id in enumerate(media) if media_id
+
+        # MEDIA[] and INTERROGATION_REPORT[] are file/document reference UUIDs,
+        # not business data -- both live in file_media_bookkeeping, keyed by
+        # parent_id=ir_id. Delete-then-insert on every (re)load so stale rows
+        # from a prior, longer version of either array don't linger.
+        now_utc = datetime.now(timezone.utc)
+        cursor.execute(
+            "DELETE FROM file_media_bookkeeping WHERE source_type = 'interrogation' "
+            "AND source_field IN ('MEDIA', 'INTERROGATION_REPORT') AND parent_id = %s",
+            (ir_id,)
+        )
+        for source_field, api_field in (('MEDIA', 'MEDIA'), ('INTERROGATION_REPORT', 'INTERROGATION_REPORT')):
+            items = record.get(api_field, [])
+            if not isinstance(items, list):
+                continue
+            values = [
+                (ir_id, idx, file_id, SOURCE_SYSTEM, SOURCE_ENDPOINT, now_utc, ETL_RUN_ID)
+                for idx, file_id in enumerate(items) if file_id
             ]
-            if media_values:
-                from psycopg2.extras import execute_values
+            if values:
                 execute_values(
                     cursor,
                     """INSERT INTO file_media_bookkeeping
                            (parent_id, file_index, file_id, source_system, source_endpoint, fetched_at, etl_run_id,
                             source_type, source_field)
                        VALUES %s ON CONFLICT DO NOTHING""",
-                    media_values,
-                    template="(%s, %s, %s::uuid, %s, %s, %s, %s, 'interrogation', 'MEDIA')"
+                    values,
+                    template=f"(%s, %s, %s::uuid, %s, %s, %s, %s, 'interrogation', '{source_field}')"
                 )
-        
-        main_values = (
+
+        # INDULGANCE_BEFORE_OFFENCE is a mixed-type API field: an empty array
+        # in most records, a plain string in the rest -- never a real
+        # multi-item array. Coerce to a nullable scalar.
+        indulgance_raw = record.get('INDULGANCE_BEFORE_OFFENCE')
+        indulgance_value = indulgance_raw if isinstance(indulgance_raw, str) and indulgance_raw.strip() else None
+
+        array_values = build_ir_arrays(record)
+
+        base_columns = [
+            'interrogation_report_id', 'crime_id', 'person_id',
+            'physical_beard', 'physical_build', 'physical_burn_marks', 'physical_color',
+            'physical_deformities_or_peculiarities', 'physical_deformities', 'physical_ear',
+            'physical_eyes', 'physical_face', 'physical_hair', 'physical_height',
+            'physical_identification_marks', 'physical_language_or_dialect',
+            'physical_leucoderma', 'physical_mole', 'physical_mustache', 'physical_nose',
+            'physical_scar', 'physical_tattoo', 'physical_teeth',
+            'socio_living_status', 'socio_marital_status', 'socio_education',
+            'socio_occupation', 'socio_income_group',
+            'offence_time', 'other_offence_time',
+            'share_of_amount_spent', 'other_share_of_amount_spent', 'share_remarks',
+            'is_in_jail', 'from_where_sent_in_jail', 'in_jail_crime_num', 'in_jail_dist_unit',
+            'is_on_bail', 'from_where_sent_on_bail', 'on_bail_crime_num', 'date_of_bail',
+            'is_absconding', 'wanted_in_police_station', 'absconding_crime_num',
+            'is_normal_life', 'eking_livelihood_by_labor_work',
+            'is_rehabilitated', 'rehabilitation_details',
+            'is_dead', 'death_details',
+            'is_facing_trial', 'facing_trial_ps_name', 'facing_trial_crime_num',
+            'other_regular_habits', 'other_indulgence_before_offence', 'indulgance_before_offence',
+            'time_since_modus_operandi',
+            'date_created', 'date_modified', 'source_system', 'source_endpoint', 'fetched_at', 'etl_run_id',
+        ]
+        base_values = [
             ir_id,
             record.get('CRIME_ID'),
             normalize_person_id(record.get('PERSON_ID')),
-            pf.get('BEARD'),
-            pf.get('BUILD'),
-            pf.get('BURN_MARKS'),
-            pf.get('COLOR'),
-            pf.get('DEFORMITIES_OR_PECULIARITIES'),
-            pf.get('DEFORMITIES'),
-            pf.get('EAR'),
-            pf.get('EYES'),
-            pf.get('FACE'),
-            pf.get('HAIR'),
-            pf.get('HEIGHT'),
-            pf.get('IDENTIFICATION_MARKS'),
-            lang_dialect,
-            pf.get('LEUCODERMA'),
-            pf.get('MOLE'),
-            pf.get('MUSTACHE'),
-            pf.get('NOSE'),
-            pf.get('SCAR'),
-            pf.get('TATTOO'),
-            pf.get('TEETH'),
-            
-            sep.get('LIVING_STATUS'),
-            sep.get('MARITAL_STATUS'),
-            sep.get('EDUCATION'),
-            sep.get('OCCUPATION'),
-            sep.get('INCOME_GROUP'),
-            
-            coo.get('OFFENCE_TIME'),
-            coo.get('OTHER_OFFENCE_TIME'),
-            
-            soas.get('SHARE_OF_AMOUNT_SPENT'),
-            soas.get('OTHER_SHARE_OF_AMOUNT_SPENT'),
-            soas.get('REMARKS'),
-            
-            in_jail.get('IS_IN_JAIL'),
-            in_jail.get('FROM_WHERE_SENT'),
-            in_jail.get('CRIME_NUM'),
-            in_jail.get('DIST_UNIT'),
-            
-            on_bail.get('IS_ON_BAIL'),
-            on_bail.get('FROM_WHERE_SENT'),
-            on_bail.get('CRIME_NUM'),
+            pf.get('BEARD'), pf.get('BUILD'), pf.get('BURN_MARKS'), pf.get('COLOR'),
+            pf.get('DEFORMITIES_OR_PECULIARITIES'), pf.get('DEFORMITIES'), pf.get('EAR'),
+            pf.get('EYES'), pf.get('FACE'), pf.get('HAIR'), pf.get('HEIGHT'),
+            pf.get('IDENTIFICATION_MARKS'), lang_dialect,
+            pf.get('LEUCODERMA'), pf.get('MOLE'), pf.get('MUSTACHE'), pf.get('NOSE'),
+            pf.get('SCAR'), pf.get('TATTOO'), pf.get('TEETH'),
+            sep.get('LIVING_STATUS'), sep.get('MARITAL_STATUS'), sep.get('EDUCATION'),
+            sep.get('OCCUPATION'), sep.get('INCOME_GROUP'),
+            coo.get('OFFENCE_TIME'), coo.get('OTHER_OFFENCE_TIME'),
+            soas.get('SHARE_OF_AMOUNT_SPENT'), soas.get('OTHER_SHARE_OF_AMOUNT_SPENT'), soas.get('REMARKS'),
+            in_jail.get('IS_IN_JAIL'), in_jail.get('FROM_WHERE_SENT'), in_jail.get('CRIME_NUM'), in_jail.get('DIST_UNIT'),
+            on_bail.get('IS_ON_BAIL'), on_bail.get('FROM_WHERE_SENT'), on_bail.get('CRIME_NUM'),
             parse_iso_date(on_bail.get('DATE_OF_BAIL')) if on_bail.get('DATE_OF_BAIL') else None,
-            
-            absconding.get('IS_ABSCONDING'),
-            absconding.get('WANTED_IN_POLICE_STATION'),
-            absconding.get('CRIME_NUM'),
-            
-            normal_life.get('IS_NORMAL_LIFE'),
-            normal_life.get('EKING_LIVELIHOOD_BY_LABOR_WORK'),
-            
-            rehabilitated.get('IS_REHABILITATED'),
-            rehabilitated.get('REHABILITATION_DETAILS'),
-            
-            dead.get('IS_DEAD'),
-            dead.get('DEATH_DETAILS'),
-            
-            facing_trial.get('IS_FACING_TRIAL'),
-            facing_trial.get('PS_NAME'),
-            facing_trial.get('CRIME_NUM'),
-            
+            absconding.get('IS_ABSCONDING'), absconding.get('WANTED_IN_POLICE_STATION'), absconding.get('CRIME_NUM'),
+            normal_life.get('IS_NORMAL_LIFE'), normal_life.get('EKING_LIVELIHOOD_BY_LABOR_WORK'),
+            rehabilitated.get('IS_REHABILITATED'), rehabilitated.get('REHABILITATION_DETAILS'),
+            dead.get('IS_DEAD'), dead.get('DEATH_DETAILS'),
+            facing_trial.get('IS_FACING_TRIAL'), facing_trial.get('PS_NAME'), facing_trial.get('CRIME_NUM'),
             record.get('OTHER_REGULAR_HABITS'),
             record.get('OTHER_INDULGENCE_BEFORE_OFFENCE') if record.get('OTHER_INDULGENCE_BEFORE_OFFENCE') is not None else record.get('OTHER_INDULGANCE_BEFORE_OFFENCE'),
+            indulgance_value,
             record.get('TIME_SINCE_MODUS_OPERANDI'),
             parse_timestamp(record.get('DATE_CREATED')),
             parse_timestamp(record.get('DATE_MODIFIED')),
-            SOURCE_SYSTEM,
-            SOURCE_ENDPOINT,
-            datetime.now(timezone.utc),
-            ETL_RUN_ID,
-            # JSONB child arrays
-            json.dumps(record.get('ASSOCIATE_DETAILS', [])),
-            json.dumps(record.get('CONSUMER_DETAILS', [])),
-            json.dumps(record.get('CONVICTION_ACQUITTAL', [])),
-            json.dumps(record.get('DEFENCE_COUNSEL', [])),
-            json.dumps(record.get('DOPAMS_LINKS', [])),
-            json.dumps(record.get('EXECUTION_OF_NBW', [])),
-            json.dumps(record.get('FAMILY_HISTORY', [])),
-            json.dumps(record.get('FINANCIAL_HISTORY', [])),
-            json.dumps(record.get('INDULGANCE_BEFORE_OFFENCE', [])),
-            json.dumps(record.get('INTERROGATION_REPORT', [])),
-            json.dumps(record.get('JAIL_SENTENCE', [])),
-            json.dumps(record.get('LOCAL_CONTACTS', [])),
-            json.dumps(record.get('MODUS_OPERANDI', [])),
-            json.dumps(record.get('NEW_GANG_FORMATION', [])),
-            json.dumps(record.get('PENDING_NBW', [])),
-            json.dumps(record.get('PREVIOUS_OFFENCES_CONFESSED', [])),
-            json.dumps(record.get('PROPERTY_DISPOSAL', [])),
-            json.dumps(record.get('REGULAR_HABITS', [])),
-            json.dumps(record.get('REGULARIZATION_OF_TRANSIT_WARRANTS', [])),
-            json.dumps(record.get('SHELTER', [])),
-            json.dumps(record.get('SIM_DETAILS', [])),
-            json.dumps(record.get('SURETIES', [])),
-            json.dumps(record.get('TYPES_OF_DRUGS', []))
+            SOURCE_SYSTEM, SOURCE_ENDPOINT, now_utc, ETL_RUN_ID,
+        ]
+
+        array_columns = list(IR_ARRAY_COLUMNS)
+        array_col_values = [array_values[c] for c in array_columns]
+
+        jsonb_columns = list(IR_JSONB_COLUMNS.keys())
+        jsonb_values = [json.dumps(record.get(IR_JSONB_COLUMNS[c], [])) for c in jsonb_columns]
+
+        all_columns = base_columns + array_columns + jsonb_columns
+        all_values = base_values + array_col_values + jsonb_values
+
+        placeholders = []
+        for c in all_columns:
+            placeholders.append('%s::jsonb' if c in IR_JSONB_COLUMNS else '%s')
+
+        update_set = ',\n                '.join(
+            f"{c} = EXCLUDED.{c}" for c in all_columns if c != 'interrogation_report_id'
         )
 
         query = f"""
             INSERT INTO {IR_TABLE} (
-                interrogation_report_id, crime_id, person_id,
-                physical_beard, physical_build, physical_burn_marks, physical_color,
-                physical_deformities_or_peculiarities, physical_deformities, physical_ear,
-                physical_eyes, physical_face, physical_hair, physical_height,
-                physical_identification_marks, physical_language_or_dialect,
-                physical_leucoderma, physical_mole, physical_mustache, physical_nose,
-                physical_scar, physical_tattoo, physical_teeth,
-                
-                socio_living_status, socio_marital_status, socio_education,
-                socio_occupation, socio_income_group,
-                
-                offence_time, other_offence_time,
-                share_of_amount_spent, other_share_of_amount_spent, share_remarks,
-                
-                is_in_jail, from_where_sent_in_jail, in_jail_crime_num, in_jail_dist_unit,
-                
-                is_on_bail, from_where_sent_on_bail, on_bail_crime_num, date_of_bail,
-                
-                is_absconding, wanted_in_police_station, absconding_crime_num,
-                
-                is_normal_life, eking_livelihood_by_labor_work,
-                
-                is_rehabilitated, rehabilitation_details,
-                
-                is_dead, death_details,
-                
-                is_facing_trial, facing_trial_ps_name, facing_trial_crime_num,
-                
-                other_regular_habits, other_indulgence_before_offence,
-                time_since_modus_operandi,
-                date_created, date_modified, source_system, source_endpoint, fetched_at, etl_run_id,
-                
-                associate_details, consumer_details, conviction_acquittal, defence_counsel, dopams_links,
-                execution_of_nbw, family_history, financial_history, indulgance_before_offence,
-                interrogation_report_refs, jail_sentence, local_contacts, modus_operandi,
-                new_gang_formation, pending_nbw, previous_offences_confessed, property_disposal,
-                regular_habits, regularization_transit_warrants, shelter, sim_details, sureties, types_of_drugs
+                {', '.join(all_columns)}
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s,
-                %s, %s,
-                %s, %s,
-                %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s, %s, %s, %s,
-                %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
-                %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
-                %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb
+                {', '.join(placeholders)}
             )
             ON CONFLICT (interrogation_report_id) DO UPDATE SET
-                crime_id = EXCLUDED.crime_id,
-                person_id = EXCLUDED.person_id,
-                physical_beard = EXCLUDED.physical_beard,
-                physical_build = EXCLUDED.physical_build,
-                physical_burn_marks = EXCLUDED.physical_burn_marks,
-                physical_color = EXCLUDED.physical_color,
-                physical_deformities_or_peculiarities = EXCLUDED.physical_deformities_or_peculiarities,
-                physical_deformities = EXCLUDED.physical_deformities,
-                physical_ear = EXCLUDED.physical_ear,
-                physical_eyes = EXCLUDED.physical_eyes,
-                physical_face = EXCLUDED.physical_face,
-                physical_hair = EXCLUDED.physical_hair,
-                physical_height = EXCLUDED.physical_height,
-                physical_identification_marks = EXCLUDED.physical_identification_marks,
-                physical_language_or_dialect = EXCLUDED.physical_language_or_dialect,
-                physical_leucoderma = EXCLUDED.physical_leucoderma,
-                physical_mole = EXCLUDED.physical_mole,
-                physical_mustache = EXCLUDED.physical_mustache,
-                physical_nose = EXCLUDED.physical_nose,
-                physical_scar = EXCLUDED.physical_scar,
-                physical_tattoo = EXCLUDED.physical_tattoo,
-                physical_teeth = EXCLUDED.physical_teeth,
-                
-                socio_living_status = EXCLUDED.socio_living_status,
-                socio_marital_status = EXCLUDED.socio_marital_status,
-                socio_education = EXCLUDED.socio_education,
-                socio_occupation = EXCLUDED.socio_occupation,
-                socio_income_group = EXCLUDED.socio_income_group,
-                
-                offence_time = EXCLUDED.offence_time,
-                other_offence_time = EXCLUDED.other_offence_time,
-                share_of_amount_spent = EXCLUDED.share_of_amount_spent,
-                other_share_of_amount_spent = EXCLUDED.other_share_of_amount_spent,
-                share_remarks = EXCLUDED.share_remarks,
-                
-                is_in_jail = EXCLUDED.is_in_jail,
-                from_where_sent_in_jail = EXCLUDED.from_where_sent_in_jail,
-                in_jail_crime_num = EXCLUDED.in_jail_crime_num,
-                in_jail_dist_unit = EXCLUDED.in_jail_dist_unit,
-                
-                is_on_bail = EXCLUDED.is_on_bail,
-                from_where_sent_on_bail = EXCLUDED.from_where_sent_on_bail,
-                on_bail_crime_num = EXCLUDED.on_bail_crime_num,
-                date_of_bail = EXCLUDED.date_of_bail,
-                
-                is_absconding = EXCLUDED.is_absconding,
-                wanted_in_police_station = EXCLUDED.wanted_in_police_station,
-                absconding_crime_num = EXCLUDED.absconding_crime_num,
-                
-                is_normal_life = EXCLUDED.is_normal_life,
-                eking_livelihood_by_labor_work = EXCLUDED.eking_livelihood_by_labor_work,
-                
-                is_rehabilitated = EXCLUDED.is_rehabilitated,
-                rehabilitation_details = EXCLUDED.rehabilitation_details,
-                
-                is_dead = EXCLUDED.is_dead,
-                death_details = EXCLUDED.death_details,
-                
-                is_facing_trial = EXCLUDED.is_facing_trial,
-                facing_trial_ps_name = EXCLUDED.facing_trial_ps_name,
-                facing_trial_crime_num = EXCLUDED.facing_trial_crime_num,
-                
-                other_regular_habits = EXCLUDED.other_regular_habits,
-                other_indulgence_before_offence = EXCLUDED.other_indulgence_before_offence,
-                time_since_modus_operandi = EXCLUDED.time_since_modus_operandi,
-                date_created = EXCLUDED.date_created,
-                date_modified = EXCLUDED.date_modified,
-                source_system = EXCLUDED.source_system,
-                source_endpoint = EXCLUDED.source_endpoint,
-                fetched_at = EXCLUDED.fetched_at,
-                etl_run_id = EXCLUDED.etl_run_id,
-                
-                associate_details = EXCLUDED.associate_details,
-                consumer_details = EXCLUDED.consumer_details,
-                conviction_acquittal = EXCLUDED.conviction_acquittal,
-                defence_counsel = EXCLUDED.defence_counsel,
-                dopams_links = EXCLUDED.dopams_links,
-                execution_of_nbw = EXCLUDED.execution_of_nbw,
-                family_history = EXCLUDED.family_history,
-                financial_history = EXCLUDED.financial_history,
-                indulgance_before_offence = EXCLUDED.indulgance_before_offence,
-                interrogation_report_refs = EXCLUDED.interrogation_report_refs,
-                jail_sentence = EXCLUDED.jail_sentence,
-                local_contacts = EXCLUDED.local_contacts,
-                modus_operandi = EXCLUDED.modus_operandi,
-                new_gang_formation = EXCLUDED.new_gang_formation,
-                pending_nbw = EXCLUDED.pending_nbw,
-                previous_offences_confessed = EXCLUDED.previous_offences_confessed,
-                property_disposal = EXCLUDED.property_disposal,
-                regular_habits = EXCLUDED.regular_habits,
-                regularization_transit_warrants = EXCLUDED.regularization_transit_warrants,
-                shelter = EXCLUDED.shelter,
-                sim_details = EXCLUDED.sim_details,
-                sureties = EXCLUDED.sureties,
-                types_of_drugs = EXCLUDED.types_of_drugs
+                {update_set}
         """
-        cursor.execute(query, main_values)
+        cursor.execute(query, tuple(all_values))
         return True
+
+    def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
+        """Fetch and load IR records for one date-range chunk."""
+        chunk_range = f"{from_date} to {to_date}"
+        logger.info(f"📅 Processing: {chunk_range}")
+
+        records = self.fetch_ir_data_from_api(from_date, to_date)
+        if records is None:
+            logger.error(f"❌ Failed to fetch IR data for {chunk_range}")
+            with self.stats_lock:
+                self.stats['total_ir_failed'] += 1
+            return
+        if not records:
+            logger.info(f"ℹ️  No IR records found for {chunk_range}")
+            return
+
+        with self.stats_lock:
+            self.stats['total_ir_fetched'] += len(records)
+
+        # Schema evolution: detect any new top-level fields the API started sending.
+        if table_columns is not None and records:
+            new_fields = self.detect_new_fields(records[0], table_columns)
+            if new_fields:
+                logger.info(f"🔍 New fields detected in API response: {list(new_fields.keys())}")
+                for api_field, db_column in new_fields.items():
+                    if self.add_column_to_table(db_column):
+                        table_columns.add(db_column)
+                self.update_existing_records_with_new_fields(new_fields, to_date)
+
+        for record in records:
+            ir_id = record.get('INTERROGATION_REPORT_ID')
+            crime_id = record.get('CRIME_ID')
+            if not ir_id:
+                logger.warning("⚠️  IR record missing INTERROGATION_REPORT_ID, skipping")
+                with self.stats_lock:
+                    self.stats['total_ir_failed'] += 1
+                continue
+
+            try:
+                with self.db_pool.get_connection_context() as conn:
+                    with conn.cursor() as cur:
+                        if crime_id not in self.crime_ids:
+                            self.queue_pending_fk(record, crime_id, conn, cur)
+                            conn.commit()
+                            logger.debug(f"⏳ IR {ir_id}: crime_id {crime_id} not in crimes table — queued for retry")
+                            continue
+
+                        existing = self.get_existing_ir_record(ir_id, cur)
+                        if existing and not self.should_update_record(existing, record):
+                            with self.stats_lock:
+                                self.stats['total_ir_no_change'] += 1
+                            continue
+
+                        self.insert_main_record(record, cur, is_update=bool(existing))
+                        conn.commit()
+                        with self.stats_lock:
+                            if existing:
+                                self.stats['total_ir_updated'] += 1
+                            else:
+                                self.stats['total_ir_inserted'] += 1
+            except Exception as e:
+                logger.error(f"❌ Error processing IR {ir_id}: {e}")
+                with self.stats_lock:
+                    self.stats['total_ir_failed'] += 1
+                    self.stats['errors'].append(f"IR {ir_id}: {str(e)}")
+
+        logger.info(f"✅ Completed: {chunk_range}")
 
     def run(self):
 

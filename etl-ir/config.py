@@ -67,6 +67,4 @@ TABLE_CONFIG = {
     'hierarchy': _table_name('HIERARCHY_TABLE', 'hierarchy'),
     'properties': _table_name('PROPERTIES_TABLE', 'properties'),
     'interrogation_reports': _table_name('IR_TABLE', 'interrogation_reports'),
-    'ir_media': _table_name('IR_MEDIA_TABLE', 'ir_media'),
-    ),
 }

@@ -1264,6 +1264,29 @@ class ArrestsETL:
                                     'invalid_ids': invalid_ids
                                 })
                                 self.log_invalid_ids(arrests, invalid_ids, chunk_range)
+
+                        # Park in FK retry queue — recovers when crime record arrives.
+                        # This worker returns before insert_arrests() is ever called for
+                        # an invalid crime_id, so insert_arrests()'s own push_fk_failure
+                        # call (further below) never runs for this case; without this,
+                        # the record was silently and permanently dropped.
+                        if push_fk_failure is not None:
+                            try:
+                                missing_cid = original_crime_id or ''
+                                push_fk_failure(
+                                    conn, 'arrests',
+                                    record_id=f"{missing_cid}|{accused_seq_no or ''}",
+                                    record_json=json.dumps(
+                                        {k: str(v) if v is not None else None
+                                         for k, v in arrests.items()},
+                                    ),
+                                    missing_fk_column='crime_id',
+                                    missing_fk_value=missing_cid,
+                                )
+                                conn.commit()
+                            except Exception as _qe:
+                                logger.warning("FK queue push failed for arrests %s: %s",
+                                               original_crime_id, _qe)
                         return
                     
                     # Create unique key for tracking duplicates (based on unique constraint)

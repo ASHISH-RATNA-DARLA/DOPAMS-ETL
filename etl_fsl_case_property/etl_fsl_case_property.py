@@ -1158,15 +1158,20 @@ class FSLCasePropertyETL:
             self.log_failed_record(case_property, reason, error_details)
             self.log_invalid_crime_id(case_property, original_crime_id or 'NULL', chunk_date_range)
             # Park in FK retry queue — recovers when crime record arrives.
+            # record_id must be unique per source record, not just per
+            # crime_id: multiple distinct case properties can share the same
+            # missing crime_id, and the queue's unique index (kind,
+            # module_name, record_key) would silently drop all but the
+            # first if record_id were the bare crime_id.
             if push_fk_failure is not None and original_crime_id:
                 try:
                     push_fk_failure(
                         self.db_conn, 'fsl_case_property',
-                        record_id=original_crime_id,
-                        record_json=json.dumps(
-                            {k: str(v) if v is not None else None
-                             for k, v in case_property.items()},
-                        ),
+                        record_id=f"{original_crime_id}|{case_property_id or ''}",
+                        # default=str only (not a per-key stringify): a
+                        # per-key str() would flatten any non-scalar field
+                        # into a string drain_fk_queue can't reconstruct.
+                        record_json=json.dumps(case_property, default=str),
                         missing_fk_column='crime_id',
                         missing_fk_value=original_crime_id,
                     )
@@ -1286,7 +1291,7 @@ class FSLCasePropertyETL:
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s
+                        %s, %s, %s, %s, %s
                     )
                 """
                 self.db_cursor.execute(insert_query, (
@@ -1354,6 +1359,41 @@ class FSLCasePropertyETL:
             return False, reason
         except Exception as e:
             self.db_conn.rollback()
+
+            # trg_enforce_case_property_mo_reference (cctns-v2_schema.sql) raises
+            # a bare RAISE EXCEPTION -- SQLSTATE P0001, not IntegrityError -- when
+            # mo_id doesn't yet exist in mo_seizures for this crime_id. Detect
+            # this SPECIFIC condition (pgcode + the trigger's own message text,
+            # not just "any P0001") so unrelated errors are never misclassified
+            # as an FK-retry-eligible failure.
+            pgcode = getattr(e, 'pgcode', None)
+            if pgcode == 'P0001' and 'Invalid MO reference' in str(e):
+                reason = 'missing_mo_reference'
+                error_details = str(e)
+                logger.warning(f"⚠️  {error_details}, queuing case property for retry")
+                self.stats['total_records_failed'] += 1
+                self.log_failed_record(case_property, reason, error_details)
+                # Park in FK retry queue — recovers once the required
+                # mo_seizures row arrives on a later run. record_id is
+                # crime_id|mo_id|case_property_id: collision-safe, since
+                # multiple case properties can reference the same still-
+                # missing mo_seizures record.
+                if push_fk_failure is not None:
+                    try:
+                        push_fk_failure(
+                            self.db_conn, 'fsl_case_property',
+                            record_id=f"{crime_id}|{mo_id}|{case_property_id or ''}",
+                            # default=str only (not a per-key stringify).
+                            record_json=json.dumps(case_property, default=str),
+                            missing_fk_column='mo_id',
+                            missing_fk_value=mo_id or '',
+                        )
+                        self.db_conn.commit()
+                    except Exception as _qe:
+                        logger.warning("FK queue push failed for fsl_case_property %s: %s",
+                                       case_property_id, _qe)
+                return False, reason
+
             reason = 'error'
             error_details = str(e)
             logger.error(f"❌ Error inserting case property: {e}")
@@ -1641,9 +1681,13 @@ class FSLCasePropertyETL:
         self.duplicates_log.write(f"The smart update logic will determine if actual updates are needed\n")
     
     def _retry_fsl_case_property_record(self, conn, record):
-        """Retry insertion of a queued fsl_case_property record once its crime_id is present.
+        """Retry insertion of a queued fsl_case_property record once its
+        dependency (crime_id, or mo_id in mo_seizures) is present.
 
-        Called by drain_fk_queue. Returns True on success, False if still unresolvable.
+        Called by drain_fk_queue for both failure modes queued under the
+        'fsl_case_property' module: missing crime_id (insert_fsl_case_property's
+        own check) and missing mo_id (trg_enforce_case_property_mo_reference
+        rejection). Returns True on success, False if still unresolvable.
         """
         original_crime_id = record.get('_original_crime_id') or record.get('crime_id')
         if not original_crime_id:
@@ -1654,7 +1698,21 @@ class FSLCasePropertyETL:
                 (original_crime_id,)
             )
             if not cur.fetchone():
-                return False  # Still missing
+                return False  # Crime still missing
+
+            # If this record was queued because of a missing mo_id (not a
+            # missing crime_id), pre-check mo_seizures directly instead of
+            # relying on the trigger to reject it again — avoids a redundant
+            # rollback/re-push cycle on every still-unresolved retry attempt.
+            mo_id = record.get('mo_id')
+            if mo_id:
+                cur.execute(
+                    f"SELECT 1 FROM {MO_SEIZURES_TABLE} WHERE crime_id = %s AND mo_id = %s",
+                    (original_crime_id, mo_id)
+                )
+                if not cur.fetchone():
+                    return False  # MO seizure still missing
+
             record['crime_id'] = original_crime_id
             record['_original_crime_id'] = original_crime_id
             success, _ = self.insert_fsl_case_property(record, 'FK_RETRY')
