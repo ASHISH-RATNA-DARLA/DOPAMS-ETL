@@ -43,13 +43,7 @@ STEP 2: Verify Database State (Run in PgAdmin)
   Copy this into PgAdmin Query Tool and execute:
 
   ---BEGIN SQL---
-  SELECT 'ir_family_history' as table_name,
-         (SELECT MAX(id) FROM ir_family_history) as max_id,
-         (SELECT last_value FROM ir_family_history_id_seq) as seq_value
   UNION ALL
-  SELECT 'ir_local_contacts',
-         (SELECT MAX(id) FROM ir_local_contacts),
-         (SELECT last_value FROM ir_local_contacts_id_seq)
   -- Add remaining 22 tables...
   ---END SQL---
 

@@ -2,7 +2,7 @@
 """
 DOPAMAS ETL Pipeline - Chargesheets API
 Fetches chargesheets data in 5-day chunks and loads into PostgreSQL
-Handles: chargesheets, chargesheet_acts, chargesheet_acts_sections, chargesheet_accused,
+Handles: chargesheets,
 and the chargesheet's uploadChargeSheet file/media reference (in the consolidated
 file_media_bookkeeping table -- formerly chargesheet_files/chargesheet_media)
 """
@@ -81,9 +81,6 @@ else:
 CHARGESHEETS_TABLE = TABLE_CONFIG.get('chargesheets', 'chargesheets')
 # chargesheet_files and chargesheet_media were consolidated into file_media_bookkeeping
 # (source_type='chargesheets', source_field='uploadChargeSheet').
-CHARGESHEET_ACTS_TABLE = TABLE_CONFIG.get('chargesheet_acts', 'chargesheet_acts')
-CHARGESHEET_ACCUSED_TABLE = TABLE_CONFIG.get('chargesheet_accused', 'chargesheet_accused')
-CHARGESHEET_ACTS_SECTIONS_TABLE = TABLE_CONFIG.get('chargesheet_acts_sections', 'chargesheet_acts_sections')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
 
 # CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
@@ -361,8 +358,7 @@ class ChargesheetsETL:
             # chargesheet_files was consolidated into the shared file_media_bookkeeping
             # table, which is written by every entity ETL -- an unfiltered MAX(date)
             # scan of that table would bleed in unrelated entities' dates, so it is
-            # intentionally not included here. chargesheets/chargesheet_acts/
-            # chargesheet_accused are written in the same batch per chargesheet and
+            # intentionally not included here. chargesheets are written in the same batch per chargesheet and
             # remain sufficient signal for this resume-date detection.
             table_configs = [
                 {
@@ -1048,7 +1044,7 @@ class ChargesheetsETL:
     def insert_chargesheet(self, chargesheet: Dict, chunk_date_range: str = "") -> Tuple[bool, str, Optional[str]]:
         """
         Insert or update single chargesheet into database with smart update logic
-        Also handles related tables: chargesheet_acts, chargesheet_accused, and the
+        Also handles related tables:
         uploadChargeSheet file/media reference (file_media_bookkeeping)
         Dates are always from API (never use CURRENT_TIMESTAMP)
         
@@ -1206,7 +1202,7 @@ class ChargesheetsETL:
                     'id', 'crime_id', 'chargesheet_no', 'chargesheet_no_icjs', 'chargesheet_date',
                     'chargesheet_type', 'court_name', 'is_ccl', 'is_esigned',
                     'date_created', 'date_modified',
-                    'source_system', 'source_endpoint', 'fetched_at', 'etl_run_id'
+                    'source_system', 'source_endpoint', 'fetched_at', 'etl_run_id', 'acts_and_sections', 'accused_particulars'
                 ]
                 insert_values = [
                     chargesheet_id,
@@ -1283,7 +1279,6 @@ class ChargesheetsETL:
         # Process accused
         accused_list = chargesheet.get('_accused', [])
         for accused_data in accused_list:
-            self.insert_chargesheet_accused(chargesheet_id, charge_sheet_api_id, accused_data)
 
     def delete_related_tables(self, chargesheet_id: str, charge_sheet_api_id: Optional[str]):
         """Remove stale child rows before reloading the current API snapshot."""

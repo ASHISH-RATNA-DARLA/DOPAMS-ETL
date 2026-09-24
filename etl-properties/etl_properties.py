@@ -27,6 +27,13 @@ except ImportError:
     pass
 from env_utils import get_etl_run_id
 
+try:
+    from etl_fk_retry_queue import push_fk_failure, drain_fk_queue as _drain_fk_queue
+except ImportError:
+    push_fk_failure = None
+    _drain_fk_queue = None
+
+
 import json
 
 from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG
@@ -54,8 +61,6 @@ logger.setLevel(LOG_CONFIG['level'])
 # Target tables (allows redirecting ETL runs to test tables)
 PROPERTIES_TABLE = TABLE_CONFIG.get('properties', 'properties')
 CRIMES_TABLE = TABLE_CONFIG.get('crimes', 'crimes')
-PENDING_FK_TABLE = 'properties_pending_fk'
-PROPERTY_ADDITIONAL_DETAILS_TABLE = TABLE_CONFIG.get('property_additional_details', 'property_additional_details')
 # property_media was consolidated into file_media_bookkeeping (source_type='property', source_field='MEDIA').
 
 # CCTNS V2 source-provenance constants (see migrations/2026-09-23_add_cctns_provenance_columns.sql)
@@ -87,7 +92,6 @@ class PropertiesETL:
         self.crime_ids = set()
         self.stats_lock = threading.Lock()
         self.schema_lock = threading.Lock()
-        self.has_property_additional_details_table = False
         self.has_file_media_bookkeeping_table = False
         self.stats = {
             'total_api_calls': 0,
@@ -252,94 +256,34 @@ class PropertiesETL:
     def queue_pending_fk(self, property_raw: Dict, crime_id: str, conn, cursor):
         """Insert a property record into the pending FK retry queue."""
         property_id = property_raw.get('PROPERTY_ID', 'unknown')
-        try:
-            cursor.execute(f"""
-                INSERT INTO {PENDING_FK_TABLE} (property_id, crime_id, raw_data)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (property_id) WHERE NOT resolved
-                DO UPDATE SET
-                    raw_data = EXCLUDED.raw_data,
-                    retry_count = {PENDING_FK_TABLE}.retry_count  -- keep existing count
-            """, (property_id, crime_id, json.dumps(property_raw, default=str)))
-            conn.commit()
+        if push_fk_failure:
+            push_fk_failure(conn, source_table='properties', record_id=property_id,
+                            record_json=json.dumps(property_raw, default=str),
+                            missing_fk_column='crime_id', missing_fk_value=crime_id)
             with self.stats_lock:
                 self.stats['total_pending_fk'] += 1
-            logger.debug(f"Queued property {property_id} (crime_id={crime_id}) for FK retry")
+
+    def _retry_property_record(self, conn, record_json_str: str) -> bool:
+        try:
+            raw_data = json.loads(record_json_str)
+            crime_id = raw_data.get('CRIME_ID')
+            # Check if crime_id exists in our in-memory set (or reload if needed)
+            if crime_id not in self.crime_ids:
+                return False
+            
+            prop = self.transform_property(raw_data)
+            with conn.cursor() as cur:
+                success = self.insert_property(prop, conn, cur)
+            return success
         except Exception as e:
-            conn.rollback()
-            logger.error(f"Failed to queue pending FK for property {property_id}: {e}")
+            logger.error(f"Error retrying property record: {e}")
+            return False
 
     def retry_pending_fk(self):
-        """
-        Retry all unresolved pending FK records.
-        For each, check if crime_id now exists in crimes. If so, process normally.
-        """
-        logger.info("")
-        logger.info("=" * 80)
-        logger.info("🔄 Retrying pending FK records...")
-
-        try:
-            # Fetch all unresolved pending records
+        """Retry all unresolved pending FK records."""
+        if _drain_fk_queue:
             with self.db_pool.get_connection_context() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"""
-                        SELECT id, property_id, crime_id, raw_data, retry_count
-                        FROM {PENDING_FK_TABLE}
-                        WHERE resolved = FALSE
-                        ORDER BY created_at
-                    """)
-                    pending_rows = cur.fetchall()
-
-            if not pending_rows:
-                logger.info("ℹ️  No pending FK records to retry")
-                return
-
-            logger.info(f"📊 Found {len(pending_rows)} pending FK records to retry")
-
-            resolved_count = 0
-            still_missing = 0
-
-            for row_id, property_id, crime_id, raw_data, retry_count in pending_rows:
-                try:
-                    with self.db_pool.get_connection_context() as conn:
-                        with conn.cursor() as cur:
-                            if crime_id in self.crime_ids:
-                                # Crime now exists — process the property
-                                prop = self.transform_property(raw_data)
-                                success = self.insert_property(prop, conn, cur)
-                                if success:
-                                    conn.commit()
-                                # Mark as resolved regardless (avoid infinite re-inserts on data issues)
-                                cur.execute(f"""
-                                    UPDATE {PENDING_FK_TABLE}
-                                    SET resolved = TRUE, resolved_at = CURRENT_TIMESTAMP,
-                                        last_retry_at = CURRENT_TIMESTAMP, retry_count = %s
-                                    WHERE id = %s
-                                """, (retry_count + 1, row_id))
-                                conn.commit()
-                                resolved_count += 1
-                                logger.debug(f"✅ Resolved pending property {property_id}")
-                            else:
-                                # Still missing — bump retry count
-                                cur.execute(f"""
-                                    UPDATE {PENDING_FK_TABLE}
-                                    SET last_retry_at = CURRENT_TIMESTAMP, retry_count = %s
-                                    WHERE id = %s
-                                """, (retry_count + 1, row_id))
-                                conn.commit()
-                                still_missing += 1
-                except Exception as e:
-                    logger.error(f"Error retrying pending property {property_id}: {e}")
-                    still_missing += 1
-
-            with self.stats_lock:
-                self.stats['total_retried_ok'] = resolved_count
-                self.stats['total_retried_still_missing'] = still_missing
-
-            logger.info(f"🔄 Retry complete: {resolved_count} resolved, {still_missing} still missing crime_id")
-
-        except Exception as e:
-            logger.error(f"❌ Error during pending FK retry: {e}")
+                _drain_fk_queue(conn, 'properties', self._retry_property_record)
 
     def get_table_columns(self, table_name: str) -> Set[str]:
         """Get all column names from a table."""
@@ -782,47 +726,6 @@ class PropertiesETL:
 
         return None, None, {'_raw': media_item}
 
-    def upsert_property_additional_details(
-        self,
-        property_id: str,
-        additional_details: Optional[Dict],
-        date_created: Optional[datetime],
-        date_modified: Optional[datetime],
-        cursor,
-    ):
-        """
-        Keep property_additional_details in overwrite mode.
-        If source is null, remove child row to avoid stale data.
-        """
-        if not self.has_property_additional_details_table:
-            return
-
-        if additional_details is None:
-            cursor.execute(
-                f"DELETE FROM {PROPERTY_ADDITIONAL_DETAILS_TABLE} WHERE property_id = %s",
-                (property_id,),
-            )
-            return
-
-        cursor.execute(
-            f"""
-                INSERT INTO {PROPERTY_ADDITIONAL_DETAILS_TABLE}
-                    (property_id, additional_details, date_created, date_modified)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (property_id)
-                DO UPDATE SET
-                    additional_details = EXCLUDED.additional_details,
-                    date_created = EXCLUDED.date_created,
-                    date_modified = EXCLUDED.date_modified
-            """,
-            (
-                property_id,
-                self.to_jsonb_param(additional_details),
-                date_created,
-                date_modified,
-            ),
-        )
-
     def replace_property_media(
         self,
         property_id: str,
@@ -939,11 +842,11 @@ class PropertiesETL:
                     property_id, crime_id, case_property_id, property_status,
                     recovered_from, place_of_recovery, date_of_seizure, nature,
                     belongs, estimate_value, recovered_value, particular_of_property,
-                    category, additional_details, media,
+                    category, additional_details,
                     date_created, date_modified,
                     source_system, source_endpoint, fetched_at, etl_run_id
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s
                 )
                 ON CONFLICT (property_id) DO UPDATE SET
@@ -960,7 +863,6 @@ class PropertiesETL:
                     particular_of_property = EXCLUDED.particular_of_property,
                     category = EXCLUDED.category,
                     additional_details = EXCLUDED.additional_details,
-                    media = EXCLUDED.media,
                     date_created = EXCLUDED.date_created,
                     date_modified = EXCLUDED.date_modified,
                     source_system = EXCLUDED.source_system,
@@ -1013,14 +915,6 @@ class PropertiesETL:
             ))
 
             upsert_result = cursor.fetchone()
-
-            self.upsert_property_additional_details(
-                prop['property_id'],
-                prop['additional_details'],
-                prop['date_created'],
-                prop['date_modified'],
-                cursor,
-            )
             self.replace_property_media(
                 prop['property_id'],
                 prop['media'],
@@ -1179,8 +1073,6 @@ class PropertiesETL:
 
             # Ensure the pending FK retry queue table exists
             self.ensure_pending_table()
-
-            self.has_property_additional_details_table = self.table_exists(PROPERTY_ADDITIONAL_DETAILS_TABLE)
             self.has_file_media_bookkeeping_table = self.table_exists('file_media_bookkeeping')
             if self.has_property_additional_details_table:
                 logger.info(f"✅ Child table detected: {PROPERTY_ADDITIONAL_DETAILS_TABLE}")
@@ -1244,7 +1136,7 @@ class PropertiesETL:
                 with conn.cursor() as cursor:
                     cursor.execute(f"SELECT COUNT(*) FROM {PROPERTIES_TABLE}")
                     db_properties_count = cursor.fetchone()[0]
-                    cursor.execute(f"SELECT COUNT(*) FROM {PENDING_FK_TABLE} WHERE resolved = FALSE")
+                    cursor.execute("SELECT COUNT(*) FROM etl_bookkeeping WHERE kind = 'fk_retry' AND module_name = 'properties' AND resolved = FALSE")
                     pending_count = cursor.fetchone()[0]
             
             # Print final statistics

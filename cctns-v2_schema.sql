@@ -333,6 +333,8 @@ CREATE TABLE public.hierarchy (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT hierarchy_pkey PRIMARY KEY (ps_code)
 );
 COMMENT ON TABLE public.hierarchy IS 'Police organizational hierarchy (ADG -> Zone -> Range -> District -> Sub-Zone -> SDPO -> Circle -> Police Station), one row per PS. Source: GET /master-data/hierarchy.';
@@ -392,6 +394,8 @@ CREATE TABLE public.crimes (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT crimes_pkey PRIMARY KEY (crime_id)
 );
 COMMENT ON TABLE public.crimes IS 'Crime/FIR records. Source: GET /crimes (bulk) and GET /crimes/{crimeId} (detail). additional_json_data holds the CCTNS response fields not individually mapped to a column (e.g. OCCURRENCE_DATE, PLACE_OF_OFFENCE, GD, COMPLAINANT_ID, IO_MOBILE).';
@@ -456,6 +460,8 @@ CREATE TABLE public.persons (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT persons_pkey PRIMARY KEY (person_id)
 );
 COMMENT ON TABLE public.persons IS 'Person master (accused/complainant/associate/etc.), 1:1 with CCTNS PERSON_ID. Source: GET /person-details/{personId}. geo_resolution_source/confidence and domicile_classification are written by the deterministic (LLM-off in pure-CCTNS mode) address/domicile steps that run after ingestion.';
@@ -488,6 +494,8 @@ CREATE TABLE public.accused (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT accused_pkey PRIMARY KEY (accused_id)
 );
 COMMENT ON TABLE public.accused IS 'Links a person to a crime as an accused, with physical features. Source: GET /accused (bulk) and GET /accused/{crimeId} (detail).';
@@ -514,6 +522,8 @@ CREATE TABLE public.arrests (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT arrests_pkey PRIMARY KEY (id)
 );
 COMMENT ON TABLE public.arrests IS 'Arrest status per accused-per-crime. No ARREST_ID in the API; natural/application-level key is (crime_id, accused_seq_no). Source: GET /arrests (bulk) and GET /arrests/{crimeId} (detail).';
@@ -531,6 +541,8 @@ CREATE TABLE public.disposal (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT disposal_pkey PRIMARY KEY (id),
     CONSTRAINT disposal_unique UNIQUE (crime_id, disposal_type, disposed_at)
 );
@@ -556,41 +568,19 @@ CREATE TABLE public.properties (
     particular_of_property text,
     category character varying(100),
     additional_details jsonb,
-    media jsonb DEFAULT '[]'::jsonb,
     date_created timestamp with time zone,
     date_modified timestamp with time zone,
     source_system character varying(20) DEFAULT 'CCTNS_V2',
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT properties_pkey PRIMARY KEY (property_id)
 );
 COMMENT ON TABLE public.properties IS 'Recovered/seized property. additional_details shape varies by CATEGORY (Drugs/Narcotics, Electrical and Electronic Goods, Miscellaneous, ...). Source: GET /property-details (bulk) and GET /property-details/{crimeId} (detail).';
 
-CREATE TABLE public.properties_pending_fk (
-    id SERIAL,
-    property_id character varying(50) NOT NULL,
-    crime_id character varying(50) NOT NULL,
-    raw_data jsonb NOT NULL,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    retry_count integer DEFAULT 0,
-    last_retry_at timestamp without time zone,
-    resolved boolean DEFAULT false,
-    resolved_at timestamp without time zone,
-    CONSTRAINT properties_pending_fk_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.properties_pending_fk IS 'Retry queue for property rows whose crime_id was not yet present in crimes at insert time (out-of-order CCTNS delivery).';
 
-CREATE TABLE public.property_additional_details (
-    property_id character varying(50) NOT NULL,
-    additional_details jsonb NOT NULL,
-    date_created timestamp with time zone,
-    date_modified timestamp with time zone,
-    CONSTRAINT property_additional_details_json_is_object CHECK ((jsonb_typeof(additional_details) = 'object'::text)),
-    CONSTRAINT property_additional_details_pkey PRIMARY KEY (property_id),
-    CONSTRAINT property_additional_details_check_1 CHECK (jsonb_typeof(additional_details) = 'object')
-);
-COMMENT ON TABLE public.property_additional_details IS 'Normalized snapshot of properties.additional_details (kept in sync by the ETL in overwrite mode); same data, queryable form.';
 
 
 -- =============================================================================
@@ -627,6 +617,8 @@ CREATE TABLE public.mo_seizures (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT mo_seizures_pkey PRIMARY KEY (mo_seizure_id)
 );
 COMMENT ON TABLE public.mo_seizures IS 'Modus-operandi seizure records. Natural key is mo_seizure_id; (crime_id, mo_id) is the API-level ordinal key. Source: GET /mo-seizures (bulk) and GET /mo-seizures/{crimeId} (detail).';
@@ -653,52 +645,15 @@ CREATE TABLE public.chargesheets (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT chargesheets_pkey PRIMARY KEY (id),
     CONSTRAINT chargesheets_unique UNIQUE (charge_sheet_id)
 );
 COMMENT ON TABLE public.chargesheets IS 'Chargesheet records (camelCase API, unlike most other CCTNS endpoints). Source: GET /chargesheets (bulk) and GET /chargesheets/{crimeId} (detail). id is a synthetic surrogate key; charge_sheet_id carries the natural CCTNS chargeSheetId.';
 
-CREATE TABLE public.chargesheet_acts (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
-    chargesheet_id uuid NOT NULL,
-    act_description text,
-    section text,
-    rw_required boolean DEFAULT false,
-    section_description text,
-    grave_particulars text,
-    created_at timestamp with time zone,
-    CONSTRAINT chargesheet_acts_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.chargesheet_acts IS 'actsAndSections[] entries (references chargesheets.id).';
 
-CREATE TABLE public.chargesheet_acts_sections (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
-    chargesheet_id character varying(50) NOT NULL,
-    act_index integer DEFAULT 0 NOT NULL,
-    section_index integer DEFAULT 0 NOT NULL,
-    act_description text,
-    section text,
-    rw_required boolean DEFAULT false,
-    section_description text,
-    grave_particulars text,
-    created_at timestamp with time zone,
-    date_modified timestamp with time zone,
-    CONSTRAINT chargesheet_acts_sections_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.chargesheet_acts_sections IS 'actsAndSections[] entries, alternate normalized form keyed by the natural charge_sheet_id (references chargesheets.charge_sheet_id) with explicit act_index/section_index ordinals.';
 
-CREATE TABLE public.chargesheet_accused (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
-    chargesheet_id uuid NOT NULL,
-    accused_person_id character varying(50) NOT NULL,
-    charge_status character varying(30),
-    requested_for_nbw boolean DEFAULT false,
-    reason_for_no_charge text,
-    is_person_master_present boolean DEFAULT true,
-    created_at timestamp with time zone,
-    CONSTRAINT chargesheet_accused_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.chargesheet_accused IS 'accusedParticulars[] entries (references chargesheets.id).';
 
 
 -- =============================================================================
@@ -721,6 +676,8 @@ CREATE TABLE public.charge_sheet_updates (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT charge_sheet_updates_pkey PRIMARY KEY (id),
     CONSTRAINT charge_sheet_updates_unique UNIQUE (update_charge_sheet_id)
 );
@@ -772,6 +729,8 @@ CREATE TABLE public.fsl_case_property (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     CONSTRAINT fsl_case_property_pkey PRIMARY KEY (case_property_id)
 );
 COMMENT ON TABLE public.fsl_case_property IS 'Forensic/case-property register entries. CCTNS calls this endpoint "case-property" (CASE_PROPERTY_ID, SCREAMING_SNAKE_CASE); DOPAMS models it as fsl_case_property. Source: GET /case-property (bulk) and GET /case-property/{crimeId} (detail).';
@@ -844,362 +803,69 @@ CREATE TABLE public.interrogation_reports (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
+    associate_details jsonb,
+    consumer_details jsonb,
+    conviction_acquittal jsonb,
+    defence_counsel jsonb,
+    dopams_links jsonb,
+    execution_of_nbw jsonb,
+    family_history jsonb,
+    financial_history jsonb,
+    indulgance_before_offence jsonb,
+    interrogation_report_refs jsonb,
+    jail_sentence jsonb,
+    local_contacts jsonb,
+    modus_operandi jsonb,
+    new_gang_formation jsonb,
+    pending_nbw jsonb,
+    previous_offences_confessed jsonb,
+    property_disposal jsonb,
+    regular_habits jsonb,
+    regularization_transit_warrants jsonb,
+    shelter jsonb,
+    sim_details jsonb,
+    sureties jsonb,
+    types_of_drugs jsonb,
     CONSTRAINT interrogation_reports_pkey PRIMARY KEY (interrogation_report_id)
 );
 COMMENT ON TABLE public.interrogation_reports IS 'Interrogation report main record, 1:1 with (crime_id, person_id) per interrogated subject. PHYSICAL_FEATURES/SOCIO_ECONOMIC_PROFILE/COMMISSION_OF_OFFENCE/SHARE_OF_AMOUNT_SPENT/PRESENT_WHEREABOUTS nested objects are flattened into columns here. Source: GET /interrogation-reports/v1/ (bulk) and GET /interrogation-reports/v1/{crimeId} (detail).';
 
-CREATE TABLE public.ir_associate_details (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    gang character varying(255),
-    relation text,
-    CONSTRAINT ir_associate_details_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_associate_details IS 'Interrogation report child table for ASSOCIATE_DETAILS[].';
 
-CREATE TABLE public.ir_consumer_details (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    consumer_person_id character varying(50),
-    place_of_consumption text,
-    other_sources text,
-    other_sources_phone_no character varying(20),
-    aadhar_card_number character varying(20),
-    aadhar_card_number_phone_no character varying(20),
-    CONSTRAINT ir_consumer_details_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_consumer_details IS 'Interrogation report child table for CONSUMER_DETAILS[].';
 
-CREATE TABLE public.ir_conviction_acquittal (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    crime_num text,
-    jurisdiction_ps text,
-    court_name text,
-    judge_name text,
-    law_section text,
-    verdict text,
-    verdict_date date,
-    reason_if_acquitted text,
-    conviction_remarks text,
-    fine_amount_in_inr numeric,
-    sentence_if_convicted text,
-    appeal_status text,
-    appeal_court text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_conviction_acquittal_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_conviction_acquittal IS 'Interrogation report child table for CONVICTION_ACQUITTAL[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_defence_counsel (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    dist_division text,
-    ps_code text,
-    crime_num text,
-    law_section text,
-    sc_cc_num text,
-    defence_counsel_address text,
-    defence_counsel_phone text,
-    assistance text,
-    defence_counsel_person_id character varying(50),
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_defence_counsel_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_defence_counsel IS 'Interrogation report child table for DEFENCE_COUNSEL[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_dopams_links (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    phone_number character varying(20),
-    dopams_data text[],
-    CONSTRAINT ir_dopams_links_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_dopams_links IS 'Interrogation report child table for DOPAMS_LINKS[].';
 
-CREATE TABLE public.ir_execution_of_nbw (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    nbw_number text,
-    issued_date date,
-    executed_date date,
-    jurisdiction_ps text,
-    crime_num text,
-    executed_by text,
-    place_of_execution text,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_execution_of_nbw_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_execution_of_nbw IS 'Interrogation report child table for EXECUTION_OF_NBW[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_family_history (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    relation text,
-    family_member_peculiarity text,
-    criminal_background boolean DEFAULT false,
-    is_alive boolean DEFAULT true,
-    family_stay_together boolean DEFAULT true,
-    CONSTRAINT ir_family_history_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_family_history IS 'Interrogation report child table for FAMILY_HISTORY[].';
 
-CREATE TABLE public.ir_financial_history (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    account_holder_person_id character varying(50),
-    pan_no character varying(50),
-    upi_id character varying(255),
-    name_of_bank character varying(255),
-    account_number text,
-    branch_name character varying(255),
-    ifsc_code character varying(50),
-    immovable_property_acquired text,
-    movable_property_acquired text,
-    CONSTRAINT ir_financial_history_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_financial_history IS 'Interrogation report child table for FINANCIAL_HISTORY[].';
 
-CREATE TABLE public.ir_indulgance_before_offence (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    indulgance text,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ir_indulgance_before_offence_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_indulgance_before_offence IS 'Interrogation report child table for INDULGANCE_BEFORE_OFFENCE (mixed array/string type in the API; stored as free text, not a relational list, per the observed type instability).';
 
-CREATE TABLE public.ir_interrogation_report_refs (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    report_ref_id text NOT NULL,
-    CONSTRAINT ir_interrogation_report_refs_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_interrogation_report_refs IS 'Interrogation report child table for a report-reference id list associated with the interrogation report.';
 
-CREATE TABLE public.ir_jail_sentence (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    crime_num text,
-    jurisdiction_ps text,
-    law_section text,
-    sentence_type text,
-    sentence_duration_in_months integer,
-    sentence_start_date date,
-    sentence_end_date date,
-    sentence_amount_in_inr numeric,
-    jail_name text,
-    date_of_jail_entry date,
-    date_of_jail_release date,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_jail_sentence_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_jail_sentence IS 'Interrogation report child table for JAIL_SENTENCE[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_local_contacts (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    person_id character varying(50),
-    town character varying(255),
-    address text,
-    jurisdiction_ps text,
-    CONSTRAINT ir_local_contacts_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_local_contacts IS 'Interrogation report child table for LOCAL_CONTACTS[].';
 
-CREATE TABLE public.ir_modus_operandi (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    crime_head character varying(255),
-    crime_sub_head character varying(255),
-    modus_operandi text,
-    CONSTRAINT ir_modus_operandi_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_modus_operandi IS 'Interrogation report child table for MODUS_OPERANDI[].';
 
-CREATE TABLE public.ir_new_gang_formation (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    gang_name text,
-    gang_formation_date date,
-    number_of_members integer,
-    leader_name text,
-    leader_person_id character varying(50),
-    gang_objective text,
-    criminal_history text,
-    jurisdiction_ps text,
-    active text,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_new_gang_formation_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_new_gang_formation IS 'Interrogation report child table for NEW_GANG_FORMATION[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_pending_nbw (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    nbw_number text,
-    issued_date date,
-    jurisdiction_ps text,
-    crime_num text,
-    reason_for_pending text,
-    expected_execution_date date,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_pending_nbw_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_pending_nbw IS 'Interrogation report child table for PENDING_NBW[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_previous_offences_confessed (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    arrest_date date,
-    arrested_by character varying(255),
-    arrest_place text,
-    crime_num text,
-    dist_unit_division character varying(255),
-    gang_member character varying(255),
-    interrogated_by character varying(255),
-    law_section character varying(255),
-    others_identify text,
-    property_recovered text,
-    property_stolen text,
-    ps_code text,
-    remarks text,
-    conviction_status character varying(100),
-    bail_status character varying(100),
-    court_name character varying(500),
-    judge_name character varying(255),
-    CONSTRAINT ir_previous_offences_confessed_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_previous_offences_confessed IS 'Interrogation report child table for PREVIOUS_OFFENCES_CONFESSED[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_property_disposal (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    mode_of_disposal text,
-    buyer_name text,
-    sold_amount_in_inr numeric,
-    location_of_disposal text,
-    date_of_disposal date,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_property_disposal_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_property_disposal IS 'Interrogation report child table for PROPERTY_DISPOSAL[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_regular_habits (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    habit character varying(255) NOT NULL,
-    CONSTRAINT ir_regular_habits_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_regular_habits IS 'Interrogation report child table for REGULAR_HABITS[] (flat string enum list).';
 
-CREATE TABLE public.ir_regularization_transit_warrants (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    warrant_number text,
-    warrant_type text,
-    issued_date date,
-    jurisdiction_ps text,
-    crime_num text,
-    status text,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_regularization_transit_warrants_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_regularization_transit_warrants IS 'Interrogation report child table for REGULARIZATION_OF_TRANSIT_WARRANTS[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_shelter (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    preparation_of_offence text,
-    after_offence text,
-    regular_residency character varying(255),
-    remarks text,
-    other_regular_residency text,
-    CONSTRAINT ir_shelter_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_shelter IS 'Interrogation report child table for SHELTER[].';
 
-CREATE TABLE public.ir_sim_details (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    phone_number character varying(20),
-    sdr text,
-    imei character varying(50),
-    true_caller_name character varying(255),
-    person_id character varying(50),
-    CONSTRAINT ir_sim_details_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_sim_details IS 'Interrogation report child table for SIM_DETAILS[].';
 
-CREATE TABLE public.ir_sureties (
-    id BIGSERIAL,
-    interrogation_report_id character varying(50),
-    surety_person_id character varying(50),
-    surety_name text,
-    relation_to_accused text,
-    occupation text,
-    aadhar_number text,
-    pan_number text,
-    house_no text,
-    street_road_no text,
-    locality_village text,
-    area_mandal text,
-    district text,
-    state_ut text,
-    pin_code text,
-    phone_number text,
-    surety_amount_in_inr numeric,
-    date_of_surety date,
-    remarks text,
-    created_at timestamp without time zone DEFAULT now(),
-    updated_at timestamp without time zone DEFAULT now(),
-    CONSTRAINT ir_sureties_pkey PRIMARY KEY (id)
-);
 COMMENT ON TABLE public.ir_sureties IS 'Interrogation report child table for SURETIES[] (always empty in sampled data; shape unconfirmed beyond column list).';
 
-CREATE TABLE public.ir_types_of_drugs (
-    id SERIAL,
-    interrogation_report_id character varying(50) NOT NULL,
-    type_of_drug text,
-    quantity character varying(255),
-    purchase_amount_in_inr text,
-    mode_of_payment text,
-    mode_of_transport text,
-    supplier_person_id character varying(50),
-    receivers_person_id character varying(50),
-    CONSTRAINT ir_types_of_drugs_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_types_of_drugs IS 'Interrogation report child table for TYPES_OF_DRUGS[].';
 
-CREATE TABLE public.ir_pending_fk (
-    id SERIAL,
-    ir_id character varying(50) NOT NULL,
-    crime_id character varying(50) NOT NULL,
-    raw_data jsonb NOT NULL,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    retry_count integer DEFAULT 0,
-    last_retry_at timestamp without time zone,
-    resolved boolean DEFAULT false,
-    resolved_at timestamp without time zone,
-    CONSTRAINT ir_pending_fk_pkey PRIMARY KEY (id)
-);
-COMMENT ON TABLE public.ir_pending_fk IS 'Retry queue for interrogation-report rows whose crime_id was not yet present in crimes at insert time (out-of-order CCTNS delivery).';
 
 
 -- =============================================================================
@@ -1231,6 +897,8 @@ CREATE TABLE public.file_media_bookkeeping (
     source_endpoint text,
     fetched_at timestamptz,
     etl_run_id uuid,
+    acts_and_sections jsonb,
+    accused_particulars jsonb,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT file_media_bookkeeping_pkey PRIMARY KEY (id)
@@ -1304,10 +972,6 @@ CREATE INDEX idx_properties_case_property_id ON public.properties USING btree (c
 -- mo_seizures / chargesheets / charge_sheet_updates / fsl_case_property
 CREATE INDEX idx_mo_seizures_crime_id ON public.mo_seizures USING btree (crime_id);
 CREATE INDEX idx_chargesheets_crime_id ON public.chargesheets USING btree (crime_id);
-CREATE INDEX idx_chargesheet_acts_chargesheet_id ON public.chargesheet_acts USING btree (chargesheet_id);
-CREATE INDEX idx_chargesheet_acts_sections_chargesheet_id ON public.chargesheet_acts_sections USING btree (chargesheet_id);
-CREATE INDEX idx_chargesheet_accused_chargesheet_id ON public.chargesheet_accused USING btree (chargesheet_id);
-CREATE INDEX idx_chargesheet_accused_person_id ON public.chargesheet_accused USING btree (accused_person_id);
 CREATE INDEX idx_charge_sheet_updates_crime_id ON public.charge_sheet_updates USING btree (crime_id);
 CREATE INDEX idx_fsl_crime_id ON public.fsl_case_property USING btree (crime_id);
 CREATE INDEX idx_fsl_mo_id ON public.fsl_case_property USING btree (mo_id);
@@ -1315,40 +979,10 @@ CREATE INDEX idx_fsl_status ON public.fsl_case_property USING btree (status);
 CREATE INDEX idx_fsl_created ON public.fsl_case_property USING btree (date_created DESC NULLS LAST);
 
 -- properties child/pending-fk tables
-CREATE UNIQUE INDEX idx_pending_fk_property_id ON public.properties_pending_fk USING btree (property_id) WHERE (NOT resolved);
-CREATE INDEX idx_properties_pending_fk_crime_id ON public.properties_pending_fk USING btree (crime_id);
 
 -- interrogation_reports + remaining child tables
 CREATE INDEX idx_ir_reports_crime_person ON public.interrogation_reports USING btree (crime_id, person_id);
 CREATE INDEX idx_ir_reports_created_modified ON public.interrogation_reports USING btree (date_created, date_modified);
-CREATE INDEX idx_ir_associate_details_ir_id ON public.ir_associate_details USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_consumer_details_ir_id ON public.ir_consumer_details USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_conviction_acquittal_ir_id ON public.ir_conviction_acquittal USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_defence_counsel_ir_id ON public.ir_defence_counsel USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_defence_counsel_person_id ON public.ir_defence_counsel USING btree (defence_counsel_person_id);
-CREATE INDEX idx_ir_dopams_links_ir_id ON public.ir_dopams_links USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_execution_of_nbw_ir_id ON public.ir_execution_of_nbw USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_family_history_ir_id ON public.ir_family_history USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_financial_history_ir_id ON public.ir_financial_history USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_indulgance_before_offence_ir_id ON public.ir_indulgance_before_offence USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_interrogation_report_refs_ir_id ON public.ir_interrogation_report_refs USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_jail_sentence_ir_id ON public.ir_jail_sentence USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_local_contacts_ir_id ON public.ir_local_contacts USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_modus_operandi_ir_id ON public.ir_modus_operandi USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_new_gang_formation_ir_id ON public.ir_new_gang_formation USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_new_gang_formation_leader_person_id ON public.ir_new_gang_formation USING btree (leader_person_id);
-CREATE INDEX idx_ir_pending_nbw_ir_id ON public.ir_pending_nbw USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_previous_offences_confessed_ir_id ON public.ir_previous_offences_confessed USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_property_disposal_ir_id ON public.ir_property_disposal USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_regular_habits_ir_id ON public.ir_regular_habits USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_regularization_transit_warrants_ir_id ON public.ir_regularization_transit_warrants USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_shelter_ir_id ON public.ir_shelter USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_sim_details_ir_id ON public.ir_sim_details USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_sureties_ir_id ON public.ir_sureties USING btree (interrogation_report_id);
-CREATE INDEX idx_ir_sureties_surety_person_id ON public.ir_sureties USING btree (surety_person_id);
-CREATE INDEX idx_ir_types_of_drugs_ir_id ON public.ir_types_of_drugs USING btree (interrogation_report_id);
-CREATE UNIQUE INDEX idx_pending_fk_ir_id ON public.ir_pending_fk USING btree (ir_id) WHERE (NOT resolved);
-CREATE INDEX idx_ir_pending_fk_crime_id ON public.ir_pending_fk USING btree (crime_id);
 
 -- file_media_bookkeeping: matches files_loader.py's original dedup key
 -- (FilesLoader._build_record_key) for singular fields (FIR_COPY,
