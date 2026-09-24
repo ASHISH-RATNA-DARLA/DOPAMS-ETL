@@ -491,7 +491,7 @@ def main():
     )
 
     try:
-        run_preflight(config_path, args.env)
+        run_preflight(config_path, args.env, pure_cctns=args.pure_cctns)
     except PreflightError as exc:
         logger.error("Preflight failed: %s", str(exc))
         sys.exit(1)

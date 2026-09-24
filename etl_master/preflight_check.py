@@ -35,6 +35,17 @@ REQUIRED_TABLES = [
     "etl_crime_processing_log",
 ]
 
+# Pure-CCTNS mode runs against cctns-v2_schema.sql's finalized 16-table
+# schema, which intentionally excludes brief_facts_ai and
+# etl_crime_processing_log (both AI/LLM-only -- see that schema file's own
+# header comment). Requiring them here would block every --pure-cctns run.
+PURE_CCTNS_REQUIRED_TABLES = [
+    "crimes",
+    "accused",
+    "persons",
+    "hierarchy",
+]
+
 
 def parse_input_file(file_path: str) -> List[Dict[str, object]]:
     if not os.path.exists(file_path):
@@ -155,7 +166,7 @@ def resolve_db_env(env_name: str) -> Dict[str, str]:
     }
 
 
-def validate_db_connection(db_env: Dict[str, str]) -> None:
+def validate_db_connection(db_env: Dict[str, str], pure_cctns: bool = False) -> None:
     try:
         connection = psycopg2.connect(
             host=db_env["DB_HOST"],
@@ -169,15 +180,22 @@ def validate_db_connection(db_env: Dict[str, str]) -> None:
         skip_schema_check = get_bool_env("ETL_PREFLIGHT_SKIP_SCHEMA_CHECK", False)
 
         if not skip_schema_check:
-            validate_minimum_schema(connection)
+            validate_minimum_schema(connection, pure_cctns=pure_cctns)
 
         connection.close()
     except Exception as exc:
         raise PreflightError(f"Database connectivity check failed: {str(exc)}") from exc
 
 
-def validate_minimum_schema(connection) -> None:
-    """Validate fresh DB has minimum core schema for unified ETL execution."""
+def validate_minimum_schema(connection, pure_cctns: bool = False) -> None:
+    """Validate fresh DB has minimum core schema for ETL execution.
+
+    Pure-CCTNS mode checks against PURE_CCTNS_REQUIRED_TABLES (the
+    finalized cctns-v2_schema.sql set), which does not include the
+    AI-only brief_facts_ai / etl_crime_processing_log tables.
+    """
+    required_tables = PURE_CCTNS_REQUIRED_TABLES if pure_cctns else REQUIRED_TABLES
+
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -188,16 +206,21 @@ def validate_minimum_schema(connection) -> None:
         )
         existing_tables = {row[0] for row in cursor.fetchall()}
 
-    missing = [name for name in REQUIRED_TABLES if name not in existing_tables]
+    missing = [name for name in required_tables if name not in existing_tables]
     if missing:
+        hint = (
+            "Apply cctns-v2_schema.sql before running ETL."
+            if pure_cctns
+            else "Apply DB-schema.sql and unified_brief_facts_etl.sql before running ETL."
+        )
         raise PreflightError(
             "Database schema is incomplete. Missing required public tables: "
             + ", ".join(missing)
-            + ". Apply DB-schema.sql and unified_brief_facts_etl.sql before running ETL."
+            + ". " + hint
         )
 
 
-def run_preflight(config_path: str, env_name: str) -> None:
+def run_preflight(config_path: str, env_name: str, pure_cctns: bool = False) -> None:
     # Resolve .env from project root (one level up from etl_master)
     load_repo_environment()
 
@@ -211,7 +234,7 @@ def run_preflight(config_path: str, env_name: str) -> None:
     validate_scripts(processes)
 
     db_env = resolve_db_env(env_name)
-    validate_db_connection(db_env)
+    validate_db_connection(db_env, pure_cctns=pure_cctns)
 
 
 
