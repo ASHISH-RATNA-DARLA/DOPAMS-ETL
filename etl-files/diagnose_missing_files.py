@@ -111,19 +111,14 @@ def analyze_database_vs_disk():
     
     try:
         import psycopg2
-        from dotenv import load_dotenv
-        
-        # Load environment variables
-        load_dotenv()
-        
-        DB_CONFIG = {
-            'host': os.getenv('POSTGRES_HOST', '192.168.103.106'),
-            'database': os.getenv('POSTGRES_DB', 'dev-2'),
-            'user': os.getenv('POSTGRES_USER', 'dev_dopamas'),
-            'password': os.getenv('POSTGRES_PASSWORD', ''),
-            'port': int(os.getenv('POSTGRES_PORT', 5432))
-        }
-        
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        from env_utils import resolve_db_config
+
+        DB_CONFIG = resolve_db_config()
+
         connection = psycopg2.connect(**DB_CONFIG)
         cursor = connection.cursor()
         
@@ -199,7 +194,7 @@ def print_recommendations(disk_count, db_count, null_ext_count):
         print(f"\n   2. VERIFY NFS MOUNT")
         print(f"      - Command: mount | grep shared-etl-files")
         print(f"      - Command: df -h | grep shared-etl-files")
-        print(f"      - Command: showmount -e 192.168.103.106")
+        print(f"      - Command: showmount -e $POSTGRES_HOST  (NFS host from your .env)")
         
         print(f"\n   3. CHECK ETL LOGS FOR ERRORS")
         print(f"      - Look for download failures")

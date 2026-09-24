@@ -84,7 +84,7 @@ class PersonsETL:
         self.threshold_suffix = float(PERSON_GENDER_CONFIG.get('threshold_suffix', 0.65))
         self.threshold_llm    = float(PERSON_GENDER_CONFIG.get('threshold_llm',    0.70))
         self.llm_gender_enabled = bool(PERSON_GENDER_LLM_CONFIG.get('enabled', True))
-        self.llm_gender_url = str(PERSON_GENDER_LLM_CONFIG.get('url', 'http://192.168.103.106:11434')).rstrip('/')
+        self.llm_gender_url = str(PERSON_GENDER_LLM_CONFIG.get('url') or '').rstrip('/')
         self.llm_gender_model = str(PERSON_GENDER_LLM_CONFIG.get('model', 'llama3.1:8b'))
         self.llm_gender_timeout = int(PERSON_GENDER_LLM_CONFIG.get('timeout', 20))
         self.llm_gender_batch_size = int(PERSON_GENDER_LLM_CONFIG.get('batch_size', 20))

@@ -71,7 +71,7 @@ PERSON_GENDER_CONFIG = {
 # LLM fallback for gender inference (Ollama-based, fires only when rule-based engine returns Unknown).
 PERSON_GENDER_LLM_CONFIG = {
     'enabled': get_bool_env('PERSON_GENDER_LLM_ENABLED', True),
-    'url': resolve_api_base_url('LLM_API_URL', default='http://192.168.103.106:11434'),
+    'url': resolve_api_base_url('LLM_API_URL'),
     'model': resolve_api_base_url('LLM_MODEL_CLASSIFICATION', default='llama3.1:8b'),
     'timeout': get_int_env('ADDRESS_LLM_TIMEOUT', 20),
     'batch_size': get_int_env('PERSON_GENDER_LLM_BATCH_SIZE', 20),
