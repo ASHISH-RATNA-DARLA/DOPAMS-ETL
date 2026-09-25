@@ -1801,7 +1801,12 @@ class ArrestsETL:
         # Start date: Always 2022-01-01T00:00:00+05:30
         # End date: Yesterday at 23:59:59+05:30 (IST)
         fixed_start_date = '2022-01-01T00:00:00+05:30'
-        calculated_end_date = get_yesterday_end_ist()
+        # Prefer the master-injected ETL_TO_DATE (via ETL_CONFIG['end_date'])
+        # so every module in one sync cycle shares the same end boundary,
+        # instead of each independently computing "yesterday" and never
+        # reaching today's records. Falls back to the local yesterday
+        # calculation only if ETL_CONFIG somehow lacks end_date.
+        calculated_end_date = ETL_CONFIG.get('end_date') or get_yesterday_end_ist()
         
         logger.info(f"Fixed Start Date: {fixed_start_date}")
         logger.info(f"Calculated End Date: {calculated_end_date}")

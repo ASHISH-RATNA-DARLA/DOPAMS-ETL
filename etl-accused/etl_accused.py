@@ -2106,7 +2106,12 @@ class AccusedETL:
                 if parse_iso_date(checkpoint_iso) > parse_iso_date(effective_start_date):
                     effective_start_date = checkpoint_iso
 
-            calculated_end_date = get_yesterday_end_ist()
+            # Prefer the master-injected ETL_TO_DATE (via ETL_CONFIG['end_date'])
+            # so every module in one sync cycle shares the same end boundary,
+            # instead of each independently computing "yesterday" and never
+            # reaching today's records. Falls back to the local yesterday
+            # calculation only if ETL_CONFIG somehow lacks end_date.
+            calculated_end_date = ETL_CONFIG.get('end_date') or get_yesterday_end_ist()
             logger.info(f"🔄 Incremental Mode: Fetching data from {effective_start_date} to {calculated_end_date}")
             
             # Get table columns for schema evolution

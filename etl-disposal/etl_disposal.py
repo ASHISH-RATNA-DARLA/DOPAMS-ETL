@@ -1679,7 +1679,12 @@ class DisposalETL:
         
         # Calculate date range
         # Calculate end date: Yesterday at 23:59:59+05:30 (IST)
-        calculated_end_date = get_yesterday_end_ist()
+        # Prefer the master-injected ETL_TO_DATE (via ETL_CONFIG['end_date'])
+        # so every module in one sync cycle shares the same end boundary,
+        # instead of each independently computing "yesterday" and never
+        # reaching today's records. Falls back to the local yesterday
+        # calculation only if ETL_CONFIG somehow lacks end_date.
+        calculated_end_date = ETL_CONFIG.get('end_date') or get_yesterday_end_ist()
         
         logger.info(f"API Data Availability: {API_DATA_START_DATE}")
         logger.info(f"Calculated End Date: {calculated_end_date}")

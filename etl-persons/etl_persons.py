@@ -24,7 +24,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_pooling import PostgreSQLConnectionPool, compute_safe_workers
 from env_utils import get_etl_run_id
 
-from config import DB_CONFIG, API_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDER_CONFIG, PERSON_GENDER_LLM_CONFIG
+from config import DB_CONFIG, API_CONFIG, ETL_CONFIG, LOG_CONFIG, TABLE_CONFIG, PERSON_GENDER_CONFIG, PERSON_GENDER_LLM_CONFIG
 
 # IST timezone offset (UTC+05:30)
 IST_OFFSET = timezone(timedelta(hours=5, minutes=30))
@@ -2018,7 +2018,12 @@ class PersonsETL:
                     resume_boundary = checkpoint_dt
 
             effective_start_date = resume_boundary.isoformat() if resume_boundary else '2022-01-01T00:00:00+05:30'
-            calculated_end_date = get_yesterday_end_ist()
+            # Prefer the master-injected ETL_TO_DATE (via ETL_CONFIG['end_date'])
+            # so every module in one sync cycle shares the same end boundary,
+            # instead of each independently computing "yesterday" and never
+            # reaching today's records. Falls back to the local yesterday
+            # calculation only if ETL_CONFIG somehow lacks end_date.
+            calculated_end_date = ETL_CONFIG.get('end_date') or get_yesterday_end_ist()
 
             chunk_days = int(os.environ.get('CHUNK_DAYS', '5'))
             overlap_days = int(os.environ.get('CHUNK_OVERLAP_DAYS', '1'))

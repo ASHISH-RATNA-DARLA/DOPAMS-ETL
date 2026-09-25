@@ -31,6 +31,10 @@ def _yesterday_ist() -> str:
     return (datetime.now(IST) - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def _today_ist() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
 def is_restart_mode() -> bool:
     return os.environ.get("RESTART", "false").strip().lower() in ("1", "true", "yes")
 
@@ -64,7 +68,15 @@ def get_from_date() -> str:
 
 
 def get_to_date() -> str:
-    """Yesterday's date in IST as YYYY-MM-DD."""
+    """Today's date in IST as YYYY-MM-DD -- the sync window's end boundary.
+
+    Previously defaulted to yesterday, which meant no run (at any cadence)
+    ever fetched records created/modified on the current day. Each child
+    module's config.py appends T23:59:59+05:30 to this value for its actual
+    API toDate, so "today" here means "through the end of today" -- always
+    >= the current moment, which is sufficient since the API cannot return
+    records that don't exist yet.
+    """
     raw = os.environ.get("ETL_TO_DATE", "").strip()
     if raw:
         try:
@@ -72,7 +84,7 @@ def get_to_date() -> str:
             return raw
         except ValueError:
             pass
-    return _yesterday_ist()
+    return _today_ist()
 
 
 def persist_last_run(to_date: str) -> None:
