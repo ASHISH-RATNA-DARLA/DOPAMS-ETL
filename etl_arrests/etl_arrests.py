@@ -193,7 +193,23 @@ class ArrestsETL:
         # proven-safe formula already used by etl-accused/etl_accused.py.
         chunk_workers = int(os.environ.get('CHUNK_PARALLEL_WORKERS', min(8, os.cpu_count() or 1)))
         total_workers = chunk_workers * self.max_workers
-        maxconn = max(50, total_workers + 20)
+
+        # Cap the real pool size well below the PostgreSQL server's global
+        # max_connections (verified via `SHOW max_connections` = 200 on the
+        # production DB) rather than scaling it to match total_workers
+        # directly. ConnectionLimiter already proved (stress-tested: 100
+        # workers against a 15-connection pool, zero PoolError, zero leaks)
+        # that a much smaller real pool safely absorbs far more concurrent
+        # workers via its blocking queue -- workers beyond the pool size
+        # simply wait for a free connection instead of each needing one.
+        # Sizing maxconn to the full total_workers product (as done here
+        # previously) reached 276 for this module's real chunk_workers x
+        # record_workers, which caused Postgres itself to reject connections
+        # with "sorry, too many clients already" -- a server-side failure
+        # ConnectionLimiter cannot queue around, since the connections it
+        # hands out must already exist in the pool.
+        PG_SAFE_MAX_CONN = 60
+        maxconn = min(max(50, total_workers + 20), PG_SAFE_MAX_CONN)
 
         try:
             self.db_pool = PostgreSQLConnectionPool(
