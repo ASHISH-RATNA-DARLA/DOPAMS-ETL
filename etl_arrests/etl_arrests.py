@@ -178,14 +178,41 @@ class ArrestsETL:
         # Initialize connection pool
         max_workers = int(os.environ.get('MAX_WORKERS', (os.cpu_count() or 1) * 4))
         self.max_workers = min(32, max_workers)  # Cap at 32 concurrent connections max
-        
+
+        # Pool sizing: each of the chunk-level workers (see process_date_ranges_parallel)
+        # concurrently runs process_date_range(), which spins up its own
+        # self.max_workers-sized inner record pool. True peak simultaneous DB
+        # demand is chunk_workers * self.max_workers, not self.max_workers alone
+        # (the previous formula). Sizing from record workers alone undersized the
+        # pool and caused PoolError-driven silent record loss under real
+        # historical-volume load. NOTE: chunk_workers must be read here (matching
+        # process_date_ranges_parallel's own env lookup) because connect_db()'s
+        # chunk-aware pool block below never actually runs -- self.db_pool is
+        # already set by the time connect_db() checks `if not hasattr(self,
+        # 'db_pool')`, so that formula was silently dead code. Matches the
+        # proven-safe formula already used by etl-accused/etl_accused.py.
+        chunk_workers = int(os.environ.get('CHUNK_PARALLEL_WORKERS', min(8, os.cpu_count() or 1)))
+        total_workers = chunk_workers * self.max_workers
+        maxconn = max(50, total_workers + 20)
+
         try:
             self.db_pool = PostgreSQLConnectionPool(
                 minconn=1,
-                maxconn=self.max_workers + 5,
+                maxconn=maxconn,
                 **DB_CONFIG
             )
-            logger.info(f"✅ Created connection pool with max {self.max_workers + 5} connections")
+            # Gate record-level DB connection acquisition through a blocking
+            # semaphore so oversubscribed workers wait for a free slot instead
+            # of raising PoolError. Same ConnectionLimiter already used by
+            # etl-accused; not a new implementation.
+            from db_pooling import ConnectionLimiter
+            limiter_capacity = max(1, maxconn - 10)
+            self.db_limiter = ConnectionLimiter(self.db_pool, max_concurrent_db_ops=limiter_capacity)
+            logger.info(
+                f"✅ Created connection pool with max {maxconn} connections "
+                f"(chunk_workers={chunk_workers}, record_workers={self.max_workers}, "
+                f"total_workers={total_workers}, limiter={limiter_capacity})"
+            )
         except Exception as e:
             logger.error(f"❌ Failed to create connection pool: {e}")
             raise
@@ -1210,7 +1237,7 @@ class ArrestsETL:
                               chunk_state: Dict, chunk_lock: threading.Lock):
         """Worker method to process a single arrests record"""
         try:
-            with self.db_pool.get_connection_context() as conn:
+            with self.db_limiter.acquire() as conn:
                 with conn.cursor() as cursor:
                     logger.trace(f"Processing record {idx}/{total_records}: {arrests_record.get('CRIME_ID')}")
                     arrests = self.transform_arrests(arrests_record, cursor)
@@ -1348,7 +1375,14 @@ class ArrestsETL:
             logger.error(f"❌ Error in worker processing record {idx}: {e}")
             with self.stats_lock:
                 self.stats['total_arrests_failed'] += 1
-    
+                # Feed the same counter the final "Errors:" summary line reads,
+                # so record-level failures (including former PoolError cases)
+                # are no longer invisible in the bottom-line result.
+                self.stats['errors'].append(
+                    f"Arrests record {idx}/{total_records} "
+                    f"(crime_id={arrests_record.get('CRIME_ID', 'unknown')}): {e}"
+                )
+
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process arrests records for a specific date range"""
         chunk_range = f"{from_date} to {to_date}"
@@ -1873,13 +1907,32 @@ class ArrestsETL:
             
             # Write summary to log files
             self.write_log_summaries()
-            
-            logger.info("✅ ETL Pipeline completed successfully!")
+
+            # Invalid-CRIME_ID failures are expected, self-healing behavior --
+            # they're queued to the FK retry system and resolved automatically
+            # on a later run, so they don't represent data loss. Any OTHER
+            # failure (connection pool exhaustion, integrity errors, etc.) has
+            # no retry path and means a real record was permanently dropped;
+            # such a run must not be reported as a clean success.
+            unhandled_failures = self.stats['total_arrests_failed'] - self.stats['total_arrests_failed_crime_id']
+
             logger.info(f"📝 API chunk log saved to: {self.api_log_file}")
             logger.info(f"📝 DB chunk log saved to: {self.db_log_file}")
             logger.info(f"📝 Failed records log saved to: {self.failed_log_file}")
             logger.info(f"📝 Invalid IDs log (CRIME_ID and PERSON_ID - skipped) saved to: {self.invalid_ids_log_file}")
             logger.info(f"📝 Duplicates log saved to: {self.duplicates_log_file}")
+
+            if unhandled_failures > 0:
+                logger.error(
+                    f"❌ ETL Pipeline completed with {unhandled_failures} unhandled record failure(s) "
+                    f"(total failed={self.stats['total_arrests_failed']}, "
+                    f"invalid_crime_id={self.stats['total_arrests_failed_crime_id']}, "
+                    f"self-healing via FK retry). These records were NOT inserted and are NOT "
+                    f"queued for automatic retry -- see the errors above and the failed records log."
+                )
+                return False
+
+            logger.info("✅ ETL Pipeline completed successfully!")
             return True
             
         except KeyboardInterrupt:

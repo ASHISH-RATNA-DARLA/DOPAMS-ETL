@@ -320,10 +320,16 @@ class DisposalETL:
             chunk_workers = int(os.environ.get('DISPOSAL_CHUNK_PARALLEL_WORKERS', os.environ.get('CHUNK_PARALLEL_WORKERS', 4)))
             record_workers = int(os.environ.get('MAX_WORKERS', getattr(self, 'max_workers', min(32, (os.cpu_count() or 1) * 4))))
 
-            # Pool sizing: chunk_workers may grab connections in parallel
-            # Each chunk may use multiple record_workers internally
+            # Pool sizing: each of the chunk_workers concurrently-running chunks
+            # spins up its own record_workers-sized inner pool, so true peak
+            # simultaneous DB demand is chunk_workers * record_workers, not
+            # chunk_workers alone. Sizing from chunk_workers alone (the previous
+            # formula) undersized the pool and caused PoolError-driven silent
+            # record loss under real historical-volume load. Matches the
+            # proven-safe formula already used by etl-accused/etl_accused.py.
+            total_workers = chunk_workers * record_workers
             minconn = max(10, chunk_workers + 3)  # Pre-allocate: chunk_workers + buffer
-            maxconn = max(20, chunk_workers * 2 + 5)  # Max: chunk_workers * 2 + safety buffer
+            maxconn = max(50, total_workers + 20)  # Max: true combined concurrency + safety buffer
 
             # Auto-downgrade if configured values are too small
             pool_config['minconn'] = minconn
@@ -331,12 +337,24 @@ class DisposalETL:
 
             self.db_pool = PostgreSQLConnectionPool(**pool_config)
 
+            # Gate record-level DB connection acquisition through a blocking
+            # semaphore so oversubscribed workers wait for a free slot instead
+            # of raising PoolError (which was previously caught, logged, and
+            # silently dropped the record). Same ConnectionLimiter already
+            # used by etl-accused; not a new implementation.
+            from db_pooling import ConnectionLimiter
+            limiter_capacity = max(1, maxconn - 10)
+            self.db_limiter = ConnectionLimiter(self.db_pool, max_concurrent_db_ops=limiter_capacity)
+
             # Keep one permanent connection for schema generation operations if needed
             self.db_conn = self.db_pool.get_connection()
             self.db_cursor = self.db_conn.cursor()
 
             logger.info(f"✅ Connected to database: {DB_CONFIG['dbname']} using connection pool")
-            logger.info(f"   Pool: min={minconn}, max={maxconn} (chunk_workers={chunk_workers}, record_workers={record_workers})")
+            logger.info(
+                f"   Pool: min={minconn}, max={maxconn} (chunk_workers={chunk_workers}, "
+                f"record_workers={record_workers}, total_workers={total_workers}, limiter={limiter_capacity})"
+            )
             return self.db_pool is not None
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")
@@ -1143,7 +1161,7 @@ class DisposalETL:
                               chunk_state: Dict, chunk_lock: threading.Lock):
         """Worker method to process a single disposal record"""
         try:
-            with self.db_pool.get_connection_context() as conn:
+            with self.db_limiter.acquire() as conn:
                 with conn.cursor() as cursor:
                     logger.trace(f"Processing record {idx}/{total_records}: {disposal_record.get('CRIME_ID')}")
                     disposal = self.transform_disposal(disposal_record, cursor)
@@ -1232,7 +1250,14 @@ class DisposalETL:
             logger.error(f"❌ Error in worker processing record {idx}: {e}")
             with self.stats_lock:
                 self.stats['total_disposals_failed'] += 1
-    
+                # Feed the same counter the final "Errors:" summary line reads,
+                # so record-level failures (including former PoolError cases)
+                # are no longer invisible in the bottom-line result.
+                self.stats['errors'].append(
+                    f"Disposal record {idx}/{total_records} "
+                    f"(crime_id={disposal_record.get('CRIME_ID', 'unknown')}): {e}"
+                )
+
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process disposal records for a specific date range"""
         chunk_range = f"{from_date} to {to_date}"
@@ -1755,13 +1780,32 @@ class DisposalETL:
             
             # Write summary to log files
             self.write_log_summaries()
-            
-            logger.info("✅ ETL Pipeline completed successfully!")
+
+            # Invalid-CRIME_ID failures are expected, self-healing behavior --
+            # they're queued to the FK retry system and resolved automatically
+            # on a later run, so they don't represent data loss. Any OTHER
+            # failure (connection pool exhaustion, integrity errors, etc.) has
+            # no retry path and means a real record was permanently dropped;
+            # such a run must not be reported as a clean success.
+            unhandled_failures = self.stats['total_disposals_failed'] - self.stats['total_disposals_failed_crime_id']
+
             logger.info(f"📝 API chunk log saved to: {self.api_log_file}")
             logger.info(f"📝 DB chunk log saved to: {self.db_log_file}")
             logger.info(f"📝 Failed records log saved to: {self.failed_log_file}")
             logger.info(f"📝 Invalid CRIME_ID log saved to: {self.invalid_crime_id_log_file}")
             logger.info(f"📝 Duplicates log saved to: {self.duplicates_log_file}")
+
+            if unhandled_failures > 0:
+                logger.error(
+                    f"❌ ETL Pipeline completed with {unhandled_failures} unhandled record failure(s) "
+                    f"(total failed={self.stats['total_disposals_failed']}, "
+                    f"invalid_crime_id={self.stats['total_disposals_failed_crime_id']}, "
+                    f"self-healing via FK retry). These records were NOT inserted and are NOT "
+                    f"queued for automatic retry -- see the errors above and the failed records log."
+                )
+                return False
+
+            logger.info("✅ ETL Pipeline completed successfully!")
             return True
             
         except KeyboardInterrupt:

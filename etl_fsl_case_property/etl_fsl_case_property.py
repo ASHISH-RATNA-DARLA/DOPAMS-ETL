@@ -1372,6 +1372,7 @@ class FSLCasePropertyETL:
                 error_details = str(e)
                 logger.warning(f"⚠️  {error_details}, queuing case property for retry")
                 self.stats['total_records_failed'] += 1
+                self.stats['total_records_failed_mo_id'] += 1
                 self.log_failed_record(case_property, reason, error_details)
                 # Park in FK retry queue — recovers once the required
                 # mo_seizures row arrives on a later run. record_id is
@@ -1460,6 +1461,11 @@ class FSLCasePropertyETL:
             if not case_property:
                 logger.warning(f"⚠️  Transform returned empty for record {idx}, skipping")
                 self.stats['total_records_failed'] += 1
+                # Feed the same counter the final "Errors:" summary line
+                # reads, so this failure (which has no FK-retry path -- it's
+                # not a missing-dependency case, the record itself is
+                # malformed) is not invisible in the bottom-line result.
+                self.stats['errors'].append(f"Case property record {idx}: transform returned empty")
                 failed_keys.append(f"record_{idx}")
                 reason = 'transform_failed'
                 if reason not in failed_reasons:
@@ -1853,13 +1859,40 @@ class FSLCasePropertyETL:
             
             # Write summary to log files
             self.write_log_summaries()
-            
-            logger.info("✅ ETL Pipeline completed successfully!")
+
+            # Invalid-CRIME_ID and missing-MO_ID failures are expected,
+            # self-healing behavior -- both are queued to the FK retry system
+            # and resolved automatically on a later run, so they don't
+            # represent permanent data loss. Any OTHER failure (transform
+            # errors, integrity errors, etc.) has no retry path and means a
+            # real record was permanently dropped; such a run must not be
+            # reported as a clean success.
+            fk_retry_queued = (
+                self.stats['total_records_failed_crime_id']
+                + self.stats['total_records_failed_mo_id']
+            )
+            unhandled_failures = self.stats['total_records_failed'] - fk_retry_queued
+
+            logger.info(f"📊 Total Failed:       {self.stats['total_records_failed']}")
+            logger.info(f"📊 Errors:             {len(self.stats['errors'])}")
+            logger.info(f"📊 FK Retry Queued:    {fk_retry_queued}")
+            logger.info(f"📊 Unhandled Failures: {unhandled_failures}")
             logger.info(f"📝 API chunk log saved to: {self.api_log_file}")
             logger.info(f"📝 DB chunk log saved to: {self.db_log_file}")
             logger.info(f"📝 Failed records log saved to: {self.failed_log_file}")
             logger.info(f"📝 Invalid CRIME_ID log saved to: {self.invalid_crime_id_log_file}")
             logger.info(f"📝 Duplicates log saved to: {self.duplicates_log_file}")
+
+            if unhandled_failures > 0:
+                logger.error(
+                    f"❌ ETL Pipeline completed with {unhandled_failures} unhandled record failure(s) "
+                    f"(total failed={self.stats['total_records_failed']}, "
+                    f"fk_retry_queued={fk_retry_queued}). These records were NOT inserted and are "
+                    f"NOT queued for automatic retry -- see the errors above and the failed records log."
+                )
+                return False
+
+            logger.info("✅ ETL Pipeline completed successfully!")
             return True
             
         except KeyboardInterrupt:

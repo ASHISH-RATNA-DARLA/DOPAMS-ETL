@@ -1519,6 +1519,10 @@ class ChargesheetsETL:
             logger.error(f"❌ Error in worker processing record {idx}: {e}")
             with self.stats_lock:
                 self.stats['total_chargesheets_failed'] += 1
+                # Feed the same counter the final "Errors:" summary line reads,
+                # so record-level failures caught at the outer worker level
+                # are no longer invisible in the bottom-line result.
+                self.stats['errors'].append(f"Chargesheet record {idx}/{total_records}: {e}")
 
     def process_date_range(self, from_date: str, to_date: str, table_columns: Set[str] = None):
         """Process chargesheet records for a specific date range"""
@@ -1896,15 +1900,38 @@ class ChargesheetsETL:
             
             # Write summary to log files
             self.write_log_summaries()
-            
-            logger.info("✅ ETL Pipeline completed successfully!")
+
+            # Invalid-CRIME_ID failures are expected, self-healing behavior --
+            # they're queued to the FK retry system and resolved automatically
+            # on a later run, so they don't represent permanent data loss. Any
+            # OTHER failure has no retry path and means a real record was
+            # permanently dropped; such a run must not be reported as a clean
+            # success.
+            fk_retry_queued = self.stats['total_chargesheets_failed_crime_id']
+            unhandled_failures = self.stats['total_chargesheets_failed'] - fk_retry_queued
+
+            logger.info(f"📊 Total Failed:       {self.stats['total_chargesheets_failed']}")
+            logger.info(f"📊 Errors:             {len(self.stats['errors'])}")
+            logger.info(f"📊 FK Retry Queued:    {fk_retry_queued}")
+            logger.info(f"📊 Unhandled Failures: {unhandled_failures}")
             logger.info(f"📝 API chunk log saved to: {self.api_log_file}")
             logger.info(f"📝 DB chunk log saved to: {self.db_log_file}")
             logger.info(f"📝 Failed records log saved to: {self.failed_log_file}")
             logger.info(f"📝 Invalid CRIME_ID log saved to: {self.invalid_crime_id_log_file}")
             logger.info(f"📝 Duplicates log saved to: {self.duplicates_log_file}")
+
+            if unhandled_failures > 0:
+                logger.error(
+                    f"❌ ETL Pipeline completed with {unhandled_failures} unhandled record failure(s) "
+                    f"(total failed={self.stats['total_chargesheets_failed']}, "
+                    f"fk_retry_queued={fk_retry_queued}). These records were NOT inserted and are "
+                    f"NOT queued for automatic retry -- see the errors above and the failed records log."
+                )
+                return False
+
+            logger.info("✅ ETL Pipeline completed successfully!")
             return True
-            
+
         except KeyboardInterrupt:
             logger.warning("\n⚠️  ETL interrupted by user")
             return False
