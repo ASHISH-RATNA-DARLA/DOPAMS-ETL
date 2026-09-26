@@ -147,19 +147,19 @@ cd /home/eagle/DOPAMS-ETL/etl_fsl_case_property
 source /home/eagle/DOPAMS-ETL/venv/bin/activate
 python3 etl_fsl_case_property.py
 
-[Order 22]
+[Order 21]
 update_file_id
 cd /home/eagle/DOPAMS-ETL/etl-files/etl_pipeline_files
 source /home/eagle/DOPAMS-ETL/venv/bin/activate
 python3 main_standalone.py
 
-[Order 23]
+[Order 22]
 files_download_media_server
 cd /home/eagle/DOPAMS-ETL/etl-files/etl_files_media_server
 source /home/eagle/DOPAMS-ETL/venv/bin/activate
 python3 -m etl_files_media_server.main
 
-[Order 24]
+[Order 23]
 update_file_extentions
 cd /home/eagle/DOPAMS-ETL/etl-files/update_file_urls_with_extensions
 source /home/eagle/DOPAMS-ETL/venv/bin/activate
