@@ -1,5 +1,9 @@
+import os
+import sys
 import psycopg2
 from psycopg2 import sql
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from env_utils import load_repo_environment, resolve_db_config
 
 def execute_sql_from_file(sql_file_path):
